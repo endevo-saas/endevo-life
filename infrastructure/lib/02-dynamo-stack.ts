@@ -119,11 +119,12 @@ export class DynamoStack extends cdk.Stack {
 
     this.tableArns = tables.map(t => t.tableArn)
 
-    // --- Outputs ---
-    tables.forEach(t => {
-      new cdk.CfnOutput(this, `Table-${t.tableName}`, {
+    // --- Outputs (IDs must be hardcoded — CDK tokens not allowed in IDs) ---
+    const tableNames = ['tenants','users','training','questions','responses','certificates','audit','videoProgress']
+    tables.forEach((t, i) => {
+      new cdk.CfnOutput(this, `TableArn${tableNames[i]}`, {
         value: t.tableArn,
-        description: `DynamoDB table ARN: ${t.tableName}`,
+        description: `DynamoDB table ARN: endevo-uat-${tableNames[i]}`,
       })
     })
   }
