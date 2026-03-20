@@ -17,7 +17,7 @@ export class CognitoStack extends cdk.Stack {
       signInAliases: { email: true },
       autoVerify: { email: true },
       mfa: cognito.Mfa.OPTIONAL,          // MFA optional, HR can enforce per tenant
-      mfaSecondFactor: { totp: true, sms: false },
+      mfaSecondFactor: { otp: true, sms: false },
       passwordPolicy: {
         minLength: 12,
         requireLowercase: true,
