@@ -26,7 +26,7 @@ export class AmplifyStack extends cdk.Stack {
     const app = new amplify.CfnApp(this, 'App', {
       name: 'endevo-uat-frontend',
       repository: 'https://github.com/shahzadms7/endevo-life',
-      oauthToken: process.env.GITHUB_TOKEN || '',
+      oauthToken: process.env.GH_TOKEN_AMPLIFY || '',
       iamServiceRole: amplifyRole.roleArn,
       platform: 'WEB_COMPUTE',
       buildSpec: [

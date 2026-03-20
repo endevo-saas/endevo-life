@@ -45,14 +45,14 @@ jobs:
         run: npx cdk diff --all
         env:
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN_AMPLIFY: ${{ secrets.GH_TOKEN_AMPLIFY }}
 
       - name: CDK Deploy (create/update all AWS resources)
         working-directory: infrastructure
         run: npx cdk deploy --all --require-approval never --outputs-file ../cdk-outputs.json
         env:
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN_AMPLIFY: ${{ secrets.GH_TOKEN_AMPLIFY }}
 
       - name: Upload CDK outputs as artifact
         uses: actions/upload-artifact@v4
