@@ -311,3 +311,43 @@ response = bedrock.invoke_model(modelId='anthropic.claude-3-sonnet', body=payloa
 - Webhook endpoints via API Gateway
 - OAuth tokens rotated automatically
 
+
+---
+
+## Phase 0 — COMPLETED 2026-03-20 ✅
+
+### Live Resource IDs (CDK deployed — do not edit manually)
+
+| Resource | ID / URL |
+|----------|---------|
+| Cognito User Pool | `us-east-1_DVyEJqgFt` |
+| Cognito App Client | `4sbv2j6cv7jpp1oi0d16njsej1` |
+| API Gateway URL | `https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com/` |
+| Amplify App ID | `d1vgn9nzfx4cxk` |
+| Amplify Live URL | `https://main.d1vgn9nzfx4cxk.amplifyapp.com` |
+| S3 Assets Bucket | `endevo-uat-assets` |
+| S3 Videos Bucket | `endevo-uat-videos` |
+| Lambda Auth | `endevo-uat-fn-auth` |
+| Lambda HR | `endevo-uat-fn-hr` |
+| Lambda Employee | `endevo-uat-fn-employee` |
+| Lambda Admin | `endevo-uat-fn-admin` |
+
+### GitHub Actions Runs — Phase 0
+| Run | Result | Issue Fixed |
+|-----|--------|------------|
+| #1 | FAILED | `totp` → `otp` in Cognito MFA config |
+| #2 | FAILED | CDK token used as CfnOutput construct ID |
+| #3 | FAILED | EndevoUatAmplify stack stuck in REVIEW_IN_PROGRESS |
+| #4 | **SUCCESS** | All 6 stacks CREATE_COMPLETE |
+
+---
+
+## Phase 1 — IN PROGRESS (next)
+
+### Deliverables
+- [ ] Python auth Lambda — login, register, MFA, forgot password
+- [ ] Next.js frontend — login page, register page, forgot password
+- [ ] Cognito integration — token handling in frontend
+- [ ] Protected routes middleware
+- [ ] First admin user seeded
+
