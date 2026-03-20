@@ -61,7 +61,29 @@
 ---
 
 ## Phase 1 — Auth (Cognito + Python Lambda)
-*No issues recorded yet — in progress*
+
+### Issue #005
+- **Date:** 2026-03-20
+- **Phase:** 1 — Frontend Build
+- **Build:** Amplify Job #5
+- **File:** `apps/web/app/(auth)/forgot-password/page.tsx` line 76
+- **Error:**
+  ```
+  Type error: Argument of type '(data: { email: string; }) => Promise<void>'
+  is not assignable to parameter of type 'SubmitHandler<FieldValues>'.
+    Types of parameters 'data' and 'data' are incompatible.
+    Property 'email' is missing in type 'FieldValues' but required in type '{ email: string; }'.
+  ```
+- **Root Cause:** `useForm()` without a generic type parameter defaults to `FieldValues` (which is `Record<string, any>`). When `handleSubmit` is called with a typed callback `(data: { email: string }) => ...`, TypeScript cannot guarantee the typed property exists in `FieldValues`, causing an incompatible types error. Login and register pages correctly used `useForm<FormData>(...)` but forgot-password missed the generic.
+- **Fix:** Added Zod-inferred generic to both form instances:
+  ```typescript
+  // Before (broken):
+  const emailForm = useForm({ resolver: zodResolver(emailSchema) })
+  // After (fixed):
+  const emailForm = useForm<z.infer<typeof emailSchema>>({ resolver: zodResolver(emailSchema) })
+  ```
+- **Commit:** `b8fcca8 fix: TypeScript SubmitHandler type error in forgot-password page`
+- **Lesson:** ALWAYS pass the Zod schema type as generic to `useForm<z.infer<typeof schema>>()`. Without it, TypeScript loses the type contract between the form schema and submit handler, causing TS errors only at build time (not in the editor if strict mode is off locally).
 
 ---
 
