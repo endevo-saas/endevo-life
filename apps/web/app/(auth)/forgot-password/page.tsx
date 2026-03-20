@@ -22,8 +22,8 @@ export default function ForgotPasswordPage() {
   const [error, setError]     = useState('')
   const API = process.env.NEXT_PUBLIC_API_URL || ''
 
-  const emailForm = useForm({ resolver: zodResolver(emailSchema) })
-  const resetForm = useForm({ resolver: zodResolver(resetSchema) })
+  const emailForm = useForm<z.infer<typeof emailSchema>>({ resolver: zodResolver(emailSchema) })
+  const resetForm = useForm<z.infer<typeof resetSchema>>({ resolver: zodResolver(resetSchema) })
 
   const sendCode = async (data: { email: string }) => {
     setLoading(true); setError('')
