@@ -1,0 +1,49 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+
+# Build outputs
+.next/
+dist/
+out/
+build/
+*.js.map
+infrastructure/dist/
+infrastructure/cdk.out/
+
+# Environment files — NEVER commit secrets
+.env
+.env.local
+.env.*.local
+.env.production
+
+# AWS
+cdk-outputs.json
+cdk.context.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/settings.json
+.idea/
+*.swp
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Python
+*.pyo
+*.pyc
+__pycache__/
+.pytest_cache/
+.mypy_cache/

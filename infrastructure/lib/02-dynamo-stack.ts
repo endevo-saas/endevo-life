@@ -1,0 +1,130 @@
+import * as cdk from 'aws-cdk-lib'
+import * as dynamodb from 'aws-cdk-lib/aws-dynamodb'
+import { Construct } from 'constructs'
+
+export class DynamoStack extends cdk.Stack {
+  public readonly tableArns: string[]
+
+  constructor(scope: Construct, id: string, props: cdk.StackProps) {
+    super(scope, id, props)
+
+    const tables: dynamodb.Table[] = []
+
+    // --- 1. Tenants ---
+    const tenants = new dynamodb.Table(this, 'Tenants', {
+      tableName: 'endevo-uat-tenants',
+      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    tables.push(tenants)
+
+    // --- 2. Users (multi-index for lookups) ---
+    const users = new dynamodb.Table(this, 'Users', {
+      tableName: 'endevo-uat-users',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    users.addGlobalSecondaryIndex({
+      indexName: 'email-index',
+      partitionKey: { name: 'email', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    users.addGlobalSecondaryIndex({
+      indexName: 'tenantId-index',
+      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    users.addGlobalSecondaryIndex({
+      indexName: 'inviteToken-index',
+      partitionKey: { name: 'inviteToken', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    tables.push(users)
+
+    // --- 3. Training Videos ---
+    const training = new dynamodb.Table(this, 'Training', {
+      tableName: 'endevo-uat-training',
+      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'videoId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    tables.push(training)
+
+    // --- 4. Assessment Questions ---
+    const questions = new dynamodb.Table(this, 'Questions', {
+      tableName: 'endevo-uat-questions',
+      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'questionId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    tables.push(questions)
+
+    // --- 5. Assessment Responses ---
+    const responses = new dynamodb.Table(this, 'Responses', {
+      tableName: 'endevo-uat-responses',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'submittedAt', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    responses.addGlobalSecondaryIndex({
+      indexName: 'tenantId-index',
+      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    tables.push(responses)
+
+    // --- 6. Certificates ---
+    const certificates = new dynamodb.Table(this, 'Certificates', {
+      tableName: 'endevo-uat-certificates',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'issuedAt', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    tables.push(certificates)
+
+    // --- 7. Audit Log ---
+    const audit = new dynamodb.Table(this, 'Audit', {
+      tableName: 'endevo-uat-audit',
+      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'sk', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      timeToLiveAttribute: 'ttl', // auto-delete old audit logs after 2 years
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    tables.push(audit)
+
+    // --- 8. Video Progress ---
+    const videoProgress = new dynamodb.Table(this, 'VideoProgress', {
+      tableName: 'endevo-uat-video-progress',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'videoId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    tables.push(videoProgress)
+
+    this.tableArns = tables.map(t => t.tableArn)
+
+    // --- Outputs ---
+    tables.forEach(t => {
+      new cdk.CfnOutput(this, `Table-${t.tableName}`, {
+        value: t.tableArn,
+        description: `DynamoDB table ARN: ${t.tableName}`,
+      })
+    })
+  }
+}

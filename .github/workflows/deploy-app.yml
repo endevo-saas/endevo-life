@@ -1,0 +1,55 @@
+name: Deploy App (Amplify)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/**'
+      - 'amplify.yml'
+      - '.github/workflows/deploy-app.yml'
+
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Trigger Amplify Build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Get Amplify App ID from CDK outputs
+        id: amplify
+        run: |
+          APP_ID=$(aws amplify list-apps --region ${{ secrets.AWS_REGION }} \
+            --query 'apps[?name==`endevo-uat-frontend`].appId' \
+            --output text)
+          echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
+
+      - name: Trigger Amplify build
+        run: |
+          aws amplify start-job \
+            --app-id ${{ steps.amplify.outputs.app_id }} \
+            --branch-name main \
+            --job-type RELEASE \
+            --region ${{ secrets.AWS_REGION }}
+          echo "Amplify build triggered for app: ${{ steps.amplify.outputs.app_id }}"
+
+      - name: Wait and check build status
+        run: |
+          APP_ID=${{ steps.amplify.outputs.app_id }}
+          echo "Waiting 30s for build to start..."
+          sleep 30
+          STATUS=$(aws amplify list-jobs \
+            --app-id $APP_ID \
+            --branch-name main \
+            --max-results 1 \
+            --region ${{ secrets.AWS_REGION }} \
+            --query 'jobSummaries[0].status' \
+            --output text)
+          echo "Build status: $STATUS"
