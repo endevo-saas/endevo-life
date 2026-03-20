@@ -229,3 +229,85 @@ import boto3
 bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
 response = bedrock.invoke_model(modelId='anthropic.claude-3-sonnet', body=payload)
 ```
+
+---
+
+## Security & Privacy Controls (US Compliance)
+
+### Data Minimization (GDPR + CCPA + HIPAA principles)
+- Collect ONLY: name, email, job title, department, training progress, assessment scores
+- NO SSN, NO health data, NO financial data stored
+- All PII encrypted at rest (DynamoDB + S3 AES-256)
+- All data in transit encrypted (TLS 1.3)
+- Data retention: audit logs TTL 2 years, auto-deleted after
+
+### Authentication Security
+| Control | Implementation |
+|---------|---------------|
+| MFA | TOTP via Cognito (Google Authenticator) |
+| Password policy | Min 12 chars, upper+lower+number+symbol |
+| Session timeout | 8 hours access token, 30 days refresh |
+| Brute force | Cognito built-in lockout |
+| Invite expiry | 72 hours, token single-use |
+
+### Access Control
+| Control | Implementation |
+|---------|---------------|
+| Role-based (RBAC) | GLOBAL_ADMIN / HR_ADMIN / EMPLOYEE |
+| Tenant isolation | Every DynamoDB query filters by tenantId |
+| Least privilege IAM | Lambda role has only required permissions |
+| No cross-tenant access | Enforced at API layer in every Python function |
+
+### Compliance Checklist
+- [ ] SOC 2 Type II — audit log complete, access controls documented
+- [ ] GDPR — data minimization, right to delete (soft delete + TTL)
+- [ ] CCPA — California data privacy, opt-out support
+- [ ] NIST Cybersecurity Framework — identify, protect, detect, respond, recover
+
+---
+
+## Third-Party & API Integrations (Planned)
+
+### HR System Integrations
+| System | Integration Type | Status |
+|--------|----------------|--------|
+| BambooHR | REST API — sync employees | Phase 3 |
+| Workday | REST API — sync org structure | Phase 3 |
+| ADP | REST API — payroll sync | Phase 4 |
+| SAP SuccessFactors | REST API | Phase 4 |
+
+### Communication
+| System | Purpose | Status |
+|--------|---------|--------|
+| Slack | Notify HR when employee completes training | Phase 2 |
+| Microsoft Teams | Same as Slack | Phase 2 |
+| SendGrid | Fallback email (if SES unavailable) | Phase 2 |
+| Twilio | SMS notifications (MFA + reminders) | Phase 3 |
+
+### SSO / Identity
+| System | Purpose | Status |
+|--------|---------|--------|
+| Google Workspace | SSO via Cognito federation | Phase 2 |
+| Microsoft Azure AD | SSO for enterprise clients | Phase 2 |
+| Okta | Enterprise SSO | Phase 3 |
+| SAML 2.0 | Generic SSO standard | Phase 3 |
+
+### Payment
+| System | Purpose | Status |
+|--------|---------|--------|
+| Stripe | Subscription billing, invoices | Phase 2 |
+
+### AI / External APIs
+| System | Purpose | Status |
+|--------|---------|--------|
+| OpenAI / Anthropic | Smart assessment + chatbot | Phase 2 |
+| AWS Bedrock | Native Claude/Titan models | Phase 2 |
+| Google Analytics | Usage analytics | Phase 1 |
+
+### How integrations are built
+- Each integration = separate Python Lambda function
+- Credentials stored in AWS SSM Parameter Store (encrypted)
+- Never hardcoded, never in GitHub
+- Webhook endpoints via API Gateway
+- OAuth tokens rotated automatically
+

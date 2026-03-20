@@ -107,3 +107,20 @@ These issues occurred before the GitHub-first approach was adopted. Recorded for
 
 *This log is maintained by the engineering team. Every issue must be recorded before the fix is merged.*
 *Last updated: 2026-03-20 | Total issues: 7 (2 active phase + 5 legacy)*
+
+---
+
+### Issue #003
+- **Date:** 2026-03-20
+- **Phase:** 0 — CDK Infrastructure
+- **Run:** GitHub Actions Run #3
+- **Stack:** EndevoUatAmplify
+- **Error:**
+  ```
+  ChangeSetNotFound: ChangeSet [cdk-deploy-change-set] does not exist
+  EndevoUatAmplify: REVIEW_IN_PROGRESS (stuck state)
+  ```
+- **Root Cause:** CDK attempted to deploy the Amplify stack while a previous partial deployment left it in `REVIEW_IN_PROGRESS` state. CloudFormation was waiting for a change set review that never completed, blocking all subsequent deployments.
+- **Fix:** Manually deleted stuck `EndevoUatAmplify` CloudFormation stack via AWS CLI: `aws cloudformation delete-stack --stack-name EndevoUatAmplify`. Triggered Run #4 to redeploy cleanly.
+- **Lesson:** When a CDK stack is stuck in `REVIEW_IN_PROGRESS`, `CREATE_FAILED`, or `ROLLBACK_FAILED`, it must be manually deleted before CDK can redeploy it. Add a pre-deploy cleanup step if this becomes recurring.
+- **Status after fix:** 5/6 stacks CREATE_COMPLETE. Run #4 deploying EndevoUatAmplify.
