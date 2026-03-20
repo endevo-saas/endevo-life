@@ -210,3 +210,22 @@ Live URL: provided by Amplify after first deploy
 
 ---
 *Last updated: 2026-03-20 | Next update: after CDK first deploy*
+
+---
+
+## AI/ML Services (Phase 2+)
+
+| Service | Purpose | Lambda | Cost |
+|---------|---------|--------|------|
+| Amazon Bedrock (Claude) | Smart assessment feedback, chatbot, certificate generation | Python boto3 | Pay per token |
+| Amazon Lex | Employee chatbot UI | Integrated with Bedrock | Pay per request |
+| Amazon Textract | Extract data from uploaded documents | HR import Lambda | Pay per page |
+| Amazon Comprehend | Sentiment analysis on audit events | Admin Lambda | Pay per unit |
+| Amazon SageMaker | Custom ML models (Phase 3) | Separate Lambda | Pay per inference |
+
+### How Python connects to Bedrock (3 lines):
+```python
+import boto3
+bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
+response = bedrock.invoke_model(modelId='anthropic.claude-3-sonnet', body=payload)
+```
