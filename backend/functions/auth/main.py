@@ -1,6 +1,7 @@
 """
 Endevo Life — Auth Lambda (Python/FastAPI)
 Handles: login, register, MFA, forgot-password, reset-password, change-password
+Version: 1.0.1 — 2026-03-21
 """
 import os
 import boto3
