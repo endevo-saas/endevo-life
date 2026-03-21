@@ -1,0 +1,55 @@
+name: Deploy Lambda Functions
+
+on:
+  push:
+    paths:
+      - 'backend/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        function:
+          - name: endevo-uat-fn-auth
+            path: backend/functions/auth
+          - name: endevo-uat-fn-hr
+            path: backend/functions/hr
+          - name: endevo-uat-fn-employee
+            path: backend/functions/employee
+          - name: endevo-uat-fn-admin
+            path: backend/functions/admin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Build and deploy ${{ matrix.function.name }}
+        run: |
+          mkdir -p /tmp/build
+          pip install \
+            -r ${{ matrix.function.path }}/requirements.txt \
+            --target /tmp/build \
+            --platform manylinux2014_x86_64 \
+            --python-version 3.12 \
+            --only-binary=:all: \
+            --quiet
+          cp ${{ matrix.function.path }}/main.py /tmp/build/
+          cd /tmp/build && zip -r /tmp/function.zip . -q
+          aws lambda update-function-code \
+            --function-name ${{ matrix.function.name }} \
+            --zip-file fileb:///tmp/function.zip \
+            --region ${{ secrets.AWS_REGION }} \
+            --query '[FunctionName,CodeSize]' --output table
+          echo "✅ Deployed: ${{ matrix.function.name }}"
