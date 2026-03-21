@@ -5,11 +5,10 @@ applications:
       phases:
         preBuild:
           commands:
-            - cd $CODEBUILD_SRC_DIR/endevo-life && npm install -g pnpm@9 && pnpm install --no-frozen-lockfile --shamefully-hoist
-            - cd $CODEBUILD_SRC_DIR/endevo-life/apps/web && pnpm install --no-frozen-lockfile --shamefully-hoist
+            - cd $CODEBUILD_SRC_DIR/endevo-life && npm install --legacy-peer-deps
         build:
           commands:
-            - cd $CODEBUILD_SRC_DIR/endevo-life && pnpm run build --filter=@endevo/web
+            - cd $CODEBUILD_SRC_DIR/endevo-life && npx turbo run build --filter=@endevo/web
       artifacts:
         baseDirectory: .next
         files:

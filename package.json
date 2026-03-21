@@ -2,6 +2,10 @@
   "name": "endevo-life",
   "version": "1.0.0",
   "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
@@ -9,6 +13,5 @@
   },
   "devDependencies": {
     "turbo": "^1.13.0"
-  },
-  "packageManager": "pnpm@9.0.0"
+  }
 }
