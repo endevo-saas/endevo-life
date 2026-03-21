@@ -1,230 +1,233 @@
 """
-Endevo Life — Auth Lambda (Python/FastAPI)
-Handles: login, register, MFA, forgot-password, reset-password, change-password
-Version: 1.0.1 — 2026-03-21
+Endevo Life — Auth Lambda
+Pure boto3 + json only — no pip install needed, runs on Lambda runtime directly.
+Handles: login, register, forgot-password, reset-password, change-password, me
 """
+import json
 import os
 import boto3
-from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException, Header
-from fastapi.middleware.cors import CORSMiddleware
-from mangum import Mangum
-from pydantic import BaseModel
+import hmac
+import hashlib
+import base64
 from botocore.exceptions import ClientError
-from boto3.dynamodb.conditions import Key
 
-app = FastAPI(title="Endevo Auth API", version="1.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
-
-REGION       = os.environ.get("REGION", "us-east-1")
-USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
-CLIENT_ID    = os.environ.get("USER_POOL_CLIENT_ID", "")
-USERS_TABLE  = "endevo-uat-users"
+POOL_ID    = os.environ.get("COGNITO_POOL_ID", "us-east-1_DVyEJqgFt")
+CLIENT_ID  = os.environ.get("COGNITO_CLIENT_ID", "4sbv2j6cv7jpp1oi0d16njsej1")
+REGION     = os.environ.get("AWS_REGION", "us-east-1")
 
 cognito = boto3.client("cognito-idp", region_name=REGION)
 dynamo  = boto3.resource("dynamodb", region_name=REGION)
 
-# ── Models ──────────────────────────────────────────────────────────────
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-class RegisterRequest(BaseModel):
-    invite_token: str
-    password: str
-    first_name: str = ""
-    last_name: str = ""
-
-class MfaRequest(BaseModel):
-    session: str
-    code: str
-
-class ForgotPasswordRequest(BaseModel):
-    email: str
-
-class ResetPasswordRequest(BaseModel):
-    email: str
-    code: str
-    new_password: str
-
-class ChangePasswordRequest(BaseModel):
-    access_token: str
-    old_password: str
-    new_password: str
-
-# ── Helpers ──────────────────────────────────────────────────────────────
-def parse_attrs(user: dict) -> dict:
-    attrs = {a["Name"]: a["Value"] for a in user.get("UserAttributes", [])}
+def resp(status, body):
     return {
-        "email":     attrs.get("email", ""),
-        "role":      attrs.get("custom:role", "EMPLOYEE"),
-        "tenant_id": attrs.get("custom:tenantId", ""),
-        "name":      f"{attrs.get('given_name','')} {attrs.get('family_name','')}".strip(),
-    }
-
-# ── Routes ───────────────────────────────────────────────────────────────
-@app.get("/api/auth/health")
-def health():
-    return {"status": "ok", "service": "auth"}
-
-@app.post("/api/auth/login")
-def login(req: LoginRequest):
-    try:
-        resp = cognito.initiate_auth(
-            AuthFlow="USER_PASSWORD_AUTH",
-            AuthParameters={
-                "USERNAME": req.email.lower().strip(),
-                "PASSWORD": req.password,
-            },
-            ClientId=CLIENT_ID,
-        )
-    except ClientError as e:
-        code = e.response["Error"]["Code"]
-        if code in ("NotAuthorizedException", "UserNotFoundException"):
-            raise HTTPException(status_code=401, detail="Invalid email or password")
-        raise HTTPException(status_code=400, detail=e.response["Error"]["Message"])
-
-    if resp.get("ChallengeName") == "SOFTWARE_TOKEN_MFA":
-        return {"challenge": "MFA_REQUIRED", "session": resp["Session"]}
-
-    tokens = resp["AuthenticationResult"]
-    user   = cognito.get_user(AccessToken=tokens["AccessToken"])
-    attrs  = parse_attrs(user)
-    return {
-        "access_token":  tokens["AccessToken"],
-        "id_token":      tokens["IdToken"],
-        "refresh_token": tokens["RefreshToken"],
-        "role":          attrs["role"],
-        "email":         attrs["email"],
-        "name":          attrs["name"],
-        "tenant_id":     attrs["tenant_id"],
-    }
-
-@app.post("/api/auth/mfa")
-def verify_mfa(req: MfaRequest):
-    try:
-        resp = cognito.respond_to_auth_challenge(
-            ClientId=CLIENT_ID,
-            ChallengeName="SOFTWARE_TOKEN_MFA",
-            Session=req.session,
-            ChallengeResponses={"SOFTWARE_TOKEN_MFA_CODE": req.code, "USERNAME": "placeholder"},
-        )
-    except ClientError:
-        raise HTTPException(status_code=401, detail="Invalid MFA code")
-
-    tokens = resp["AuthenticationResult"]
-    user   = cognito.get_user(AccessToken=tokens["AccessToken"])
-    attrs  = parse_attrs(user)
-    return {
-        "access_token": tokens["AccessToken"],
-        "id_token":     tokens["IdToken"],
-        "role":         attrs["role"],
-        "email":        attrs["email"],
-        "name":         attrs["name"],
-    }
-
-@app.post("/api/auth/register")
-def register(req: RegisterRequest):
-    if len(req.password) < 12:
-        raise HTTPException(status_code=400, detail="Password must be at least 12 characters")
-
-    table  = dynamo.Table(USERS_TABLE)
-    result = table.query(
-        IndexName="inviteToken-index",
-        KeyConditionExpression=Key("inviteToken").eq(req.invite_token),
-        Limit=1,
-    )
-    items = result.get("Items", [])
-    if not items or items[0].get("status") != "invited":
-        raise HTTPException(status_code=400, detail="Invalid or expired invitation")
-
-    invited = items[0]
-    email   = invited["email"]
-    fn      = req.first_name or invited.get("firstName", "")
-    ln      = req.last_name  or invited.get("lastName", "")
-
-    try:
-        cognito.admin_create_user(
-            UserPoolId=USER_POOL_ID,
-            Username=email,
-            MessageAction="SUPPRESS",
-            UserAttributes=[
-                {"Name": "email",           "Value": email},
-                {"Name": "email_verified",  "Value": "true"},
-                {"Name": "given_name",      "Value": fn},
-                {"Name": "family_name",     "Value": ln},
-                {"Name": "custom:role",     "Value": invited.get("role", "EMPLOYEE")},
-                {"Name": "custom:tenantId", "Value": invited["tenantId"]},
-            ],
-        )
-        cognito.admin_set_user_password(
-            UserPoolId=USER_POOL_ID,
-            Username=email,
-            Password=req.password,
-            Permanent=True,
-        )
-    except ClientError as e:
-        raise HTTPException(status_code=500, detail=e.response["Error"]["Message"])
-
-    table.update_item(
-        Key={"userId": invited["userId"]},
-        UpdateExpression="SET #s=:active, inviteToken=:n, inviteExpires=:n, activatedAt=:now",
-        ExpressionAttributeNames={"#s": "status"},
-        ExpressionAttributeValues={
-            ":active": "active",
-            ":n": None,
-            ":now": datetime.now(timezone.utc).isoformat(),
+        "statusCode": status,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
         },
-    )
-    return {"success": True, "email": email}
+        "body": json.dumps(body)
+    }
 
-@app.post("/api/auth/forgot-password")
-def forgot_password(req: ForgotPasswordRequest):
-    try:
-        cognito.forgot_password(ClientId=CLIENT_ID, Username=req.email.lower().strip())
-    except ClientError:
-        pass
-    return {"message": "If that email exists, a reset code has been sent"}
+def err(status, msg):
+    return resp(status, {"detail": msg})
 
-@app.post("/api/auth/reset-password")
-def reset_password(req: ResetPasswordRequest):
-    if len(req.new_password) < 12:
-        raise HTTPException(status_code=400, detail="Password must be at least 12 characters")
+def get_body(event):
     try:
-        cognito.confirm_forgot_password(
-            ClientId=CLIENT_ID,
-            Username=req.email.lower().strip(),
-            ConfirmationCode=req.code,
-            Password=req.new_password,
+        return json.loads(event.get("body") or "{}")
+    except:
+        return {}
+
+def handler(event, context):
+    method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    path   = event.get("rawPath", "")
+
+    # CORS preflight
+    if method == "OPTIONS":
+        return resp(200, {})
+
+    body = get_body(event)
+
+    # ── POST /api/auth/login ──────────────────────────────────────
+    if path.endswith("/login") and method == "POST":
+        email    = (body.get("email") or "").lower().strip()
+        password = body.get("password") or ""
+        if not email or not password:
+            return err(400, "Email and password required")
+        try:
+            r = cognito.initiate_auth(
+                AuthFlow="USER_PASSWORD_AUTH",
+                AuthParameters={"USERNAME": email, "PASSWORD": password},
+                ClientId=CLIENT_ID
+            )
+            if r.get("ChallengeName") == "SOFTWARE_TOKEN_MFA":
+                return resp(200, {
+                    "mfa_required": True,
+                    "session": r["Session"],
+                    "challenge": r["ChallengeName"]
+                })
+            tokens = r["AuthenticationResult"]
+            # Get user attributes
+            user = cognito.get_user(AccessToken=tokens["AccessToken"])
+            attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
+            return resp(200, {
+                "access_token":  tokens["AccessToken"],
+                "id_token":      tokens["IdToken"],
+                "refresh_token": tokens["RefreshToken"],
+                "role":          attrs.get("custom:role", "EMPLOYEE"),
+                "tenant_id":     attrs.get("custom:tenantId", ""),
+                "tenant_name":   attrs.get("custom:tenantName", ""),
+                "email":         attrs.get("email", email),
+                "first_name":    attrs.get("given_name", ""),
+                "last_name":     attrs.get("family_name", "")
+            })
+        except ClientError as e:
+            code = e.response["Error"]["Code"]
+            if code in ("NotAuthorizedException", "UserNotFoundException"):
+                return err(401, "Invalid email or password")
+            return err(400, str(e.response["Error"]["Message"]))
+
+    # ── POST /api/auth/mfa ────────────────────────────────────────
+    if path.endswith("/mfa") and method == "POST":
+        session  = body.get("session") or ""
+        otp_code = body.get("code") or ""
+        email    = body.get("email") or ""
+        try:
+            r = cognito.respond_to_auth_challenge(
+                ClientId=CLIENT_ID,
+                ChallengeName="SOFTWARE_TOKEN_MFA",
+                Session=session,
+                ChallengeResponses={
+                    "USERNAME": email,
+                    "SOFTWARE_TOKEN_MFA_CODE": otp_code
+                }
+            )
+            tokens = r["AuthenticationResult"]
+            user = cognito.get_user(AccessToken=tokens["AccessToken"])
+            attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
+            return resp(200, {
+                "access_token":  tokens["AccessToken"],
+                "id_token":      tokens["IdToken"],
+                "refresh_token": tokens["RefreshToken"],
+                "role":          attrs.get("custom:role", "EMPLOYEE")
+            })
+        except ClientError as e:
+            return err(401, "Invalid MFA code")
+
+    # ── POST /api/auth/register ───────────────────────────────────
+    if path.endswith("/register") and method == "POST":
+        token     = body.get("invite_token") or ""
+        password  = body.get("password") or ""
+        first     = body.get("first_name") or ""
+        last      = body.get("last_name") or ""
+        if not all([token, password, first, last]):
+            return err(400, "All fields required")
+        # Look up invite token in DynamoDB
+        table = dynamo.Table("endevo-uat-users")
+        result = table.scan(
+            FilterExpression="inviteToken = :t AND #s = :pending",
+            ExpressionAttributeValues={":t": token, ":pending": "pending"},
+            ExpressionAttributeNames={"#s": "status"}
         )
-    except ClientError:
-        raise HTTPException(status_code=400, detail="Invalid or expired reset code")
-    return {"success": True}
+        items = result.get("Items", [])
+        if not items:
+            return err(400, "Invalid or expired invite link")
+        user_record = items[0]
+        email = user_record["email"]
+        tenant_id   = user_record.get("tenantId", "")
+        tenant_name = user_record.get("tenantName", "")
+        role        = user_record.get("role", "EMPLOYEE")
+        try:
+            cognito.admin_create_user(
+                UserPoolId=POOL_ID,
+                Username=email,
+                TemporaryPassword=password,
+                UserAttributes=[
+                    {"Name": "email",              "Value": email},
+                    {"Name": "email_verified",     "Value": "true"},
+                    {"Name": "given_name",         "Value": first},
+                    {"Name": "family_name",        "Value": last},
+                    {"Name": "custom:role",        "Value": role},
+                    {"Name": "custom:tenantId",    "Value": tenant_id},
+                    {"Name": "custom:tenantName",  "Value": tenant_name},
+                ],
+                MessageAction="SUPPRESS"
+            )
+            cognito.admin_set_user_password(
+                UserPoolId=POOL_ID, Username=email,
+                Password=password, Permanent=True
+            )
+            # Mark invite used
+            table.update_item(
+                Key={"userId": user_record["userId"]},
+                UpdateExpression="SET #s = :active, firstName = :f, lastName = :l",
+                ExpressionAttributeValues={":active": "active", ":f": first, ":l": last},
+                ExpressionAttributeNames={"#s": "status"}
+            )
+            return resp(200, {"message": "Account created successfully"})
+        except ClientError as e:
+            return err(400, str(e.response["Error"]["Message"]))
 
-@app.post("/api/auth/change-password")
-def change_password(req: ChangePasswordRequest):
-    if len(req.new_password) < 12:
-        raise HTTPException(status_code=400, detail="Password must be at least 12 characters")
-    try:
-        cognito.change_password(
-            AccessToken=req.access_token,
-            PreviousPassword=req.old_password,
-            ProposedPassword=req.new_password,
-        )
-    except ClientError:
-        raise HTTPException(status_code=400, detail="Password change failed")
-    return {"success": True}
+    # ── POST /api/auth/forgot-password ───────────────────────────
+    if path.endswith("/forgot-password") and method == "POST":
+        email = (body.get("email") or "").lower().strip()
+        try:
+            cognito.forgot_password(ClientId=CLIENT_ID, Username=email)
+        except:
+            pass  # Silent fail — don't reveal if email exists
+        return resp(200, {"message": "If this email exists, a reset code was sent"})
 
-@app.get("/api/auth/me")
-def get_me(authorization: str = Header(default="")):
-    token = authorization.replace("Bearer ", "").strip()
-    if not token:
-        raise HTTPException(status_code=401, detail="No token provided")
-    try:
-        user  = cognito.get_user(AccessToken=token)
-        return parse_attrs(user)
-    except ClientError:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    # ── POST /api/auth/reset-password ────────────────────────────
+    if path.endswith("/reset-password") and method == "POST":
+        email    = (body.get("email") or "").lower().strip()
+        code     = body.get("code") or ""
+        new_pass = body.get("new_password") or ""
+        if not all([email, code, new_pass]):
+            return err(400, "Email, code, and new password required")
+        try:
+            cognito.confirm_forgot_password(
+                ClientId=CLIENT_ID,
+                Username=email,
+                ConfirmationCode=code,
+                Password=new_pass
+            )
+            return resp(200, {"message": "Password reset successfully"})
+        except ClientError as e:
+            return err(400, str(e.response["Error"]["Message"]))
 
-# Lambda entry point
-handler = Mangum(app, lifespan="off")
+    # ── POST /api/auth/change-password ───────────────────────────
+    if path.endswith("/change-password") and method == "POST":
+        access_token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
+        old_pass = body.get("old_password") or ""
+        new_pass = body.get("new_password") or ""
+        try:
+            cognito.change_password(
+                AccessToken=access_token,
+                PreviousPassword=old_pass,
+                ProposedPassword=new_pass
+            )
+            return resp(200, {"message": "Password changed successfully"})
+        except ClientError as e:
+            return err(400, str(e.response["Error"]["Message"]))
+
+    # ── GET /api/auth/me ─────────────────────────────────────────
+    if path.endswith("/me") and method == "GET":
+        access_token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
+        if not access_token:
+            return err(401, "Not authenticated")
+        try:
+            user = cognito.get_user(AccessToken=access_token)
+            attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
+            return resp(200, {
+                "email":       attrs.get("email"),
+                "first_name":  attrs.get("given_name"),
+                "last_name":   attrs.get("family_name"),
+                "role":        attrs.get("custom:role"),
+                "tenant_id":   attrs.get("custom:tenantId"),
+                "tenant_name": attrs.get("custom:tenantName")
+            })
+        except ClientError:
+            return err(401, "Invalid or expired token")
+
+    return err(404, f"Route not found: {method} {path}")

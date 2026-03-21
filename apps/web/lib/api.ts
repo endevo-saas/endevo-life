@@ -29,14 +29,35 @@ export const api = {
     apiFetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
   me: () => apiFetch('/api/auth/me'),
 
-  // Admin
+  // Admin — Tenants
   adminDashboard: () => apiFetch('/api/admin/dashboard'),
   adminTenants: () => apiFetch<{ tenants: Tenant[]; count: number }>('/api/admin/tenants'),
-  adminCreateTenant: (body: { name: string; plan?: string }) =>
+  adminGetTenant: (id: string) => apiFetch<TenantDetail>(`/api/admin/tenants/${id}`),
+  adminCreateTenant: (body: { name: string; plan?: string; maxSeats?: number }) =>
     apiFetch('/api/admin/tenants', { method: 'POST', body: JSON.stringify(body) }),
   adminUpdateTenant: (id: string, body: Record<string, unknown>) =>
     apiFetch(`/api/admin/tenants/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  adminUsers: () => apiFetch<{ users: User[]; count: number }>('/api/admin/users'),
+  adminDeleteTenant: (id: string) =>
+    apiFetch(`/api/admin/tenants/${id}`, { method: 'DELETE' }),
+
+  // Admin — Users
+  adminUsers: (tenantId?: string) =>
+    apiFetch<{ users: User[]; count: number }>(`/api/admin/users${tenantId ? `?tenantId=${tenantId}` : ''}`),
+  adminGetUser: (id: string) => apiFetch<User>(`/api/admin/users/${id}`),
+  adminCreateUser: (body: Record<string, unknown>) =>
+    apiFetch('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
+  adminUpdateUser: (id: string, body: Record<string, unknown>) =>
+    apiFetch(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  adminDeleteUser: (id: string) =>
+    apiFetch(`/api/admin/users/${id}`, { method: 'DELETE' }),
+  adminLockUser: (id: string) =>
+    apiFetch(`/api/admin/users/${id}/lock`, { method: 'POST' }),
+  adminUnlockUser: (id: string) =>
+    apiFetch(`/api/admin/users/${id}/unlock`, { method: 'POST' }),
+  adminResetPassword: (id: string) =>
+    apiFetch<{ temporary_password: string }>(`/api/admin/users/${id}/reset-password`, { method: 'POST' }),
+
+  // Admin — Other
   adminAudit: () => apiFetch<{ logs: AuditLog[] }>('/api/admin/audit'),
   adminHealth: () => apiFetch('/api/admin/health'),
 
@@ -75,7 +96,19 @@ export interface Tenant {
   createdAt: string
   maxSeats: number
   user_count?: number
-  employee_count?: number
+  hr_count?: number
+  active_count?: number
+}
+
+export interface TenantDetail extends Tenant {
+  hr_admins: User[]
+  employees: User[]
+  stats: {
+    total_users: number
+    active_users: number
+    hr_admins: number
+    employees: number
+  }
 }
 
 export interface User {
