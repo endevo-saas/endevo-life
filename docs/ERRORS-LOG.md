@@ -157,7 +157,75 @@ These issues occurred before the GitHub-first approach was adopted. Recorded for
 ---
 
 *This log is maintained by the engineering team. Every issue must be recorded before the fix is merged.*
-*Last updated: 2026-03-20 | Total issues: 7 (2 active phase + 5 legacy)*
+*Last updated: 2026-03-21 | Total issues: 13 (8 active phase + 5 legacy)*
+
+---
+
+## Phase 1 — QA Session Issues (2026-03-21)
+
+### Issue #008
+- **Date:** 2026-03-21
+- **Phase:** 1 — Backend QA
+- **Lambda:** endevo-uat-fn-hr
+- **Error:** Audit log returns 0 entries after all HR actions
+- **Root Cause:** `endevo-uat-audit` table has composite key (`tenantId` HASH + `sk` RANGE). Lambda `put_item` did not include `sk`. DynamoDB raised `ValidationException` but `except: pass` swallowed it silently.
+- **Fix:** `hr/main.py` audit function now writes `sk = f"{now}#{audit_id}"`. Changed `except: pass` to `except Exception as e: print(f"AUDIT_WRITE_ERROR: {e}")`
+- **Lesson:** NEVER use bare `except: pass`. Always log errors. DynamoDB composite-key tables MUST include ALL key attributes in every put_item.
+
+---
+
+### Issue #009
+- **Date:** 2026-03-21
+- **Phase:** 1 — Backend QA
+- **Lambda:** endevo-uat-fn-employee
+- **Error:** Assessment returns 20 questions (all tenants) instead of 5 (own tenant only)
+- **Root Cause:** Questions scan only filtered `courseId = :c`. All 4 tenants had the same courseId, so all 4 × 5 = 20 questions returned.
+- **Fix:** Changed scan filter to `tenantId = :t AND courseId = :c`
+- **Lesson:** Every scan that should be tenant-scoped MUST include `tenantId` filter.
+
+---
+
+### Issue #010
+- **Date:** 2026-03-21
+- **Phase:** 1 — Backend QA
+- **Lambda:** endevo-uat-fn-employee
+- **Error:** `PROG_T.put_item` failing silently — video-progress table `ValidationException`
+- **Root Cause:** `endevo-uat-video-progress` requires `userId` (HASH) + `videoId` (RANGE). Lambda was writing `courseId` but not `videoId`.
+- **Fix:** Lambda now writes `videoId = course_id` alongside `courseId = course_id`
+- **Lesson:** Check ACTUAL DynamoDB table key schema against Lambda code. Never assume schema without verifying.
+
+---
+
+### Issue #011
+- **Date:** 2026-03-21
+- **Phase:** 1 — Backend QA
+- **Lambda:** endevo-uat-fn-employee
+- **Error:** Dashboard `completed_courses` stays 0 after passing assessment
+- **Root Cause:** Assessment submit endpoint issued certificate but did not write progress record with `completed = True`
+- **Fix:** Added `PROG_T.put_item({..., completed: True, progressPct: 100})` inside `if passed:` block
+- **Lesson:** When one action should update multiple state stores, do it atomically in the same Lambda invocation.
+
+---
+
+### Issue #012
+- **Date:** 2026-03-21
+- **Phase:** 1 — Frontend QA
+- **Files:** All dashboard pages
+- **Error:** All 3 dashboards showed hardcoded "—" values. No API calls made.
+- **Root Cause:** Frontend was never connected to APIs. Only static placeholders existed.
+- **Fix:** Built 15 new pages, shared `lib/api.ts`, 3 sidebar layouts with logout. Full API integration.
+- **Lesson:** Phase 1 is not complete until frontend AND backend are connected end-to-end.
+
+---
+
+### Issue #013 (OPEN)
+- **Date:** 2026-03-21
+- **Phase:** 1 — Backend QA
+- **Lambda:** endevo-uat-fn-admin
+- **Error:** `PUT /api/admin/tenants/fake-id` returns 200 "Tenant updated" instead of 404
+- **Root Cause:** DynamoDB `update_item` is an upsert — creates item if it doesn't exist
+- **Fix Required:** Add `get_item` check before `update_item`. Return 404 if item not found.
+- **Status:** OPEN — low priority, no data corruption risk
 
 ---
 
