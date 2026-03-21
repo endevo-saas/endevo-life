@@ -62,6 +62,35 @@
 
 ## Phase 1 — Auth (Cognito + Python Lambda)
 
+### Issue #007
+- **Date:** 2026-03-20
+- **Phase:** 1 — Frontend Build
+- **Build:** Amplify Jobs #6, #7
+- **File:** `apps/web/app/(auth)/register/page.tsx`
+- **Error:**
+  ```
+  ⨯ useSearchParams() should be wrapped in a suspense boundary at page "/register".
+  Read more: https://nextjs.org/docs/messages/missing-suspense-with-csr-bailout
+  Error occurred prerendering page "/register".
+  ```
+- **Root Cause:** In Next.js 15 App Router, `useSearchParams()` triggers a "client-side rendering bailout" during static generation — even in `'use client'` components. Next.js attempts a static pre-render pass for ALL pages by default. `useSearchParams` requires reading from the URL at request time, which is impossible during static generation, so Next.js throws unless the component is wrapped in `<Suspense>`. Adding `export const dynamic = 'force-dynamic'` alone was NOT sufficient — Next.js 15 still performs a render pass and throws before the dynamic flag takes effect.
+- **Fix:** Split the page into two components:
+  1. `RegisterForm` — inner component that calls `useSearchParams()`, contains all logic
+  2. `RegisterPage` (default export) — outer shell that wraps `<RegisterForm>` in `<Suspense fallback={...}>`
+  ```tsx
+  export default function RegisterPage() {
+    return (
+      <Suspense fallback={<LoadingSpinner />}>
+        <RegisterForm />  {/* useSearchParams() lives here */}
+      </Suspense>
+    )
+  }
+  ```
+- **Commit:** `fix: wrap RegisterForm in Suspense boundary for Next.js 15 useSearchParams`
+- **Lesson:** In Next.js 15, EVERY component using `useSearchParams()` MUST be wrapped in `<Suspense>`. This applies even with `'use client'` and `dynamic = 'force-dynamic'`. The pattern: always split into outer page shell (Suspense) + inner content component. This is a breaking change from Next.js 13/14. Apply this pattern to any future page using `useSearchParams`, `usePathname` with dynamic segments, or any hook that reads request-time data.
+
+---
+
 ### Issue #005
 - **Date:** 2026-03-20
 - **Phase:** 1 — Frontend Build

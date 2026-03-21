@@ -1,8 +1,6 @@
 'use client'
 
-export const dynamic = 'force-dynamic'
-
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -22,7 +20,8 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>
 
-export default function RegisterPage() {
+// Inner component — uses useSearchParams, MUST be inside <Suspense>
+function RegisterForm() {
   const router      = useRouter()
   const params      = useSearchParams()
   const token       = params.get('token') || ''
@@ -131,5 +130,21 @@ export default function RegisterPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+// Outer page — wraps RegisterForm in Suspense (required by Next.js 15 for useSearchParams)
+export default function RegisterPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="glass p-8 text-center">
+          <Loader2 className="w-8 h-8 text-brand-400 animate-spin mx-auto mb-3" />
+          <p className="text-slate-400 text-sm">Loading...</p>
+        </div>
+      </div>
+    }>
+      <RegisterForm />
+    </Suspense>
   )
 }
