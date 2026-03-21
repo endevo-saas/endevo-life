@@ -5,7 +5,8 @@ applications:
       phases:
         preBuild:
           commands:
-            - cd $CODEBUILD_SRC_DIR/endevo-life && npm install -g pnpm@9 && pnpm install --no-frozen-lockfile
+            - cd $CODEBUILD_SRC_DIR/endevo-life && npm install -g pnpm@9 && pnpm install --no-frozen-lockfile --shamefully-hoist
+            - cd $CODEBUILD_SRC_DIR/endevo-life/apps/web && pnpm install --no-frozen-lockfile --shamefully-hoist
         build:
           commands:
             - cd $CODEBUILD_SRC_DIR/endevo-life && pnpm run build --filter=@endevo/web
