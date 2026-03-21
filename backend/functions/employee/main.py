@@ -103,7 +103,7 @@ def handler(event, context):
     # GET /api/employee/assessment/{courseId}
     if "/assessment/" in path and method == "GET":
         course_id = path.split("/")[-1]
-        questions = QUEST_T.scan(FilterExpression="courseId = :c", ExpressionAttributeValues={":c": course_id})
+        questions = QUEST_T.scan(FilterExpression="tenantId = :t AND courseId = :c", ExpressionAttributeValues={":t": tenant_id, ":c": course_id})
         qs = [{k: v for k, v in q.items() if k != "correctAnswer"} for q in questions.get("Items", [])]
         return resp(200, {"questions": qs, "count": len(qs)})
 
@@ -112,7 +112,7 @@ def handler(event, context):
         parts = path.split("/")
         course_id = parts[-2]
         answers = body.get("answers", {})
-        questions = QUEST_T.scan(FilterExpression="courseId = :c", ExpressionAttributeValues={":c": course_id})
+        questions = QUEST_T.scan(FilterExpression="tenantId = :t AND courseId = :c", ExpressionAttributeValues={":t": tenant_id, ":c": course_id})
         qs = questions.get("Items", [])
         if not qs: return err(404, "Assessment not found")
         correct = sum(1 for q in qs if answers.get(q["questionId"]) == q.get("correctAnswer"))
@@ -123,6 +123,8 @@ def handler(event, context):
         RESP_T.put_item(Item={"responseId": resp_id, "userId": user_sub, "tenantId": tenant_id, "courseId": course_id, "score": score, "passed": passed, "answers": answers, "submittedAt": now})
         if passed:
             CERT_T.put_item(Item={"certId": str(uuid.uuid4()), "userId": user_sub, "tenantId": tenant_id, "courseId": course_id, "email": email, "score": score, "issuedAt": now})
+            # Auto-mark progress as completed
+            PROG_T.put_item(Item={"userId": user_sub, "videoId": course_id, "progressId": str(uuid.uuid4()), "tenantId": tenant_id, "courseId": course_id, "progressPct": 100, "completed": True, "updatedAt": now})
         return resp(200, {"score": score, "passed": passed, "correct": correct, "total": len(qs), "certificate_issued": passed})
 
     # GET /api/employee/certificates
