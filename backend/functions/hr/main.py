@@ -1,9 +1,19 @@
 """
 Endevo Life — HR Admin Lambda (pure boto3, no pip needed)
-Routes: dashboard, employees list, invite, update, deactivate, audit log
+Foundation v2: pagination, server-side search, input validation
+
+Routes:
+  GET  /api/hr/dashboard
+  GET  /api/hr/employees             ?search=&status=&limit=50&next_token=
+  POST /api/hr/invite
+  PUT  /api/hr/employees/{id}
+  DELETE /api/hr/employees/{id}
+  GET  /api/hr/audit                 ?limit=50&next_token=
 """
-import json, os, uuid, boto3
+import json, os, uuid, base64, re
+import boto3
 from datetime import datetime, timezone
+from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
 
 POOL_ID   = os.environ.get("COGNITO_POOL_ID", "us-east-1_DVyEJqgFt")
@@ -14,72 +24,226 @@ ses       = boto3.client("ses", region_name=REGION)
 USERS_T   = dynamo.Table("endevo-uat-users")
 AUDIT_T   = dynamo.Table("endevo-uat-audit")
 
-def resp(status, body):
-    return {"statusCode": status, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type,Authorization", "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS"}, "body": json.dumps(body, default=str)}
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
-def err(status, msg): return resp(status, {"detail": msg})
+def resp(status, body):
+    return {
+        "statusCode": status,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "Content-Type,Authorization",
+            "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS"
+        },
+        "body": json.dumps(body, default=str)
+    }
+
+def err(status, msg):
+    return resp(status, {"detail": msg})
+
 def get_body(event):
-    try: return json.loads(event.get("body") or "{}")
-    except: return {}
+    try:
+        return json.loads(event.get("body") or "{}")
+    except:
+        return {}
 
 def get_caller(event):
     token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
-    if not token: return None, None, None
+    if not token:
+        return None, None, None
     try:
         u = cognito.get_user(AccessToken=token)
         attrs = {a["Name"]: a["Value"] for a in u["UserAttributes"]}
         return attrs.get("custom:tenantId"), attrs.get("custom:role"), attrs.get("email")
-    except: return None, None, None
+    except:
+        return None, None, None
+
+def sanitize(value, max_len=200):
+    if not isinstance(value, str):
+        return value
+    v = value.strip()[:max_len]
+    for bad in ["<script", "</script", "javascript:", "onload=", "onerror=", "eval(", "document."]:
+        v = re.sub(re.escape(bad), "", v, flags=re.IGNORECASE)
+    return v
+
+def validate_email(email):
+    if not email or len(email) > 254:
+        return False
+    return bool(re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", email))
+
+def encode_cursor(last_key):
+    if not last_key:
+        return None
+    return base64.urlsafe_b64encode(json.dumps(last_key, default=str).encode()).decode()
+
+def decode_cursor(token):
+    if not token:
+        return None
+    try:
+        return json.loads(base64.urlsafe_b64decode(token.encode()))
+    except:
+        return None
+
+def scan_page(table, limit, next_token, filter_expr=None):
+    limit = min(max(int(limit or 50), 1), 200)
+    params = {"Limit": limit}
+    if filter_expr is not None:
+        params["FilterExpression"] = filter_expr
+    start_key = decode_cursor(next_token)
+    if start_key:
+        params["ExclusiveStartKey"] = start_key
+    result = table.scan(**params)
+    return result.get("Items", []), encode_cursor(result.get("LastEvaluatedKey"))
+
+def scan_all(table, filter_expr=None):
+    params = {}
+    if filter_expr is not None:
+        params["FilterExpression"] = filter_expr
+    items = []
+    while True:
+        result = table.scan(**params)
+        items.extend(result.get("Items", []))
+        last = result.get("LastEvaluatedKey")
+        if not last:
+            break
+        params["ExclusiveStartKey"] = last
+    return items
+
+def count_items(table, filter_expr=None):
+    params = {"Select": "COUNT"}
+    if filter_expr is not None:
+        params["FilterExpression"] = filter_expr
+    total = 0
+    while True:
+        result = table.scan(**params)
+        total += result.get("Count", 0)
+        last = result.get("LastEvaluatedKey")
+        if not last:
+            break
+        params["ExclusiveStartKey"] = last
+    return total
 
 def audit(tenant_id, actor, action, details=""):
     try:
         now = datetime.now(timezone.utc).isoformat()
         audit_id = str(uuid.uuid4())
-        AUDIT_T.put_item(Item={"tenantId": tenant_id, "sk": f"{now}#{audit_id}", "auditId": audit_id, "actor": actor, "action": action, "details": details, "createdAt": now})
+        AUDIT_T.put_item(Item={
+            "tenantId": tenant_id,
+            "sk": f"{now}#{audit_id}",
+            "auditId": audit_id,
+            "actor": actor,
+            "action": action,
+            "details": details[:500],
+            "createdAt": now
+        })
     except Exception as e:
         print(f"AUDIT_WRITE_ERROR: {e}")
+
+# ── Handler ───────────────────────────────────────────────────────────────────
 
 def handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     path   = event.get("rawPath", "")
-    if method == "OPTIONS": return resp(200, {})
+    qs     = event.get("queryStringParameters") or {}
+
+    if method == "OPTIONS":
+        return resp(200, {})
+
     body = get_body(event)
     tenant_id, role, caller_email = get_caller(event)
-    if not tenant_id: return err(401, "Not authenticated")
-    if role not in ("HR_ADMIN", "GLOBAL_ADMIN"): return err(403, "HR Admin access required")
 
-    # GET /api/hr/dashboard
+    if not tenant_id:
+        return err(401, "Not authenticated")
+    if role not in ("HR_ADMIN", "GLOBAL_ADMIN"):
+        return err(403, "HR Admin access required")
+
+    # ── GET /api/hr/dashboard ─────────────────────────────────────────────
     if path.endswith("/dashboard") and method == "GET":
-        result = USERS_T.scan(FilterExpression="tenantId = :t", ExpressionAttributeValues={":t": tenant_id})
-        users = result.get("Items", [])
+        base_filter = Attr("tenantId").eq(tenant_id)
         return resp(200, {
-            "total_users":      len(users),
-            "active_users":     len([u for u in users if u.get("status") == "active"]),
-            "pending_invites":  len([u for u in users if u.get("status") == "pending"]),
-            "total_employees":  len([u for u in users if u.get("role") == "EMPLOYEE"])
+            "total_users":     count_items(USERS_T, base_filter),
+            "active_users":    count_items(USERS_T, base_filter & Attr("status").eq("active")),
+            "pending_invites": count_items(USERS_T, base_filter & Attr("status").eq("pending")),
+            "total_employees": count_items(USERS_T, base_filter & Attr("role").eq("EMPLOYEE")),
         })
 
-    # GET /api/hr/employees
+    # ── GET /api/hr/employees ─────────────────────────────────────────────
     if path.endswith("/employees") and method == "GET":
-        result = USERS_T.scan(
-            FilterExpression="tenantId = :t AND #r = :role",
-            ExpressionAttributeValues={":t": tenant_id, ":role": "EMPLOYEE"},
-            ExpressionAttributeNames={"#r": "role"}
-        )
-        employees = [{k: v for k, v in e.items() if k != "inviteToken"} for e in result.get("Items", [])]
-        return resp(200, {"employees": employees, "count": len(employees)})
+        limit         = qs.get("limit", 50)
+        next_token    = qs.get("next_token")
+        search        = sanitize(qs.get("search", ""), 100)
+        filter_status = qs.get("status", "")
+        filter_dept   = qs.get("department", "")
 
-    # POST /api/hr/invite
+        # Always scope to tenant + EMPLOYEE role
+        fexpr = Attr("tenantId").eq(tenant_id) & Attr("role").eq("EMPLOYEE")
+
+        if filter_status:
+            fexpr = fexpr & Attr("status").eq(filter_status)
+        if filter_dept:
+            fexpr = fexpr & Attr("department").eq(filter_dept)
+        if search:
+            sf = (Attr("email").contains(search) |
+                  Attr("firstName").contains(search) |
+                  Attr("lastName").contains(search))
+            fexpr = fexpr & sf
+
+        items, next_cursor = scan_page(USERS_T, limit, next_token, fexpr)
+        employees = [{k: v for k, v in e.items() if k != "inviteToken"} for e in items]
+
+        return resp(200, {
+            "employees":  employees,
+            "count":      len(employees),
+            "next_token": next_cursor,
+            "has_more":   bool(next_cursor)
+        })
+
+    # ── POST /api/hr/invite ───────────────────────────────────────────────
     if path.endswith("/invite") and method == "POST":
-        email      = (body.get("email") or "").lower().strip()
-        first_name = body.get("first_name") or ""
-        last_name  = body.get("last_name") or ""
-        department = body.get("department") or "General"
-        job_title  = body.get("job_title") or ""
-        if not email: return err(400, "Email required")
-        invite_token = str(uuid.uuid4())
-        user_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
+        email      = sanitize((body.get("email") or "").lower().strip(), 254)
+        first_name = sanitize(body.get("first_name") or body.get("firstName") or "", 50)
+        last_name  = sanitize(body.get("last_name") or body.get("lastName") or "", 50)
+        department = sanitize(body.get("department") or "General", 100)
+        job_title  = sanitize(body.get("job_title") or body.get("jobTitle") or "", 100)
+
+        if not email:
+            return err(400, "Email required")
+        if not validate_email(email):
+            return err(400, "Invalid email format")
+
+        # Check for duplicate invite within this tenant
+        existing = scan_all(USERS_T, Attr("email").eq(email) & Attr("tenantId").eq(tenant_id))
+        if existing:
+            return err(409, f"{email} is already a member of this organisation")
+
+        invite_token  = str(uuid.uuid4())
+        temp_password = f"Invite@{str(uuid.uuid4())[:8]}!"
+        user_id       = str(uuid.uuid4())
+        now           = datetime.now(timezone.utc).isoformat()
+
+        # Create Cognito user
+        try:
+            cognito.admin_create_user(
+                UserPoolId=POOL_ID, Username=email,
+                TemporaryPassword=temp_password,
+                UserAttributes=[
+                    {"Name": "email",           "Value": email},
+                    {"Name": "email_verified",  "Value": "true"},
+                    {"Name": "given_name",      "Value": first_name},
+                    {"Name": "family_name",     "Value": last_name},
+                    {"Name": "custom:role",     "Value": "EMPLOYEE"},
+                    {"Name": "custom:tenantId", "Value": tenant_id},
+                ],
+                MessageAction="SUPPRESS"
+            )
+            cognito.admin_set_user_password(UserPoolId=POOL_ID, Username=email,
+                Password=temp_password, Permanent=True)
+        except ClientError as e:
+            code = e.response["Error"]["Code"]
+            if code == "UsernameExistsException":
+                return err(409, f"User {email} already exists in the system")
+            return err(400, str(e.response["Error"]["Message"]))
+
         USERS_T.put_item(Item={
             "userId": user_id, "tenantId": tenant_id, "email": email,
             "firstName": first_name, "lastName": last_name,
@@ -87,43 +251,90 @@ def handler(event, context):
             "department": department, "jobTitle": job_title,
             "inviteToken": invite_token, "invitedBy": caller_email, "createdAt": now
         })
-        invite_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/register?token={invite_token}"
+
+        invite_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/register?token={invite_token}&email={email}"
+
         try:
             ses.send_email(
                 Source="noreply@endevo.life",
                 Destination={"ToAddresses": [email]},
-                Message={"Subject": {"Data": "You've been invited to Endevo Life"}, "Body": {"Text": {"Data": f"Hi {first_name},\n\nYou have been invited to Endevo Life.\n\nClick here to register:\n{invite_url}\n\nEndevo Life Team"}}}
+                Message={
+                    "Subject": {"Data": "You've been invited to Endevo Life"},
+                    "Body": {"Html": {"Data": f"""
+                        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+                          <h2 style="color:#6366f1">You're invited to Endevo Life</h2>
+                          <p>Hi {first_name or email},</p>
+                          <p>You've been invited to complete your digital legacy training.</p>
+                          <a href="{invite_url}" style="display:inline-block;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;margin:16px 0">Accept Invitation</a>
+                          <p style="color:#666;font-size:12px">Temporary password: <code>{temp_password}</code></p>
+                        </div>"""}}
+                }
             )
-        except: pass
-        audit(tenant_id, caller_email, "INVITE_SENT", f"Invited {email}")
-        return resp(200, {"message": "Invitation sent", "user_id": user_id, "invite_url": invite_url})
+            email_sent = True
+        except Exception as e:
+            print(f"SES_ERROR: {e}")
+            email_sent = False
 
-    # PUT /api/hr/employees/{id}
+        audit(tenant_id, caller_email, "INVITE_SENT",
+              f"Invited {email} (dept: {department})")
+        return resp(200, {
+            "message": "Invitation sent", "user_id": user_id,
+            "invite_url": invite_url, "email_sent": email_sent,
+            "temp_password": temp_password
+        })
+
+    # ── PUT /api/hr/employees/{id} ────────────────────────────────────────
     if "/employees/" in path and method == "PUT":
         user_id = path.split("/")[-1]
-        allowed = ["firstName","lastName","department","jobTitle","status"]
-        updates = {k: v for k, v in body.items() if k in allowed}
-        if not updates: return err(400, "Nothing to update")
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item or item.get("tenantId") != tenant_id:
+            return err(404, "Employee not found in your organisation")
+
+        allowed = ["firstName", "lastName", "department", "jobTitle", "status"]
+        updates = {}
+        for k in allowed:
+            if k in body:
+                updates[k] = sanitize(str(body[k]), 100) if isinstance(body[k], str) else body[k]
+        if not updates:
+            return err(400, "Nothing to update")
+        if "status" in updates and updates["status"] not in ("active", "inactive", "pending"):
+            return err(400, "Invalid status — must be active, inactive, or pending")
+
         expr  = "SET " + ", ".join([f"#{k} = :{k}" for k in updates])
         names = {f"#{k}": k for k in updates}
         vals  = {f":{k}": v for k, v in updates.items()}
-        USERS_T.update_item(Key={"userId": user_id}, UpdateExpression=expr, ExpressionAttributeNames=names, ExpressionAttributeValues=vals)
-        audit(tenant_id, caller_email, "USER_UPDATED", f"Updated {user_id}")
+        USERS_T.update_item(Key={"userId": user_id}, UpdateExpression=expr,
+            ExpressionAttributeNames=names, ExpressionAttributeValues=vals)
+        audit(tenant_id, caller_email, "EMPLOYEE_UPDATED",
+              f"Updated {item.get('email')} fields: {list(updates.keys())}")
         return resp(200, {"message": "Employee updated"})
 
-    # DELETE /api/hr/employees/{id}
+    # ── DELETE /api/hr/employees/{id} ─────────────────────────────────────
     if "/employees/" in path and method == "DELETE":
         user_id = path.split("/")[-1]
         item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
-        if not item or item.get("tenantId") != tenant_id: return err(404, "Employee not found")
-        USERS_T.update_item(Key={"userId": user_id}, UpdateExpression="SET #s = :v", ExpressionAttributeNames={"#s": "status"}, ExpressionAttributeValues={":v": "inactive"})
-        audit(tenant_id, caller_email, "USER_DEACTIVATED", f"Deactivated {item.get('email')}")
+        if not item or item.get("tenantId") != tenant_id:
+            return err(404, "Employee not found in your organisation")
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET #s = :v",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "inactive"})
+        audit(tenant_id, caller_email, "EMPLOYEE_DEACTIVATED",
+              f"Deactivated: {item.get('email')}")
         return resp(200, {"message": "Employee deactivated"})
 
-    # GET /api/hr/audit
+    # ── GET /api/hr/audit ─────────────────────────────────────────────────
     if path.endswith("/audit") and method == "GET":
-        result = AUDIT_T.scan(FilterExpression="tenantId = :t", ExpressionAttributeValues={":t": tenant_id})
-        logs = sorted(result.get("Items", []), key=lambda x: x.get("createdAt",""), reverse=True)[:50]
-        return resp(200, {"logs": logs})
+        limit      = min(int(qs.get("limit", 50)), 200)
+        next_token = qs.get("next_token")
+        fexpr      = Attr("tenantId").eq(tenant_id)
+        items, next_cursor = scan_page(AUDIT_T, limit, next_token, fexpr)
+        logs = sorted(items, key=lambda x: x.get("createdAt", ""), reverse=True)
+        return resp(200, {
+            "logs":       logs,
+            "count":      len(logs),
+            "next_token": next_cursor,
+            "has_more":   bool(next_cursor)
+        })
 
     return err(404, f"Route not found: {method} {path}")
