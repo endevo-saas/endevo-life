@@ -38,13 +38,19 @@ jobs:
       - name: Build and deploy ${{ matrix.function.name }}
         run: |
           mkdir -p /tmp/build
-          pip install \
-            -r ${{ matrix.function.path }}/requirements.txt \
-            --target /tmp/build \
-            --platform manylinux2014_x86_64 \
-            --python-version 3.12 \
-            --only-binary=:all: \
-            --quiet
+          # Install 3rd-party deps if requirements.txt has real packages (skip comments/empty)
+          PKGS=$(grep -v '^\s*#' ${{ matrix.function.path }}/requirements.txt | grep -v '^\s*$' || true)
+          if [ -n "$PKGS" ]; then
+            pip install \
+              -r ${{ matrix.function.path }}/requirements.txt \
+              --target /tmp/build \
+              --platform manylinux2014_x86_64 \
+              --python-version 3.12 \
+              --only-binary=:all: \
+              --quiet
+          else
+            echo "No 3rd-party deps (boto3 pre-installed in Lambda runtime)"
+          fi
           cp ${{ matrix.function.path }}/main.py /tmp/build/
           cd /tmp/build && zip -r /tmp/function.zip . -q
           aws lambda update-function-code \

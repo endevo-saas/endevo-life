@@ -124,19 +124,30 @@ def count_items(table, filter_expr=None):
         params["ExclusiveStartKey"] = last
     return total
 
-def audit(tenant_id, actor, action, details=""):
+def get_ip(event):
+    return event.get("requestContext", {}).get("http", {}).get("sourceIp", "unknown")
+
+def get_device(event):
+    headers = event.get("headers") or {}
+    return (headers.get("user-agent") or headers.get("User-Agent") or "unknown")[:200]
+
+def audit(tenant_id, actor, action, details="", ip="", device="", severity="INFO"):
     try:
         now = datetime.now(timezone.utc).isoformat()
         audit_id = str(uuid.uuid4())
-        AUDIT_T.put_item(Item={
-            "tenantId": tenant_id,
-            "sk": f"{now}#{audit_id}",
-            "auditId": audit_id,
-            "actor": actor,
-            "action": action,
-            "details": details[:500],
+        item = {
+            "tenantId":  tenant_id,
+            "sk":        f"{now}#{audit_id}",
+            "auditId":   audit_id,
+            "actor":     actor,
+            "action":    action,
+            "details":   details[:500],
+            "severity":  severity,
             "createdAt": now
-        })
+        }
+        if ip:     item["ip_address"] = ip
+        if device: item["user_agent"] = device
+        AUDIT_T.put_item(Item=item)
     except Exception as e:
         print(f"AUDIT_WRITE_ERROR: {e}")
 
@@ -146,6 +157,8 @@ def handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     path   = event.get("rawPath", "")
     qs     = event.get("queryStringParameters") or {}
+    ip     = get_ip(event)
+    device = get_device(event)
 
     if method == "OPTIONS":
         return resp(200, {})
@@ -277,7 +290,7 @@ def handler(event, context):
             email_sent = False
 
         audit(tenant_id, caller_email, "INVITE_SENT",
-              f"Invited {email} (dept: {department})")
+              f"Invited {email} (dept: {department})", ip=ip, device=device)
         return resp(200, {
             "message": "Invitation sent", "user_id": user_id,
             "invite_url": invite_url, "email_sent": email_sent,
@@ -307,7 +320,7 @@ def handler(event, context):
         USERS_T.update_item(Key={"userId": user_id}, UpdateExpression=expr,
             ExpressionAttributeNames=names, ExpressionAttributeValues=vals)
         audit(tenant_id, caller_email, "EMPLOYEE_UPDATED",
-              f"Updated {item.get('email')} fields: {list(updates.keys())}")
+              f"Updated {item.get('email','')} fields: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "Employee updated"})
 
     # ── DELETE /api/hr/employees/{id} ─────────────────────────────────────
@@ -321,7 +334,7 @@ def handler(event, context):
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={":v": "inactive"})
         audit(tenant_id, caller_email, "EMPLOYEE_DEACTIVATED",
-              f"Deactivated: {item.get('email')}")
+              f"Deactivated: {item.get('email','')}", ip=ip, device=device)
         return resp(200, {"message": "Employee deactivated"})
 
     # ── GET /api/hr/audit ─────────────────────────────────────────────────

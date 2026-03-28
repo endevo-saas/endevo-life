@@ -135,6 +135,9 @@ export interface AuditLog {
   details: string
   createdAt: string
   tenantId?: string
+  ip_address?: string
+  user_agent?: string
+  severity?: string
 }
 
 export interface Course {

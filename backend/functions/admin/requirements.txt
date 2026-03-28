@@ -1,1 +1,1 @@
-requirements.txt
+# boto3 is pre-installed in AWS Lambda Python 3.12 runtime — no pip installs needed
