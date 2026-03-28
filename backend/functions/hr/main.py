@@ -62,9 +62,10 @@ def sanitize(value, max_len=200):
     if not isinstance(value, str):
         return value
     v = value.strip()[:max_len]
-    for bad in ["<script", "</script", "javascript:", "onload=", "onerror=", "eval(", "document."]:
+    v = re.sub(r'<[^>]*>', '', v)
+    for bad in ["javascript:", "onload=", "onerror=", "onclick=", "eval(", "document.", "window."]:
         v = re.sub(re.escape(bad), "", v, flags=re.IGNORECASE)
-    return v
+    return v.strip()
 
 def validate_email(email):
     if not email or len(email) > 254:

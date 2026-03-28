@@ -73,13 +73,16 @@ def get_caller(event):
         return None, None
 
 def sanitize(value, max_len=200):
-    """Strip whitespace, limit length, block XSS patterns."""
+    """Strip whitespace, remove ALL HTML tags, limit length, block XSS patterns."""
     if not isinstance(value, str):
         return value
     v = value.strip()[:max_len]
-    for bad in ["<script", "</script", "javascript:", "onload=", "onerror=", "eval(", "document."]:
+    # Strip all HTML/XML tags completely
+    v = re.sub(r'<[^>]*>', '', v)
+    # Block dangerous patterns
+    for bad in ["javascript:", "onload=", "onerror=", "onclick=", "eval(", "document.", "window."]:
         v = re.sub(re.escape(bad), "", v, flags=re.IGNORECASE)
-    return v
+    return v.strip()
 
 def validate_email(email):
     """RFC-5322 lightweight check."""
@@ -207,10 +210,8 @@ def handler(event, context):
         plan_filter = qs.get("plan", "")
         status_filter = qs.get("status", "")
 
-        # Build filter expression
+        # Build filter expression (plan/status only; name search done in Python for case-insensitivity)
         fexpr = None
-        if search:
-            fexpr = Attr("name").contains(search)
         if plan_filter:
             pf = Attr("plan").eq(plan_filter)
             fexpr = (fexpr & pf) if fexpr else pf
@@ -219,6 +220,11 @@ def handler(event, context):
             fexpr = (fexpr & sf) if fexpr else sf
 
         items, next_cursor = scan_page(TENANTS_T, limit, next_token, fexpr)
+
+        # Case-insensitive name search in Python (DynamoDB contains() is case-sensitive)
+        if search:
+            sl = search.lower()
+            items = [t for t in items if sl in t.get("name", "").lower() or sl in t.get("tenantId", "").lower()]
 
         # Get user counts per tenant using COUNT (no data transfer)
         for t in items:
@@ -244,6 +250,10 @@ def handler(event, context):
         hr_contact = sanitize(body.get("hrContact") or "", 100)
         hr_email   = sanitize((body.get("hrEmail") or "").lower().strip(), 254)
 
+        # Reject raw input containing HTML/script injection before sanitization
+        raw_name = body.get("name") or ""
+        if re.search(r'[<>]|javascript:|on\w+=', raw_name, re.IGNORECASE):
+            return err(400, "Tenant name contains invalid characters")
         if not name:
             return err(400, "Tenant name required")
         if len(name) < 2:
