@@ -33,7 +33,7 @@ export const api = {
   adminDashboard: () => apiFetch('/api/admin/dashboard'),
   adminTenants: () => apiFetch<{ tenants: Tenant[]; count: number }>('/api/admin/tenants'),
   adminGetTenant: (id: string) => apiFetch<TenantDetail>(`/api/admin/tenants/${id}`),
-  adminCreateTenant: (body: { name: string; plan?: string; maxSeats?: number }) =>
+  adminCreateTenant: (body: Record<string, unknown>) =>
     apiFetch('/api/admin/tenants', { method: 'POST', body: JSON.stringify(body) }),
   adminUpdateTenant: (id: string, body: Record<string, unknown>) =>
     apiFetch(`/api/admin/tenants/${id}`, { method: 'PUT', body: JSON.stringify(body) }),

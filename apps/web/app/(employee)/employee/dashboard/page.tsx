@@ -1,7 +1,7 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import {
   PlayCircle, Award, CheckCircle, TrendingUp, Loader2, RefreshCw,
   Star, Flame, Target, Zap, Trophy, ClipboardList, User, Sparkles

@@ -78,7 +78,7 @@ export default function TenantsPage() {
     if (!form.name.trim()) { setError('Tenant name required'); return }
     setSaving(true); setError('')
     try {
-      await api.adminCreateTenant({ name:form.name.trim(), plan:form.plan, maxSeats:Number(form.maxSeats), website:form.website, hrContact:form.hrContact, hrEmail:form.hrEmail } as Record<string,unknown>)
+      await api.adminCreateTenant({ name:form.name.trim(), plan:form.plan, maxSeats:Number(form.maxSeats), website:form.website, hrContact:form.hrContact, hrEmail:form.hrEmail })
       closeModal(); showSuccess(`Tenant "${form.name}" created`); load()
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Create failed') }
     finally { setSaving(false) }
