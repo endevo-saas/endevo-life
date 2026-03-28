@@ -257,3 +257,89 @@ These issues occurred before the GitHub-first approach was adopted. Recorded for
 - **Root Cause:** `--frozen-lockfile` requires a committed `pnpm-lock.yaml`. The lockfile was never generated and committed — the repo only has `package.json` files. Amplify has no way to generate it during build when frozen mode is active.
 - **Fix:** Changed `pnpm install --frozen-lockfile` to `pnpm install --no-frozen-lockfile` in `amplify.yml`. This lets pnpm resolve and install packages freely. Next step: commit the generated lockfile after first successful build for reproducibility.
 - **Lesson:** Always commit `pnpm-lock.yaml` to the repo. For a new project with no lockfile, use `--no-frozen-lockfile` for the first build, then commit the generated lockfile for future builds.
+
+---
+
+## Session 4 — TypeScript Build Failures (2026-03-28)
+
+### Issue #014
+- **Date:** 2026-03-28
+- **Phase:** 4 — Dashboard Rebuild
+- **Build:** Amplify Jobs #26, #27, #28 (3 consecutive failures)
+- **File:** `apps/web/lib/api.ts`
+- **Error:** `Type error: Argument of type 'Record<string, unknown>' is not assignable to parameter of type '{ name: string; plan?: string | undefined; maxSeats?: number | undefined; }'`
+- **Root Cause:** `adminCreateTenant` was typed as `(body: { name: string; plan?: string; maxSeats?: number })` but the tenants page was passing additional fields (website, hrContact, hrEmail). TypeScript strict mode rejected the call even with `as Record<string,unknown>` cast at the call site.
+- **Fix:** Changed `adminCreateTenant` body type to `Record<string, unknown>` in `api.ts`
+- **Lesson:** Use `Record<string, unknown>` for body types when the API accepts arbitrary extra fields. Don't use narrow object types that will break when backend adds new accepted fields.
+- **GitHub Issue:** #N/A (resolved before issue tracking was set up)
+
+---
+
+### Issue #015
+- **Date:** 2026-03-28
+- **Phase:** 4 — Dashboard Rebuild
+- **Build:** Amplify Jobs #26, #27, #28
+- **Files:** `admin/dashboard/page.tsx`, `employee/dashboard/page.tsx`, `admin/health/page.tsx`
+- **Error:** `'React' refers to a UMD global, but the current file is a module. Consider adding an import instead.`
+- **Root Cause:** All three dashboard files used `React.ElementType` as a prop type for icon components, but in Next.js 15 with the new JSX transform, `import React` is NOT auto-injected. Referencing `React.*` types without importing the namespace causes TypeScript to error.
+- **Fix:** Added `import React,` to the existing `{ useEffect, useState, useCallback }` import line in all three files.
+- **Lesson:** In Next.js 15, you don't need `import React` for JSX, but you DO need it when referencing `React.ElementType`, `React.FC`, `React.ReactNode` etc. as type annotations.
+- **GitHub Issue:** #N/A (resolved before issue tracking was set up)
+
+---
+
+## Session 5 — Full QA + Security Audit (2026-03-28)
+
+### Issue #016 — GitHub Issue #1
+- **Date:** 2026-03-28
+- **Phase:** QA
+- **Lambda:** endevo-uat-fn-admin
+- **Error:** `GET /api/admin/users?role=HR_ADMIN` returns count=0. HR Admins invisible in admin UI.
+- **Root Cause:** HR_ADMIN users were seeded into Cognito only. Admin users list scans DynamoDB, which had 0 HR_ADMIN records.
+- **Fix:** Backfilled 4 HR_ADMIN users into DynamoDB (hr@acme, hr@techvision, hr@globalhr, niki.hr@nikicorp). New invite flow (Lambda v2) correctly writes to both Cognito + DynamoDB.
+- **Lesson:** Seed scripts must write to ALL data stores (Cognito + DynamoDB). Audit scripts should detect Cognito/DynamoDB divergence.
+
+---
+
+### Issue #017 — GitHub Issue #2
+- **Date:** 2026-03-28
+- **Phase:** QA / Security
+- **Lambda:** endevo-uat-fn-admin + endevo-uat-fn-hr
+- **Error:** Input `<script>alert(1)</script>` passed through sanitize() and created a tenant with name `>alert(1)</>` — XSS was neutralized but residual garbage was stored.
+- **Root Cause:** `sanitize()` only stripped specific keyword substrings (`<script`, `</script`) leaving surrounding characters intact. No check on the raw input before sanitization.
+- **Fix:** Changed sanitize() to strip ALL HTML tags via `re.sub(r'<[^>]*>', '', v)`. Added raw input pre-check: reject any input containing `<`, `>`, or `on*=` with 400 error before sanitizing.
+- **Lesson:** Sanitization should strip tags completely (regex), not keyword-by-keyword. Always validate raw input for forbidden characters in addition to sanitizing.
+
+---
+
+### Issue #018 — GitHub Issue #3
+- **Date:** 2026-03-28
+- **Phase:** QA
+- **Lambda:** endevo-uat-fn-admin
+- **Error:** `GET /api/admin/tenants?search=acme` returns count=0. Tenant search completely broken.
+- **Root Cause:** DynamoDB `Attr("name").contains(search)` is case-sensitive. "acme" does not match "Acme Corporation".
+- **Fix:** Removed DynamoDB-level name contains filter. Added Python-side case-insensitive filter after scan: `if sl in t.get("name","").lower()`.
+- **Lesson:** DynamoDB has no native case-insensitive string search. Always do case-insensitive filtering in application code.
+
+---
+
+### Issue #019 — GitHub Issue #4
+- **Date:** 2026-03-28
+- **Phase:** QA / Infrastructure
+- **Lambda:** All 4 functions
+- **Error:** After push to GitHub, all API calls returned 500. Amplify built fine, Lambda was still on old code.
+- **Root Cause:** No CI/CD pipeline for Lambda deployment. Amplify only builds Next.js frontend. Lambda code must be manually zipped and deployed via `aws lambda update-function-code`.
+- **Fix:** Manually deployed all 4 Lambdas. Identified gap.
+- **Required Action:** GitHub Actions workflow to auto-deploy Lambdas on changes to `backend/functions/`.
+- **Lesson:** Every deployable artifact needs its own CI/CD pipeline. Amplify ≠ Lambda deployment.
+
+---
+
+### Issue #020 — GitHub Issue #5
+- **Date:** 2026-03-28
+- **Phase:** QA / Infrastructure
+- **Lambda:** endevo-uat-fn-admin
+- **Error:** Health page showed `ses: error`. Overall system status showed degraded.
+- **Root Cause:** Lambda IAM role had `ses:SendEmail` and `ses:SendRawEmail` but NOT `ses:GetSendQuota`. Health check calls `ses.get_send_quota()` which requires the missing permission.
+- **Fix:** Added `ses:GetSendQuota` and `ses:GetAccountSendingEnabled` to `LambdaRoleDefaultPolicy75625A82` inline policy via AWS CLI.
+- **Lesson:** When adding a new AWS API call to Lambda, always check if the IAM role has permission for that specific action. GetX permissions are separate from SendX permissions in SES.
