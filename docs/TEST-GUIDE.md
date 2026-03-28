@@ -24,8 +24,9 @@
 |------|-------|--------|
 | GLOBAL_ADMIN | admin@endevo.com | All tenants |
 | HR_ADMIN | hr@acme.com | Acme Corp |
-| HR_ADMIN | hr@techvision.com | TechVision |
 | EMPLOYEE | ava.anderson@acme.com | Acme Corp |
+
+> All 3 accounts share one password. Ask Shahzad or see `_sessions/TEST-USERS.md` (local only).
 
 ---
 
