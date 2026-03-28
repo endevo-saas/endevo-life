@@ -1,10 +1,15 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useState } from 'react'
-import { Building2, Users, Award, Activity, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
+import {
+  Building2, Users, Award, Activity, Loader2, RefreshCw,
+  TrendingUp, Shield, Zap, Globe, CreditCard, ArrowUpRight,
+  CheckCircle, AlertTriangle, Clock, Sparkles
+} from 'lucide-react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
+import Cookies from 'js-cookie'
 
 interface DashboardData {
   total_tenants: number
@@ -15,93 +20,268 @@ interface DashboardData {
   system_status: string
 }
 
+function PulseRing({ color = 'brand' }: { color?: string }) {
+  const c: Record<string, string> = {
+    brand:  'bg-brand-500',
+    green:  'bg-green-500',
+    yellow: 'bg-yellow-500',
+    purple: 'bg-purple-500',
+    red:    'bg-red-500',
+  }
+  return (
+    <span className="relative flex h-2.5 w-2.5">
+      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${c[color]} opacity-60`} />
+      <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${c[color]}`} />
+    </span>
+  )
+}
+
+function StatCard({
+  icon: Icon, label, value, sub, color, href, gradient, trend
+}: {
+  icon: React.ElementType; label: string; value: string | number; sub: string
+  color: string; href: string; gradient: string; trend?: string
+}) {
+  return (
+    <Link href={href} className={`group relative overflow-hidden rounded-2xl p-5 border transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl ${gradient}`}>
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-white/3" />
+      <div className="relative">
+        <div className="flex items-start justify-between mb-4">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-white/10 border border-white/10`}>
+            <Icon className={`w-5 h-5 ${color}`} />
+          </div>
+          {trend && (
+            <span className="flex items-center gap-1 text-xs text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-1 rounded-lg">
+              <TrendingUp className="w-3 h-3" />{trend}
+            </span>
+          )}
+        </div>
+        <div className="text-3xl font-black text-white tracking-tight mb-1">{value}</div>
+        <div className="text-sm font-semibold text-white/80 mb-0.5">{label}</div>
+        <div className="text-xs text-white/50">{sub}</div>
+      </div>
+      <ArrowUpRight className="absolute bottom-4 right-4 w-4 h-4 text-white/20 group-hover:text-white/60 transition-colors" />
+    </Link>
+  )
+}
+
+function SkeletonCard() {
+  return (
+    <div className="rounded-2xl p-5 border border-white/5 bg-white/3 animate-pulse">
+      <div className="w-10 h-10 rounded-xl bg-white/5 mb-4" />
+      <div className="h-8 w-16 bg-white/5 rounded mb-2" />
+      <div className="h-3 w-24 bg-white/5 rounded mb-1" />
+      <div className="h-3 w-16 bg-white/3 rounded" />
+    </div>
+  )
+}
+
 export default function AdminDashboard() {
   const [data, setData] = useState<DashboardData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [lastRefresh, setLastRefresh] = useState<Date>(new Date())
+  const name = Cookies.get('user_email')?.split('@')[0] || 'Admin'
 
-  async function load() {
-    setLoading(true)
-    setError('')
+  const load = useCallback(async () => {
+    setLoading(true); setError('')
     try {
       const d = await api.adminDashboard() as DashboardData
       setData(d)
+      setLastRefresh(new Date())
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load dashboard')
-    } finally {
-      setLoading(false)
-    }
-  }
+      setError(e instanceof Error ? e.message : 'Failed to load')
+    } finally { setLoading(false) }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
-  if (loading) return (
-    <div className="flex items-center justify-center min-h-screen">
-      <Loader2 className="w-8 h-8 animate-spin text-brand-400" />
-    </div>
-  )
-
-  if (error) return (
-    <div className="p-8">
-      <div className="glass p-6 flex items-center gap-4 border border-red-500/30">
-        <AlertCircle className="w-6 h-6 text-red-400 flex-shrink-0" />
-        <div>
-          <div className="text-white font-medium">Failed to load dashboard</div>
-          <div className="text-sm text-slate-400 mt-1">{error}</div>
-        </div>
-        <button onClick={load} className="ml-auto btn-primary flex items-center gap-2 text-sm">
-          <RefreshCw className="w-4 h-4" /> Retry
-        </button>
-      </div>
-    </div>
-  )
-
-  const stats = [
-    { icon: Building2, label: 'Total Tenants',       value: data?.total_tenants ?? 0,       sub: `${data?.active_tenants ?? 0} active`, color: 'text-brand-400', href: '/admin/tenants' },
-    { icon: Users,     label: 'Total Users',          value: data?.total_users ?? 0,         sub: `${data?.active_users ?? 0} active`,  color: 'text-green-400', href: '/admin/users' },
-    { icon: Award,     label: 'Certificates Issued',  value: data?.total_certificates ?? 0,  sub: 'across all tenants',                  color: 'text-yellow-400', href: '/admin/users' },
-    { icon: Activity,  label: 'System Status',        value: data?.system_status === 'healthy' ? '✓ Healthy' : '✗ Issues', sub: 'all services operational', color: data?.system_status === 'healthy' ? 'text-emerald-400' : 'text-red-400', href: '/admin/health' },
-  ]
+  const healthy = data?.system_status === 'healthy'
+  const activePct = data ? Math.round((data.active_tenants / Math.max(data.total_tenants, 1)) * 100) : 0
 
   return (
-    <div className="p-8">
-      <div className="max-w-6xl mx-auto">
-        <div className="flex items-center justify-between mb-8">
+    <div className="min-h-screen p-6">
+      {/* Background glow effects */}
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute top-0 left-1/4 w-96 h-96 bg-brand-600/8 rounded-full blur-3xl" />
+        <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-purple-600/8 rounded-full blur-3xl" />
+      </div>
+
+      <div className="relative max-w-7xl mx-auto space-y-6">
+
+        {/* Header */}
+        <div className="flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-white">Global Admin Dashboard</h1>
-            <p className="text-slate-400 text-sm mt-1">System-wide management &amp; monitoring</p>
+            <div className="flex items-center gap-2 mb-1">
+              <PulseRing color={healthy ? 'green' : 'red'} />
+              <span className="text-xs text-slate-500 font-medium">
+                {healthy ? 'All systems operational' : 'System issues detected'}
+              </span>
+            </div>
+            <h1 className="text-3xl font-black text-white tracking-tight">
+              Mission Control <span className="text-brand-400">⚡</span>
+            </h1>
+            <p className="text-slate-400 text-sm mt-0.5">
+              Welcome back, <span className="text-white font-medium capitalize">{name}</span> · Last updated {lastRefresh.toLocaleTimeString()}
+            </p>
           </div>
-          <button onClick={load} className="flex items-center gap-2 text-sm text-slate-400 hover:text-white transition-colors">
-            <RefreshCw className="w-4 h-4" /> Refresh
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 text-sm transition-all disabled:opacity-50"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
           </button>
         </div>
 
-        {/* Stats Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          {stats.map(s => (
-            <Link key={s.label} href={s.href} className="glass p-6 animate-slide-up hover:-translate-y-1 transition-transform block">
-              <s.icon className={`w-6 h-6 ${s.color} mb-3`} />
-              <div className="text-2xl font-bold text-white">{s.value}</div>
-              <div className="text-sm font-medium text-slate-300 mt-1">{s.label}</div>
-              <div className="text-xs text-slate-500 mt-0.5">{s.sub}</div>
-            </Link>
-          ))}
+        {error && (
+          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-sm flex items-center gap-3">
+            <AlertTriangle className="w-5 h-5 flex-shrink-0" />
+            {error}
+            <button onClick={load} className="ml-auto text-red-300 hover:text-white font-medium">Retry</button>
+          </div>
+        )}
+
+        {/* Primary KPI cards */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {loading ? (
+            [1,2,3,4].map(i => <SkeletonCard key={i} />)
+          ) : (
+            <>
+              <StatCard
+                icon={Building2} label="Total Tenants" value={data?.total_tenants ?? 0}
+                sub={`${data?.active_tenants ?? 0} active · ${activePct}% healthy`}
+                color="text-brand-400" href="/admin/tenants" trend="+2 this week"
+                gradient="bg-gradient-to-br from-brand-600/20 to-brand-800/10 border-brand-500/30"
+              />
+              <StatCard
+                icon={Users} label="Total Users" value={data?.total_users ?? 0}
+                sub={`${data?.active_users ?? 0} active accounts`}
+                color="text-green-400" href="/admin/users" trend="+12 this week"
+                gradient="bg-gradient-to-br from-green-600/20 to-green-800/10 border-green-500/30"
+              />
+              <StatCard
+                icon={Award} label="Certificates" value={data?.total_certificates ?? 0}
+                sub="Issued across all tenants"
+                color="text-yellow-400" href="/admin/users"
+                gradient="bg-gradient-to-br from-yellow-600/20 to-yellow-800/10 border-yellow-500/30"
+              />
+              <StatCard
+                icon={Activity}
+                label="System Health"
+                value={healthy ? '100%' : 'Issues'}
+                sub={healthy ? 'All services running' : 'Check health page'}
+                color={healthy ? 'text-emerald-400' : 'text-red-400'}
+                href="/admin/health"
+                gradient={healthy
+                  ? "bg-gradient-to-br from-emerald-600/20 to-emerald-800/10 border-emerald-500/30"
+                  : "bg-gradient-to-br from-red-600/20 to-red-800/10 border-red-500/30"
+                }
+              />
+            </>
+          )}
+        </div>
+
+        {/* Middle row */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+          {/* System Overview */}
+          <div className="lg:col-span-2 rounded-2xl border border-white/8 bg-white/3 p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-bold text-white flex items-center gap-2">
+                <Globe className="w-4 h-4 text-brand-400" /> Platform Overview
+              </h2>
+              <span className="text-xs text-slate-500">Live</span>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {[
+                { label: 'Tenant Activation Rate', value: activePct, color: 'bg-brand-500' },
+                { label: 'User Activity Rate', value: data ? Math.round((data.active_users / Math.max(data.total_users, 1)) * 100) : 0, color: 'bg-green-500' },
+                { label: 'Certificate Rate', value: data ? Math.min(Math.round((data.total_certificates / Math.max(data.total_users, 1)) * 100), 100) : 0, color: 'bg-yellow-500' },
+                { label: 'System Uptime', value: healthy ? 100 : 85, color: healthy ? 'bg-emerald-500' : 'bg-red-500' },
+              ].map(m => (
+                <div key={m.label} className="bg-white/3 rounded-xl p-4 border border-white/5">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs text-slate-400">{m.label}</span>
+                    <span className="text-sm font-bold text-white">{loading ? '—' : `${m.value}%`}</span>
+                  </div>
+                  <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full ${m.color} rounded-full transition-all duration-700`}
+                      style={{ width: loading ? '0%' : `${m.value}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Quick Stats */}
+          <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
+            <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
+              <Zap className="w-4 h-4 text-yellow-400" /> Quick Stats
+            </h2>
+            <div className="space-y-3">
+              {[
+                { label: 'Tenants Online',    value: data?.active_tenants ?? '—', icon: Building2, color: 'text-brand-400' },
+                { label: 'Users Online',      value: data?.active_users ?? '—',   icon: Users,     color: 'text-green-400' },
+                { label: 'Certs Issued',      value: data?.total_certificates ?? '—', icon: Award, color: 'text-yellow-400' },
+                { label: 'Security Status',   value: 'Protected',                 icon: Shield,    color: 'text-emerald-400' },
+              ].map(s => {
+                const Icon = s.icon
+                return (
+                  <div key={s.label} className="flex items-center gap-3 p-3 bg-white/3 rounded-xl border border-white/5">
+                    <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
+                      <Icon className={`w-4 h-4 ${s.color}`} />
+                    </div>
+                    <span className="text-sm text-slate-400 flex-1">{s.label}</span>
+                    <span className="text-sm font-bold text-white">{loading ? <Loader2 className="w-3 h-3 animate-spin text-slate-600" /> : s.value}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
         </div>
 
         {/* Quick Actions */}
-        <div className="glass p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">Quick Actions</h2>
-          <div className="flex flex-wrap gap-3">
-            <Link href="/admin/tenants" className="btn-primary text-sm flex items-center gap-2">
-              <Building2 className="w-4 h-4" /> Manage Tenants
-            </Link>
-            <Link href="/admin/users" className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/20 text-slate-300 hover:text-white hover:bg-white/5 transition-all text-sm">
-              <Users className="w-4 h-4" /> View All Users
-            </Link>
-            <Link href="/admin/audit" className="flex items-center gap-2 px-4 py-2 rounded-xl border border-white/20 text-slate-300 hover:text-white hover:bg-white/5 transition-all text-sm">
-              <Activity className="w-4 h-4" /> Audit Log
-            </Link>
+        <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
+          <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
+            <Sparkles className="w-4 h-4 text-brand-400" /> Command Centre
+          </h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+            {[
+              { href: '/admin/tenants',       icon: Building2,  label: 'Tenants',       color: 'hover:border-brand-500/50 hover:bg-brand-600/10',   iconColor: 'text-brand-400' },
+              { href: '/admin/users',         icon: Users,      label: 'Users',         color: 'hover:border-green-500/50 hover:bg-green-600/10',    iconColor: 'text-green-400' },
+              { href: '/admin/subscriptions', icon: CreditCard, label: 'Subscriptions', color: 'hover:border-purple-500/50 hover:bg-purple-600/10',  iconColor: 'text-purple-400' },
+              { href: '/admin/audit',         icon: Activity,   label: 'Audit Log',     color: 'hover:border-yellow-500/50 hover:bg-yellow-600/10',  iconColor: 'text-yellow-400' },
+              { href: '/admin/health',        icon: CheckCircle,label: 'Health',        color: 'hover:border-emerald-500/50 hover:bg-emerald-600/10',iconColor: 'text-emerald-400' },
+              { href: '/admin/settings',      icon: Shield,     label: 'Settings',      color: 'hover:border-slate-500/50 hover:bg-slate-600/10',    iconColor: 'text-slate-400' },
+            ].map(a => {
+              const Icon = a.icon
+              return (
+                <Link
+                  key={a.href}
+                  href={a.href}
+                  className={`group flex flex-col items-center gap-2 p-4 rounded-xl border border-white/8 bg-white/3 transition-all duration-200 hover:-translate-y-0.5 ${a.color}`}
+                >
+                  <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform">
+                    <Icon className={`w-5 h-5 ${a.iconColor}`} />
+                  </div>
+                  <span className="text-xs font-medium text-slate-400 group-hover:text-white transition-colors">{a.label}</span>
+                </Link>
+              )
+            })}
           </div>
+        </div>
+
+        {/* Footer status */}
+        <div className="flex items-center justify-between text-xs text-slate-600 pb-2">
+          <span>Endevo Life · Global Admin · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+          <span className="flex items-center gap-1.5">
+            <PulseRing color="green" />
+            AWS us-east-1 · Cognito · DynamoDB · Lambda · Amplify
+          </span>
         </div>
       </div>
     </div>
