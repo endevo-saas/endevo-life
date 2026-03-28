@@ -103,15 +103,31 @@ def handler(event, context):
 
     # ── POST /api/admin/tenants ───────────────────────────────────────────
     if path.endswith("/tenants") and method == "POST":
-        name     = body.get("name") or ""
-        plan     = body.get("plan") or "enterprise"
-        max_seats = int(body.get("maxSeats") or 50)
+        name       = body.get("name") or ""
+        plan       = body.get("plan") or "enterprise"
+        max_seats  = int(body.get("maxSeats") or 50)
+        website    = body.get("website") or ""
+        hr_contact = body.get("hrContact") or ""
+        hr_email   = body.get("hrEmail") or ""
         if not name: return err(400, "Tenant name required")
-        tenant_id = f"tenant-{str(uuid.uuid4())[:8]}"
+        # Sequential tenant ID: count existing tenants → tenant-001, tenant-002, ...
+        existing = TENANTS_T.scan(Select="COUNT")
+        seq = existing.get("Count", 0) + 1
+        tenant_id = f"tenant-{seq:03d}"
+        # Ensure uniqueness (in case of concurrent creates)
+        while TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item"):
+            seq += 1
+            tenant_id = f"tenant-{seq:03d}"
         now = datetime.now(timezone.utc).isoformat()
-        TENANTS_T.put_item(Item={"tenantId": tenant_id, "name": name, "plan": plan, "status": "active", "createdAt": now, "createdBy": caller_email, "maxSeats": max_seats, "employeeCount": 0})
+        TENANTS_T.put_item(Item={
+            "tenantId": tenant_id, "name": name, "plan": plan, "status": "active",
+            "website": website, "hrContact": hr_contact, "hrEmail": hr_email,
+            "createdAt": now, "createdBy": caller_email,
+            "maxSeats": max_seats, "employeeCount": 0,
+            "tenantCode": tenant_id
+        })
         audit("SYSTEM", caller_email, "TENANT_CREATED", f"Created tenant: {name} ({tenant_id})")
-        return resp(200, {"message": "Tenant created", "tenant_id": tenant_id})
+        return resp(200, {"message": "Tenant created", "tenant_id": tenant_id, "tenant_code": tenant_id})
 
     # ── GET /api/admin/tenants/{id} ───────────────────────────────────────
     if "/tenants/" in path and method == "GET":
@@ -359,5 +375,90 @@ def handler(event, context):
         overall = "healthy" if dynamo_ok == "ok" and cognito_ok == "ok" else "degraded"
         return resp(200, {"status": overall, "timestamp": datetime.now(timezone.utc).isoformat(),
             "services": {"dynamodb": dynamo_ok, "cognito": cognito_ok, "lambda": "ok"}})
+
+    # ── POST /api/admin/invite ────────────────────────────────────────────
+    # Invite any email (gmail, hotmail, corporate) as any role to any tenant
+    if path.endswith("/invite") and method == "POST":
+        email      = (body.get("email") or "").lower().strip()
+        user_role  = body.get("role") or "EMPLOYEE"
+        tenant_id  = body.get("tenantId") or ""
+        first      = body.get("firstName") or ""
+        last       = body.get("lastName") or ""
+        if not email: return err(400, "Email required")
+        if user_role not in ("GLOBAL_ADMIN", "HR_ADMIN", "EMPLOYEE"):
+            return err(400, "Invalid role")
+        if user_role in ("HR_ADMIN", "EMPLOYEE") and not tenant_id:
+            return err(400, "tenantId required for HR_ADMIN/EMPLOYEE")
+        # Get tenant info
+        tenant_name = ""
+        if tenant_id:
+            t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+            if not t: return err(404, f"Tenant {tenant_id} not found")
+            tenant_name = t.get("name", "")
+        # Generate invite token
+        invite_token = str(uuid.uuid4())
+        temp_password = f"Invite@{str(uuid.uuid4())[:8]}!"
+        # Create Cognito user
+        try:
+            cognito.admin_create_user(
+                UserPoolId=POOL_ID, Username=email,
+                TemporaryPassword=temp_password,
+                UserAttributes=[
+                    {"Name": "email",             "Value": email},
+                    {"Name": "email_verified",    "Value": "true"},
+                    {"Name": "given_name",        "Value": first},
+                    {"Name": "family_name",       "Value": last},
+                    {"Name": "custom:role",       "Value": user_role},
+                    {"Name": "custom:tenantId",   "Value": tenant_id},
+                    {"Name": "custom:tenantName", "Value": tenant_name},
+                ],
+                MessageAction="SUPPRESS"
+            )
+            cognito.admin_set_user_password(UserPoolId=POOL_ID, Username=email, Password=temp_password, Permanent=True)
+        except ClientError as e:
+            code = e.response["Error"]["Code"]
+            if code == "UsernameExistsException":
+                return err(409, f"User {email} already exists")
+            return err(400, str(e.response["Error"]["Message"]))
+        # Save to DynamoDB
+        user_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        USERS_T.put_item(Item={
+            "userId": user_id, "tenantId": tenant_id, "email": email,
+            "firstName": first, "lastName": last, "role": user_role,
+            "status": "pending", "inviteToken": invite_token,
+            "createdBy": caller_email, "createdAt": now
+        })
+        # Send invite email via SES
+        invite_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/register?token={invite_token}&email={email}"
+        try:
+            ses.send_email(
+                Source="no-reply@endevo.life",
+                Destination={"ToAddresses": [email]},
+                Message={
+                    "Subject": {"Data": f"You're invited to Endevo Life — {tenant_name or 'Platform'}"},
+                    "Body": {"Html": {"Data": f"""
+                        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
+                          <h2 style="color:#6366f1">Welcome to Endevo Life</h2>
+                          <p>You've been invited as <strong>{user_role.replace('_',' ')}</strong>{' at ' + tenant_name if tenant_name else ''}.</p>
+                          <p>Click below to set up your account:</p>
+                          <a href="{invite_url}" style="display:inline-block;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;margin:16px 0">Accept Invitation</a>
+                          <p style="color:#666;font-size:12px">Your temporary password: <code>{temp_password}</code><br>Login at: <a href="https://main.d1vgn9nzfx4cxk.amplifyapp.com/login">Endevo Life Login</a></p>
+                        </div>"""}}
+                }
+            )
+            email_sent = True
+        except Exception as e:
+            print(f"SES_ERROR: {e}")
+            email_sent = False
+        audit(tenant_id or "SYSTEM", caller_email, "USER_INVITED",
+              f"Invited {email} as {user_role}" + (f" to {tenant_name}" if tenant_name else ""))
+        return resp(200, {
+            "message": f"Invitation sent to {email}",
+            "user_id": user_id,
+            "email_sent": email_sent,
+            "temp_password": temp_password,
+            "invite_url": invite_url
+        })
 
     return err(404, f"Route not found: {method} {path}")

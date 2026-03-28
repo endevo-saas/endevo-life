@@ -39,6 +39,10 @@ export const api = {
     apiFetch(`/api/admin/tenants/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
   adminDeleteTenant: (id: string) =>
     apiFetch(`/api/admin/tenants/${id}`, { method: 'DELETE' }),
+  adminInvite: (body: Record<string, unknown>) =>
+    apiFetch('/api/admin/invite', { method: 'POST', body: JSON.stringify(body) }),
+  changePassword: (oldPassword: string, newPassword: string) =>
+    apiFetch('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ old_password: oldPassword, new_password: newPassword }) }),
 
   // Admin — Users
   adminUsers: (tenantId?: string) =>
