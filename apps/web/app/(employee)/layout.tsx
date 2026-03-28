@@ -1,7 +1,7 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { PlayCircle, ClipboardList, Award, User, BarChart3, LogOut } from 'lucide-react'
+import { PlayCircle, ClipboardList, Award, User, BarChart3, LogOut, Settings } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 
 const nav = [
@@ -10,6 +10,7 @@ const nav = [
   { href: '/employee/assessment',    icon: ClipboardList,   label: 'Assessment' },
   { href: '/employee/certificates',  icon: Award,           label: 'Certificates' },
   { href: '/employee/profile',       icon: User,            label: 'My Profile' },
+  { href: '/employee/settings',      icon: Settings,        label: 'Settings' },
 ]
 
 export default function EmployeeLayout({ children }: { children: React.ReactNode }) {

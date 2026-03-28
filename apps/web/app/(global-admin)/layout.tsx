@@ -1,16 +1,17 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Shield, Building2, Users, FileText, Activity, LogOut, BarChart3, Settings } from 'lucide-react'
+import { Shield, Building2, Users, FileText, Activity, LogOut, BarChart3, Settings, CreditCard } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 
 const nav = [
-  { href: '/admin/dashboard', icon: BarChart3,   label: 'Dashboard' },
-  { href: '/admin/tenants',   icon: Building2,   label: 'Tenants' },
-  { href: '/admin/users',     icon: Users,       label: 'All Users' },
-  { href: '/admin/audit',     icon: FileText,    label: 'Audit Log' },
-  { href: '/admin/health',    icon: Activity,    label: 'System Health' },
-  { href: '/admin/settings',  icon: Settings,    label: 'Settings' },
+  { href: '/admin/dashboard',     icon: BarChart3,   label: 'Dashboard' },
+  { href: '/admin/tenants',       icon: Building2,   label: 'Tenants' },
+  { href: '/admin/users',         icon: Users,       label: 'All Users' },
+  { href: '/admin/subscriptions', icon: CreditCard,  label: 'Subscriptions' },
+  { href: '/admin/audit',         icon: FileText,    label: 'Audit Log' },
+  { href: '/admin/health',        icon: Activity,    label: 'System Health' },
+  { href: '/admin/settings',      icon: Settings,    label: 'Settings' },
 ]
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
