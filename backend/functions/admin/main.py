@@ -308,6 +308,8 @@ def handler(event, context):
         website    = sanitize(body.get("website") or "", 200)
         hr_contact = sanitize(body.get("hrContact") or "", 100)
         hr_email   = sanitize((body.get("hrEmail") or "").lower().strip(), 254)
+        hr_first   = sanitize(body.get("hrFirstName") or hr_contact.split()[0] if hr_contact else "", 50)
+        hr_last    = sanitize(body.get("hrLastName")  or (hr_contact.split()[1] if len(hr_contact.split()) > 1 else "Admin"), 50)
 
         # Reject raw input containing HTML/script injection before sanitization
         raw_name = body.get("name") or ""
@@ -317,14 +319,23 @@ def handler(event, context):
             return err(400, "Tenant name required")
         if len(name) < 2:
             return err(400, "Tenant name must be at least 2 characters")
+        # HR admin email is MANDATORY — without it there's no one to notify the org
+        if not hr_email:
+            return err(400, "HR Admin email is required. Every tenant must have an HR admin to manage their organization.")
+        if not validate_email(hr_email):
+            return err(400, "Invalid HR admin email format")
         if plan not in ("trial", "starter", "professional", "enterprise", "enterprise-plus"):
             return err(400, "Invalid plan")
         try:
             max_seats = int(max_seats or 50)
         except (TypeError, ValueError):
             return err(400, "maxSeats must be a number")
-        if hr_email and not validate_email(hr_email):
-            return err(400, "Invalid HR admin email format")
+
+        # Check HR email uniqueness globally — one email, one role
+        existing_user = scan_all(USERS_T, Attr("email").eq(hr_email))
+        if existing_user:
+            existing_role = existing_user[0].get("role", "unknown")
+            return err(409, f"Email {hr_email} is already registered as {existing_role}. One email can only hold one role.")
 
         # Sequential tenant ID — format: tenant-00001 (supports up to 99,999+)
         seq = count_items(TENANTS_T) + 1
@@ -341,8 +352,91 @@ def handler(event, context):
             "maxSeats": max_seats, "employeeCount": 0,
             "tenantCode": tenant_id
         })
-        audit("SYSTEM", caller_email, "TENANT_CREATED", f"Created tenant: {name} ({tenant_id})", ip=ip, device=device)
-        return resp(200, {"message": "Tenant created", "tenant_id": tenant_id, "tenant_code": tenant_id})
+
+        # Auto-create HR Admin account and send invite email
+        invite_token  = str(uuid.uuid4())
+        temp_password = f"Endevo@{str(uuid.uuid4())[:8]}!"
+        hr_user_id    = str(uuid.uuid4())
+        hr_created    = False
+        email_sent    = False
+
+        try:
+            cognito.admin_create_user(
+                UserPoolId=POOL_ID, Username=hr_email,
+                TemporaryPassword=temp_password,
+                UserAttributes=[
+                    {"Name": "email",             "Value": hr_email},
+                    {"Name": "email_verified",    "Value": "true"},
+                    {"Name": "given_name",        "Value": hr_first or "HR"},
+                    {"Name": "family_name",       "Value": hr_last  or "Admin"},
+                    {"Name": "custom:role",       "Value": "HR_ADMIN"},
+                    {"Name": "custom:tenantId",   "Value": tenant_id},
+                    {"Name": "custom:tenantName", "Value": name},
+                ],
+                MessageAction="SUPPRESS"
+            )
+            cognito.admin_set_user_password(UserPoolId=POOL_ID, Username=hr_email,
+                Password=temp_password, Permanent=True)
+            USERS_T.put_item(Item={
+                "userId": hr_user_id, "tenantId": tenant_id, "email": hr_email,
+                "firstName": hr_first or "HR", "lastName": hr_last or "Admin",
+                "role": "HR_ADMIN", "status": "active", "inviteToken": invite_token,
+                "createdBy": caller_email, "createdAt": now
+            })
+            hr_created = True
+        except ClientError as ce:
+            # HR admin creation failed — don't fail the tenant, but note it
+            print(f"HR_ADMIN_CREATE_ERROR: {ce}")
+
+        if hr_created:
+            invite_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/login"
+            try:
+                ses.send_email(
+                    Source="no-reply@endevo.life",
+                    Destination={"ToAddresses": [hr_email]},
+                    Message={
+                        "Subject": {"Data": f"Welcome to Endevo Life — You are the HR Admin for {name}"},
+                        "Body": {"Html": {"Data": f"""
+                            <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px;background:#0f172a;color:#e2e8f0;border-radius:12px">
+                              <div style="text-align:center;margin-bottom:24px">
+                                <h1 style="color:#818cf8;font-size:28px;margin:0">Endevo Life</h1>
+                                <p style="color:#64748b;font-size:14px;margin:4px 0 0">Digital Legacy & Estate Planning Platform</p>
+                              </div>
+                              <h2 style="color:#e2e8f0;font-size:20px">Your HR Admin Account is Ready</h2>
+                              <p style="color:#94a3b8">You have been set up as the <strong style="color:#818cf8">HR Administrator</strong> for <strong style="color:#fff">{name}</strong>.</p>
+                              <div style="background:#1e293b;border-radius:8px;padding:20px;margin:20px 0;border-left:4px solid #818cf8">
+                                <p style="margin:0 0 8px;color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px">Your Login Credentials</p>
+                                <p style="margin:4px 0;color:#e2e8f0"><strong>Email:</strong> {hr_email}</p>
+                                <p style="margin:4px 0;color:#e2e8f0"><strong>Temporary Password:</strong> <code style="background:#0f172a;padding:2px 8px;border-radius:4px;color:#818cf8">{temp_password}</code></p>
+                                <p style="margin:4px 0;color:#e2e8f0"><strong>Organization:</strong> {name}</p>
+                                <p style="margin:4px 0;color:#e2e8f0"><strong>Tenant ID:</strong> <code style="color:#64748b">{tenant_id}</code></p>
+                              </div>
+                              <p style="color:#94a3b8;font-size:14px">Please log in and change your password immediately.</p>
+                              <a href="{invite_url}" style="display:inline-block;padding:14px 28px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;margin:16px 0">Login to Endevo Life →</a>
+                              <p style="color:#475569;font-size:12px;margin-top:24px;border-top:1px solid #1e293b;padding-top:16px">
+                                As HR Admin you can: invite employees, manage training, view reports, and download certificates.<br>
+                                Need help? Contact <a href="mailto:support@endevo.life" style="color:#818cf8">support@endevo.life</a>
+                              </p>
+                            </div>"""
+                        }}
+                    }
+                )
+                email_sent = True
+            except Exception as se:
+                print(f"SES_ERROR: {se}")
+
+        audit("SYSTEM", caller_email, "TENANT_CREATED",
+              f"Created tenant: {name} ({tenant_id}) | HR Admin: {hr_email} | Email sent: {email_sent}",
+              ip=ip, device=device)
+        return resp(200, {
+            "message": f"Tenant '{name}' created successfully",
+            "tenant_id":      tenant_id,
+            "tenant_code":    tenant_id,
+            "hr_admin_email": hr_email,
+            "hr_admin_created": hr_created,
+            "invite_email_sent": email_sent,
+            "temp_password":  temp_password if hr_created else None
+        })
 
     # ── GET /api/admin/tenants/{id} ───────────────────────────────────────
     if "/tenants/" in path and method == "GET":

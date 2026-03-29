@@ -51,7 +51,7 @@ export default function TenantsPage() {
   const [modal, setModal] = useState<Modal>(null)
   const [selected, setSelected] = useState<TenantFull | null>(null)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name:'', website:'', hrContact:'', hrEmail:'', plan:'professional', maxSeats:'50', status:'active' })
+  const [form, setForm] = useState({ name:'', website:'', hrContact:'', hrEmail:'', hrFirstName:'', hrLastName:'', plan:'professional', maxSeats:'50', status:'active' })
 
   async function load() {
     setLoading(true); setError('')
@@ -63,8 +63,8 @@ export default function TenantsPage() {
 
   const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(()=>setSuccess(''),4000) }
   const closeModal = () => { setModal(null); setSelected(null); setError('') }
-  const openCreate = () => { setForm({name:'',website:'',hrContact:'',hrEmail:'',plan:'professional',maxSeats:'50',status:'active'}); setModal('create') }
-  const openEdit = (t: TenantFull) => { setSelected(t); setForm({name:t.name,website:t.website||'',hrContact:t.hrContact||'',hrEmail:t.hrEmail||'',plan:t.plan,maxSeats:String(t.maxSeats||50),status:t.status}); setModal('edit') }
+  const openCreate = () => { setForm({name:'',website:'',hrContact:'',hrEmail:'',hrFirstName:'',hrLastName:'',plan:'professional',maxSeats:'50',status:'active'}); setModal('create') }
+  const openEdit = (t: TenantFull) => { setSelected(t); setForm({name:t.name,website:t.website||'',hrContact:t.hrContact||'',hrEmail:t.hrEmail||'',hrFirstName:'',hrLastName:'',plan:t.plan,maxSeats:String(t.maxSeats||50),status:t.status}); setModal('edit') }
   const openView = (t: TenantFull) => { setSelected(t); setModal('view') }
   const openDelete = (t: TenantFull) => { setSelected(t); setModal('delete') }
 
@@ -75,12 +75,22 @@ export default function TenantsPage() {
     return matchSearch && matchPlan
   })
 
+  const [createResult, setCreateResult] = useState<{ temp_password?: string; hr_admin_email?: string } | null>(null)
+
   async function createTenant() {
     if (!form.name.trim()) { setError('Tenant name required'); return }
+    if (!form.hrEmail.trim()) { setError('HR Admin email is required — every tenant must have an HR admin'); return }
     setSaving(true); setError('')
     try {
-      await api.adminCreateTenant({ name:form.name.trim(), plan:form.plan, maxSeats:Number(form.maxSeats), website:form.website, hrContact:form.hrContact, hrEmail:form.hrEmail })
-      closeModal(); showSuccess(`Tenant "${form.name}" created`); load()
+      const res = await api.adminCreateTenant({
+        name: form.name.trim(), plan: form.plan, maxSeats: Number(form.maxSeats),
+        website: form.website, hrContact: form.hrContact, hrEmail: form.hrEmail,
+        hrFirstName: form.hrFirstName, hrLastName: form.hrLastName
+      }) as { temp_password?: string; hr_admin_email?: string }
+      setCreateResult(res)
+      closeModal()
+      showSuccess(`Tenant "${form.name}" created — HR admin invite sent to ${form.hrEmail}`)
+      load()
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Create failed') }
     finally { setSaving(false) }
   }
@@ -212,10 +222,16 @@ export default function TenantsPage() {
                   </div>
                 </section>
                 <section>
-                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">HR Admin Contact</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    <F label="Contact Name" v={form.hrContact} set={v=>setForm(f=>({...f,hrContact:v}))} ph="Jane Smith"/>
-                    <F label="Contact Email" v={form.hrEmail} set={v=>setForm(f=>({...f,hrEmail:v}))} ph="hr@acme.com" t="email"/>
+                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">HR Admin <span className="text-red-400">*</span> <span className="text-slate-600 normal-case font-normal">(mandatory — account will be auto-created &amp; invite sent)</span></p>
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-2 gap-3">
+                      <F label="First Name *" v={form.hrFirstName} set={v=>setForm(f=>({...f,hrFirstName:v}))} ph="Jane"/>
+                      <F label="Last Name *" v={form.hrLastName} set={v=>setForm(f=>({...f,hrLastName:v}))} ph="Smith"/>
+                    </div>
+                    <F label="HR Admin Email *" v={form.hrEmail} set={v=>setForm(f=>({...f,hrEmail:v}))} ph="hr@acme.com" t="email"/>
+                    <div className="p-2 bg-brand-500/5 border border-brand-500/20 rounded-lg text-xs text-brand-300 flex items-center gap-2">
+                      <span>📧</span> An account will be created and login credentials emailed to this address automatically.
+                    </div>
                   </div>
                 </section>
                 <section>

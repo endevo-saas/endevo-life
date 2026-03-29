@@ -11,7 +11,7 @@ Routes:
   POST /api/auth/change-password
   GET  /api/auth/me
 """
-import json, os, re
+import json, os, re, random, string
 import boto3
 from datetime import datetime, timezone, timedelta
 from botocore.exceptions import ClientError
@@ -21,14 +21,15 @@ CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID", "4sbv2j6cv7jpp1oi0d16njsej1")
 REGION    = os.environ.get("AWS_REGION",         "us-east-1")
 
 cognito = boto3.client("cognito-idp", region_name=REGION)
+ses     = boto3.client("ses",         region_name=REGION)
 dynamo  = boto3.resource("dynamodb",  region_name=REGION)
 
 USERS_T  = dynamo.Table("endevo-uat-users")
-AUDIT_T  = dynamo.Table("endevo-uat-audit")
-TOKENS_T = dynamo.Table("endevo-uat-audit")   # reuse audit for brute-force tracking
+AUDIT_T  = dynamo.Table("endevo-uat-audit")   # also stores OTP records + brute-force tracking
 
-MAX_FAILED = 5    # lock out after 5 consecutive failures
-LOCKOUT_MIN = 15  # lockout window in minutes
+MAX_FAILED  = 5    # lock out after 5 consecutive failures
+LOCKOUT_MIN = 15   # lockout window in minutes
+OTP_TTL_MIN = 10   # OTP expires after 10 minutes
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -103,6 +104,85 @@ def get_failed_count(ip):
     except:
         return 0  # fail open — don't block on DB errors
 
+def generate_otp():
+    """Generate a 6-digit numeric OTP."""
+    return ''.join(random.choices(string.digits, k=6))
+
+def store_otp(otp_ref, email, otp_code, tokens):
+    """Store OTP + tokens in audit table. TTL auto-deletes after OTP_TTL_MIN minutes."""
+    import uuid as _uuid
+    now = datetime.now(timezone.utc)
+    ttl = int((now + timedelta(minutes=OTP_TTL_MIN)).timestamp())
+    AUDIT_T.put_item(Item={
+        "tenantId":      "OTP_STORE",
+        "sk":            f"{otp_ref}#{email}",
+        "auditId":       str(_uuid.uuid4()),
+        "actor":         email,
+        "action":        "OTP_PENDING",
+        "otp_code":      otp_code,
+        "otp_ref":       otp_ref,
+        "tokens":        json.dumps(tokens),
+        "details":       f"OTP login pending for {email}",
+        "severity":      "INFO",
+        "createdAt":     now.isoformat(),
+        "ttl":           ttl
+    })
+
+def get_otp_record(otp_ref, email):
+    """Look up OTP record by ref + email. Returns None if expired or not found."""
+    result = AUDIT_T.get_item(Key={
+        "tenantId": "OTP_STORE",
+        "sk":       f"{otp_ref}#{email}"
+    })
+    item = result.get("Item")
+    if not item:
+        return None
+    # Manual expiry check (TTL may not be instant)
+    created = datetime.fromisoformat(item.get("createdAt", "2000-01-01T00:00:00+00:00"))
+    if (datetime.now(timezone.utc) - created).total_seconds() > OTP_TTL_MIN * 60:
+        return None
+    if item.get("action") != "OTP_PENDING":
+        return None
+    return item
+
+def delete_otp_record(otp_ref, email):
+    """Consume OTP record after successful verification."""
+    AUDIT_T.delete_item(Key={"tenantId": "OTP_STORE", "sk": f"{otp_ref}#{email}"})
+
+def send_otp_email(email, otp_code, first_name=""):
+    """Send OTP code to user's email via SES."""
+    greeting = f"Hi {first_name}," if first_name else "Hello,"
+    try:
+        ses.send_email(
+            Source="no-reply@endevo.life",
+            Destination={"ToAddresses": [email]},
+            Message={
+                "Subject": {"Data": "Endevo Life — Your Login Verification Code"},
+                "Body": {"Html": {"Data": f"""
+                    <div style="font-family:sans-serif;max-width:480px;margin:0 auto;padding:32px;background:#0f172a;color:#e2e8f0;border-radius:12px">
+                      <div style="text-align:center;margin-bottom:24px">
+                        <h1 style="color:#818cf8;font-size:24px;margin:0">Endevo Life</h1>
+                        <p style="color:#64748b;font-size:13px;margin:4px 0 0">Security Verification</p>
+                      </div>
+                      <p style="color:#94a3b8">{greeting}</p>
+                      <p style="color:#94a3b8">Your one-time login code is:</p>
+                      <div style="text-align:center;margin:24px 0;padding:24px;background:#1e293b;border-radius:12px;border:1px solid #334155">
+                        <div style="font-size:42px;font-weight:900;letter-spacing:12px;color:#818cf8;font-family:monospace">{otp_code}</div>
+                        <p style="color:#64748b;font-size:12px;margin:8px 0 0">Expires in {OTP_TTL_MIN} minutes</p>
+                      </div>
+                      <p style="color:#64748b;font-size:12px">If you did not attempt to log in, please change your password immediately and contact <a href="mailto:support@endevo.life" style="color:#818cf8">support@endevo.life</a></p>
+                      <p style="color:#475569;font-size:11px;margin-top:16px;border-top:1px solid #1e293b;padding-top:12px">
+                        This code is valid for {OTP_TTL_MIN} minutes and can only be used once. Never share this code with anyone.
+                      </p>
+                    </div>"""
+                }}
+            }
+        )
+        return True
+    except Exception as e:
+        print(f"OTP_EMAIL_ERROR: {e}")
+        return False
+
 def handler(event, context):
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     path   = event.get("rawPath", "")
@@ -116,6 +196,7 @@ def handler(event, context):
 
     # ── POST /api/auth/login ──────────────────────────────────────
     if path.endswith("/login") and method == "POST":
+        import uuid as _uuid
         email    = (body.get("email") or "").lower().strip()
         password = body.get("password") or ""
 
@@ -145,11 +226,13 @@ def handler(event, context):
             tokens = r["AuthenticationResult"]
             user = cognito.get_user(AccessToken=tokens["AccessToken"])
             attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
-            tenant_id = attrs.get("custom:tenantId", "")
+            tenant_id  = attrs.get("custom:tenantId", "")
+            first_name = attrs.get("given_name", "")
 
-            security_audit("LOGIN_SUCCESS", email, tenant_id or "AUTH", ip, device,
-                           f"Login from {ip} | {device[:80]}")
-            return resp(200, {
+            # ── Email OTP step ──────────────────────────────────────
+            otp_code = generate_otp()
+            otp_ref  = str(_uuid.uuid4())
+            token_payload = {
                 "access_token":  tokens["AccessToken"],
                 "id_token":      tokens["IdToken"],
                 "refresh_token": tokens["RefreshToken"],
@@ -157,9 +240,21 @@ def handler(event, context):
                 "tenant_id":     tenant_id,
                 "tenant_name":   attrs.get("custom:tenantName", ""),
                 "email":         attrs.get("email", email),
-                "first_name":    attrs.get("given_name", ""),
+                "first_name":    first_name,
                 "last_name":     attrs.get("family_name", "")
+            }
+            store_otp(otp_ref, email, otp_code, token_payload)
+            email_ok = send_otp_email(email, otp_code, first_name)
+
+            security_audit("OTP_SENT", email, tenant_id or "AUTH", ip, device,
+                           f"OTP sent for login from {ip} | email_sent={email_ok}")
+            return resp(200, {
+                "otp_required": True,
+                "otp_ref":      otp_ref,
+                "email":        email,
+                "message":      f"Verification code sent to {email}. Please check your inbox."
             })
+
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code in ("NotAuthorizedException", "UserNotFoundException"):
@@ -167,6 +262,35 @@ def handler(event, context):
                                f"Invalid credentials from {ip}", "WARN")
                 return err(401, "Invalid email or password")
             return err(400, str(e.response["Error"]["Message"]))
+
+    # ── POST /api/auth/verify-otp ─────────────────────────────────
+    if path.endswith("/verify-otp") and method == "POST":
+        email    = (body.get("email") or "").lower().strip()
+        otp_ref  = body.get("otp_ref") or ""
+        otp_code = body.get("code") or ""
+
+        if not all([email, otp_ref, otp_code]):
+            return err(400, "email, otp_ref, and code are required")
+
+        record = get_otp_record(otp_ref, email)
+        if not record:
+            security_audit("OTP_EXPIRED", email, "AUTH", ip, device,
+                           "OTP not found or expired", "WARN")
+            return err(401, "Verification code has expired or is invalid. Please log in again.")
+
+        if record.get("otp_code") != otp_code:
+            security_audit("OTP_FAILED", email, "AUTH", ip, device,
+                           f"Wrong OTP attempt from {ip}", "WARN")
+            return err(401, "Incorrect verification code. Please check your email and try again.")
+
+        # OTP valid — consume it and return stored tokens
+        delete_otp_record(otp_ref, email)
+        token_payload = json.loads(record.get("tokens", "{}"))
+        tenant_id = token_payload.get("tenant_id", "")
+
+        security_audit("LOGIN_SUCCESS", email, tenant_id or "AUTH", ip, device,
+                       f"OTP verified. Login complete from {ip} | {device[:80]}")
+        return resp(200, token_payload)
 
     # ── POST /api/auth/mfa ────────────────────────────────────────
     if path.endswith("/mfa") and method == "POST":
