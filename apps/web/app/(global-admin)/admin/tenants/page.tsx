@@ -5,8 +5,9 @@ import React, { useEffect, useState } from 'react'
 import {
   Building2, Plus, Pencil, Check, X, Loader2, AlertCircle,
   RefreshCw, Users, Globe, Mail, Eye, ChevronDown, Tag, Crown, ArrowUpRight,
-  ToggleLeft, ToggleRight
+  ToggleLeft, ToggleRight, Download
 } from 'lucide-react'
+import { exportCsv } from '@/lib/export'
 import { api, Tenant } from '@/lib/api'
 import Link from 'next/link'
 
@@ -135,6 +136,14 @@ export default function TenantsPage() {
           </div>
           <div className="flex gap-2">
             <button onClick={load} className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"><RefreshCw className="w-4 h-4"/></button>
+            <button onClick={() => exportCsv('endevo_tenants', filtered as unknown as Record<string, unknown>[], [
+              {key:'tenantId',label:'Tenant ID'},{key:'name',label:'Name'},{key:'plan',label:'Plan'},
+              {key:'status',label:'Status'},{key:'user_count',label:'Users'},{key:'maxSeats',label:'Max Seats'},
+              {key:'hrContact',label:'HR Contact'},{key:'hrEmail',label:'HR Email'},{key:'website',label:'Website'},
+              {key:'createdAt',label:'Created'}
+            ])} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm bg-white/5 text-slate-300 hover:text-white border border-white/10 transition-all">
+              <Download className="w-4 h-4"/>CSV
+            </button>
             <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm btn-primary"><Plus className="w-4 h-4"/>New Tenant</button>
           </div>
         </div>

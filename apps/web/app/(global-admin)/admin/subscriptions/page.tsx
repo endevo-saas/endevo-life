@@ -9,6 +9,7 @@ import {
   Users, Plus, Save, X, BarChart3, Calendar, Settings
 } from 'lucide-react'
 import { api, Tenant } from '@/lib/api'
+import { exportCsv } from '@/lib/export'
 
 // ── Plan definitions (editable pricing) ───────────────────────────────────────
 const DEFAULT_PLANS = [
@@ -178,6 +179,13 @@ export default function SubscriptionsPage() {
               className="flex items-center gap-2 px-4 py-2 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-300 hover:bg-yellow-500/20 text-sm transition-all"
             >
               <DollarSign className="w-4 h-4" /> Edit Pricing
+            </button>
+            <button onClick={() => exportCsv('endevo_subscriptions', filtered as unknown as Record<string, unknown>[], [
+              {key:'name',label:'Organization'},{key:'tenantId',label:'Tenant ID'},{key:'plan',label:'Plan'},
+              {key:'status',label:'Status'},{key:'user_count',label:'Active Users'},{key:'maxSeats',label:'Max Seats'},
+              {key:'hrEmail',label:'HR Email'},{key:'createdAt',label:'Created'}
+            ])} className="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 text-sm border border-white/10 transition-all">
+              <Download className="w-4 h-4" /> Export CSV
             </button>
             <button onClick={load} className="flex items-center gap-2 px-3 py-2 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 text-sm transition-all">
               <RefreshCw className="w-4 h-4" /> Refresh

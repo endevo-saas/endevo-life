@@ -7,6 +7,7 @@ import {
   Building2, User, Download, Calendar, Star, Filter
 } from 'lucide-react'
 import { api } from '@/lib/api'
+import { exportCsv } from '@/lib/export'
 
 interface CertRecord {
   certId: string
@@ -76,6 +77,13 @@ export default function AdminCertificatesPage() {
             <h1 className="text-2xl font-bold text-white">Certificates</h1>
             <p className="text-slate-400 text-sm mt-0.5">All certificates issued across the platform</p>
           </div>
+          <button onClick={() => exportCsv('endevo_certificates', filtered as unknown as Record<string, unknown>[], [
+            {key:'certId',label:'Cert ID'},{key:'email',label:'Email'},{key:'firstName',label:'First Name'},
+            {key:'lastName',label:'Last Name'},{key:'tenantName',label:'Organization'},{key:'courseId',label:'Course ID'},
+            {key:'score',label:'Score %'},{key:'issuedAt',label:'Issued Date'}
+          ])} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm bg-white/5 text-slate-300 hover:text-white border border-white/10 transition-all">
+            <Download className="w-4 h-4"/>CSV
+          </button>
           <button onClick={load} className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all">
             <RefreshCw className="w-4 h-4" />
           </button>

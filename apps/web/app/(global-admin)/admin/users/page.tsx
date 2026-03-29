@@ -5,8 +5,9 @@ import React, { useEffect, useState } from 'react'
 import {
   Users, Search, Loader2, AlertCircle, RefreshCw, Shield, User,
   Plus, Pencil, Lock, Unlock, KeyRound, Mail, X, Check,
-  ChevronDown, Building2, Eye, EyeOff, ToggleLeft, ToggleRight
+  ChevronDown, Building2, Eye, EyeOff, ToggleLeft, ToggleRight, Download
 } from 'lucide-react'
+import { exportCsv } from '@/lib/export'
 import { api, User as UserType, Tenant } from '@/lib/api'
 
 type Modal = 'create' | 'edit' | 'confirm-toggle' | 'resetpw' | 'invite' | null
@@ -130,6 +131,13 @@ export default function AllUsersPage() {
           </div>
           <div className="flex gap-2">
             <button onClick={load} className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all"><RefreshCw className="w-4 h-4" /></button>
+            <button onClick={() => exportCsv('endevo_users', filtered as unknown as Record<string, unknown>[], [
+              {key:'email',label:'Email'},{key:'firstName',label:'First Name'},{key:'lastName',label:'Last Name'},
+              {key:'role',label:'Role'},{key:'status',label:'Status'},{key:'tenantId',label:'Tenant ID'},
+              {key:'department',label:'Department'},{key:'jobTitle',label:'Job Title'},{key:'createdAt',label:'Created'}
+            ])} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm bg-white/5 text-slate-300 hover:text-white border border-white/10 transition-all">
+              <Download className="w-4 h-4"/>CSV
+            </button>
             <button onClick={openInvite} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 border border-white/10 transition-all"><Mail className="w-4 h-4" />Invite by Email</button>
             <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm btn-primary"><Plus className="w-4 h-4" />Create User</button>
           </div>
