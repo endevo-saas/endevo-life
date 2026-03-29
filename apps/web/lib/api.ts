@@ -14,12 +14,25 @@ export async function apiFetch<T = unknown>(
   path: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
-    ...options,
-    headers: { ...authHeaders(), ...(options.headers || {}) },
-  })
-  const data = await res.json()
-  if (!res.ok) throw new Error(data.detail || data.error || `API error ${res.status}`)
+  let res: Response
+  try {
+    res = await fetch(`${BASE}${path}`, {
+      ...options,
+      headers: { ...authHeaders(), ...(options.headers || {}) },
+    })
+  } catch {
+    throw new Error('Network error — check your connection or try again')
+  }
+  let data: unknown
+  try {
+    data = await res.json()
+  } catch {
+    throw new Error(`Server error ${res.status} — invalid response`)
+  }
+  if (!res.ok) {
+    const d = data as Record<string, string>
+    throw new Error(d?.detail || d?.error || d?.message || `API error ${res.status}`)
+  }
   return data as T
 }
 

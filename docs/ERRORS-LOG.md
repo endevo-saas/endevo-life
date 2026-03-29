@@ -343,3 +343,105 @@ These issues occurred before the GitHub-first approach was adopted. Recorded for
 - **Root Cause:** Lambda IAM role had `ses:SendEmail` and `ses:SendRawEmail` but NOT `ses:GetSendQuota`. Health check calls `ses.get_send_quota()` which requires the missing permission.
 - **Fix:** Added `ses:GetSendQuota` and `ses:GetAccountSendingEnabled` to `LambdaRoleDefaultPolicy75625A82` inline policy via AWS CLI.
 - **Lesson:** When adding a new AWS API call to Lambda, always check if the IAM role has permission for that specific action. GetX permissions are separate from SendX permissions in SES.
+
+---
+
+## Session 6 — Full Bug Hunt + Enterprise Hardening (2026-03-29)
+
+### Issue #021
+- **Date:** 2026-03-29
+- **Phase:** 1 — Admin Module
+- **Lambda:** endevo-uat-fn-admin
+- **Error:** ALL admin API routes returned 500 Internal Server Error immediately after login
+- **Root Cause:** Python syntax error — `audit()` calls had `ip=ip, device=device` placed INSIDE `.get()` parentheses instead of as separate function arguments. This caused `Runtime.UserCodeSyntaxError` crashing the entire Lambda on cold start.
+- **Example:** `audit(item.get("tenantId", "SYSTEM", ip=ip, device=device), ...)` — wrong
+- **Fix:** Moved `ip=ip, device=device` outside `.get()` to correct `audit(item.get("tenantId","SYSTEM"), ..., ip=ip, device=device)` — fixed all 10 occurrences. Validated with `ast.parse()` before deploying.
+- **Lesson:** Python keyword arguments placed inside a nested call crash the outer function. Always run `ast.parse()` on Lambda code before deploying. One syntax error kills ALL routes.
+
+---
+
+### Issue #022
+- **Date:** 2026-03-29
+- **Phase:** 1 — Admin Module (Frontend)
+- **File:** `apps/web/app/(global-admin)/admin/tenants/page.tsx`, `admin/users/page.tsx`
+- **Error:** "Application error: a client-side exception has occurred" — blank white screen on both pages
+- **Root Cause:** `React.ReactNode` and `React.ElementType` used as TypeScript types in helper components, but `import React` was missing. Next.js 15 new JSX transform does not auto-inject React namespace for type references.
+- **Fix:** Added `import React,` to both files.
+- **Lesson:** In Next.js 15, `React.*` TYPE references (ReactNode, ElementType, Fragment, ChangeEvent) require explicit `import React` even though JSX does not.
+
+---
+
+### Issue #023
+- **Date:** 2026-03-29
+- **Phase:** 1 — Auth (Frontend)
+- **File:** `apps/web/app/(auth)/login/page.tsx`
+- **Error:** CAPTCHA error message never appeared when user entered wrong answer
+- **Root Cause:** `refreshCaptcha()` was called immediately after `setCaptchaErr(true)`, and `refreshCaptcha()` also called `setCaptchaErr(false)` — resetting the error before React rendered it.
+- **Fix:** Separated concerns — `refreshCaptcha()` only resets question/input. Error state managed independently.
+- **Lesson:** Never reset error state inside a shared utility function. Keep error state changes isolated.
+
+---
+
+### Issue #024
+- **Date:** 2026-03-29
+- **Phase:** 1 — Auth (Frontend)
+- **File:** `apps/web/app/(auth)/login/page.tsx`
+- **Error:** MFA verification always failed with network error
+- **Root Cause:** MFA submit called `/api/auth/mfa` (relative URL → Next.js server) instead of `${NEXT_PUBLIC_API_URL}/api/auth/mfa` (Lambda).
+- **Fix:** Changed to `${process.env.NEXT_PUBLIC_API_URL}/api/auth/mfa`.
+- **Lesson:** All backend calls must use `NEXT_PUBLIC_API_URL`. Relative `/api/` paths hit Next.js server-side routes, not Lambda.
+
+---
+
+### Issue #025
+- **Date:** 2026-03-29
+- **Phase:** 1 — Auth (Frontend)
+- **File:** `apps/web/lib/auth/cognito.ts`
+- **Error:** Sidebar showed wrong username, layout displayed "Admin" placeholder instead of real name
+- **Root Cause:** `user_email` cookie was never set after login. Sidebar reads from this cookie.
+- **Fix:** Added `Cookies.set('user_email', data.email || '', ...)` to `signIn()` function.
+- **Lesson:** Every piece of data consumed by the UI (role, email, token) must be explicitly set in the cookie after login.
+
+---
+
+### Issue #026
+- **Date:** 2026-03-29
+- **Phase:** 1 — Admin Module (Frontend)
+- **Files:** `admin/subscriptions/page.tsx`, `admin/tenants/page.tsx`, `admin/users/page.tsx`, `hr/employees/page.tsx`
+- **Error:** Pages crashed with TypeError when DynamoDB returned records with missing `name`, `email`, or `firstName` fields
+- **Root Cause:** Code accessed `t.name[0]`, `u.email[0]`, `t.name.toLowerCase()`, `u.email.toLowerCase()` without null guards. TypeScript types said these were `string` but DynamoDB can return `undefined` for any attribute.
+- **Fix:** Added optional chaining and null coalescing everywhere: `(t.name?.[0] ?? '?').toUpperCase()`, `(t.name || '').toLowerCase()`, `(u.email || '').toLowerCase()`.
+- **Lesson:** NEVER trust TypeScript types for DynamoDB data. All fields from external APIs must be treated as potentially undefined, regardless of the interface definition. Always use `?.` and `|| ''`.
+
+---
+
+### Issue #027
+- **Date:** 2026-03-29
+- **Phase:** 1 — All Modules (Frontend)
+- **Files:** All route group pages
+- **Error:** Any crash caused a blank white "Application error" screen with no recovery path
+- **Root Cause:** No React Error Boundary existed at any level. Next.js shows a generic crash screen with no "Try Again" or navigation options.
+- **Fix:** Added `error.tsx` to all 4 route groups: root, `(global-admin)`, `(hr-admin)`, `(employee)`. Each shows error message, "Try Again", and navigation back to dashboard.
+- **Lesson:** Every Next.js route group MUST have `error.tsx`. This is the most important resilience pattern — it turns a total crash into a recoverable error state.
+
+---
+
+### Issue #028
+- **Date:** 2026-03-29
+- **Phase:** 1 — Auth (Middleware)
+- **File:** `apps/web/middleware.ts`
+- **Error:** `/signup` page redirected to `/login` when accessed directly
+- **Root Cause:** `/signup` was not in the `PUBLIC_PATHS` array in middleware. Middleware intercepted the request and redirected unauthenticated users away.
+- **Fix:** Added `/signup` to `PUBLIC_PATHS`.
+- **Lesson:** Every public page (login, register, signup, forgot-password) must be explicitly listed in middleware PUBLIC_PATHS.
+
+---
+
+### Issue #029
+- **Date:** 2026-03-29
+- **Phase:** 1 — API Layer (Frontend)
+- **File:** `apps/web/lib/api.ts`
+- **Error:** Network failures showed raw `TypeError: Failed to fetch` with no user-friendly message
+- **Root Cause:** `apiFetch` only handled HTTP error responses (`!res.ok`) but not network-level failures (offline, CORS, DNS). Also, `res.json()` could throw if server returned non-JSON response (e.g., 502 HTML error page from API Gateway).
+- **Fix:** Wrapped `fetch()` in try/catch for network errors. Wrapped `res.json()` in try/catch for parse errors. Improved error message extraction.
+- **Lesson:** Every API call has 3 failure modes: (1) network down, (2) server returns non-JSON, (3) server returns JSON error. All 3 must be handled separately.
