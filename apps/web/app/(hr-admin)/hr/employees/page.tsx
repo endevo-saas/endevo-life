@@ -2,7 +2,8 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useState } from 'react'
-import { Users, Search, Pencil, UserX, Check, X, Loader2, AlertCircle, RefreshCw, UserPlus } from 'lucide-react'
+import { Users, Search, Pencil, UserX, Check, X, Loader2, AlertCircle, RefreshCw, UserPlus, Download, UserCheck } from 'lucide-react'
+import { exportCsv } from '@/lib/export'
 import { api, User } from '@/lib/api'
 import Link from 'next/link'
 
@@ -78,7 +79,7 @@ export default function EmployeesPage() {
   }
 
   async function deactivate(userId: string, email: string) {
-    if (!confirm(`Deactivate ${email}? They will lose access.`)) return
+    if (!confirm(`Deactivate ${email}? They will lose access immediately. You can reactivate at any time.`)) return
     setDeactivating(userId)
     try {
       await api.hrDeactivateEmployee(userId)
@@ -86,6 +87,19 @@ export default function EmployeesPage() {
       load()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Deactivation failed')
+    } finally {
+      setDeactivating(null)
+    }
+  }
+
+  async function reactivate(userId: string, email: string) {
+    setDeactivating(userId)
+    try {
+      await api.hrReactivateEmployee(userId)
+      showSuccess(`${email} reactivated`)
+      load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Reactivation failed')
     } finally {
       setDeactivating(null)
     }
@@ -100,7 +114,14 @@ export default function EmployeesPage() {
             <p className="text-slate-400 text-sm mt-1">{filtered.length} of {employees.length} employees</p>
           </div>
           <div className="flex gap-3">
-            <button onClick={load} className="text-slate-400 hover:text-white transition-colors">
+            <button onClick={() => exportCsv('hr_employees', filtered as unknown as Record<string, unknown>[], [
+              {key:'email',label:'Email'},{key:'firstName',label:'First Name'},{key:'lastName',label:'Last Name'},
+              {key:'status',label:'Status'},{key:'department',label:'Department'},
+              {key:'jobTitle',label:'Job Title'},{key:'createdAt',label:'Joined'}
+            ])} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm bg-white/5 text-slate-300 hover:text-white border border-white/10 transition-all">
+              <Download className="w-4 h-4"/>CSV
+            </button>
+            <button onClick={load} className="text-slate-400 hover:text-white transition-colors p-2">
               <RefreshCw className="w-4 h-4" />
             </button>
             <Link href="/hr/invite" className="btn-primary flex items-center gap-2 text-sm">
@@ -250,16 +271,23 @@ export default function EmployeesPage() {
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
-                          {emp.status !== 'inactive' && (
+                          {emp.status !== 'inactive' ? (
                             <button
                               onClick={() => deactivate(emp.userId, emp.email)}
                               disabled={deactivating === emp.userId}
-                              className="p-1.5 rounded-lg text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition-colors"
-                              title="Deactivate"
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-orange-400 hover:bg-orange-500/10 transition-colors"
+                              title="Deactivate employee"
                             >
-                              {deactivating === emp.userId
-                                ? <Loader2 className="w-4 h-4 animate-spin" />
-                                : <UserX className="w-4 h-4" />}
+                              {deactivating === emp.userId ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserX className="w-4 h-4" />}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => reactivate(emp.userId, emp.email)}
+                              disabled={deactivating === emp.userId}
+                              className="p-1.5 rounded-lg text-slate-500 hover:text-green-400 hover:bg-green-500/10 transition-colors"
+                              title="Reactivate employee"
+                            >
+                              {deactivating === emp.userId ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4" />}
                             </button>
                           )}
                         </div>

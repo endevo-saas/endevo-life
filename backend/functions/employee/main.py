@@ -44,11 +44,12 @@ def handler(event, context):
 
     # GET /api/employee/dashboard
     if path.endswith("/dashboard") and method == "GET":
-        certs = CERT_T.scan(FilterExpression="tenantId = :t AND userId = :u", ExpressionAttributeValues={":t": tenant_id, ":u": user_sub})
-        courses = TRAIN_T.scan(FilterExpression="tenantId = :t", ExpressionAttributeValues={":t": tenant_id})
-        progress = PROG_T.scan(FilterExpression="userId = :u", ExpressionAttributeValues={":u": user_sub})
-        total_courses = len(courses.get("Items", []))
+        from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+        courses_resp = TRAIN_T.query(KeyConditionExpression=_Key("tenantId").eq(tenant_id))
+        total_courses = len(courses_resp.get("Items", []))
+        progress = PROG_T.scan(FilterExpression=_Attr("userId").eq(user_sub))
         completed = len([p for p in progress.get("Items", []) if p.get("completed")])
+        certs = CERT_T.scan(FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id))
         return resp(200, {
             "total_courses":     total_courses,
             "completed_courses": completed,
@@ -58,7 +59,8 @@ def handler(event, context):
 
     # GET /api/employee/profile
     if path.endswith("/profile") and method == "GET":
-        result = USERS_T.scan(FilterExpression="email = :e AND tenantId = :t", ExpressionAttributeValues={":e": email, ":t": tenant_id})
+        from boto3.dynamodb.conditions import Attr as _Attr
+        result = USERS_T.scan(FilterExpression=_Attr("email").eq(email) & _Attr("tenantId").eq(tenant_id))
         items = result.get("Items", [])
         if not items: return err(404, "Profile not found")
         profile = {k: v for k, v in items[0].items() if k not in ["inviteToken"]}
@@ -66,10 +68,11 @@ def handler(event, context):
 
     # PUT /api/employee/profile
     if path.endswith("/profile") and method == "PUT":
+        from boto3.dynamodb.conditions import Attr as _Attr
         allowed = ["firstName","lastName","jobTitle","department"]
         updates = {k: v for k, v in body.items() if k in allowed}
         if not updates: return err(400, "Nothing to update")
-        result = USERS_T.scan(FilterExpression="email = :e AND tenantId = :t", ExpressionAttributeValues={":e": email, ":t": tenant_id})
+        result = USERS_T.scan(FilterExpression=_Attr("email").eq(email) & _Attr("tenantId").eq(tenant_id))
         items = result.get("Items", [])
         if not items: return err(404, "Profile not found")
         user_id = items[0]["userId"]
@@ -81,14 +84,26 @@ def handler(event, context):
 
     # GET /api/employee/training
     if path.endswith("/training") and method == "GET":
-        courses = TRAIN_T.scan(FilterExpression="tenantId = :t", ExpressionAttributeValues={":t": tenant_id})
-        progress = PROG_T.scan(FilterExpression="userId = :u", ExpressionAttributeValues={":u": user_sub})
-        prog_map = {p["courseId"]: p for p in progress.get("Items", [])}
+        from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+        courses_resp = TRAIN_T.query(KeyConditionExpression=_Key("tenantId").eq(tenant_id))
+        courses = courses_resp.get("Items", [])
+        progress = PROG_T.scan(FilterExpression=_Attr("userId").eq(user_sub))
+        # Build progress map keyed by both videoId and courseId for safety
+        prog_map = {}
+        for p in progress.get("Items", []):
+            prog_map[p.get("videoId", "")] = p
+            prog_map[p.get("courseId", "")] = p
         result = []
-        for c in courses.get("Items", []):
-            cid = c.get("courseId","")
-            p = prog_map.get(cid, {})
-            result.append({**c, "progress_pct": p.get("progressPct", 0), "completed": p.get("completed", False)})
+        for c in courses:
+            # videoId is the sort key in training table — use as courseId
+            vid = c.get("videoId", c.get("courseId", ""))
+            p = prog_map.get(vid, {})
+            result.append({
+                **c,
+                "courseId":    vid,
+                "progress_pct": p.get("progressPct", 0),
+                "completed":   p.get("completed", False)
+            })
         return resp(200, {"courses": result, "count": len(result)})
 
     # POST /api/employee/progress

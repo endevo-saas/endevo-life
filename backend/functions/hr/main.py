@@ -235,18 +235,34 @@ def handler(event, context):
         user_id       = str(uuid.uuid4())
         now           = datetime.now(timezone.utc).isoformat()
 
+        # Look up tenant name for Cognito attribute
+        tenant_name = ""
+        try:
+            t = dynamo.Table("endevo-uat-tenants").get_item(Key={"tenantId": tenant_id}).get("Item")
+            tenant_name = t.get("name", "") if t else ""
+        except Exception:
+            pass
+
+        # Check global email uniqueness — one email one role
+        from boto3.dynamodb.conditions import Attr as _Attr
+        global_existing = scan_all(USERS_T, _Attr("email").eq(email))
+        if global_existing:
+            existing_role = global_existing[0].get("role", "unknown")
+            return err(409, f"{email} is already registered as {existing_role} in the system. One email can only hold one role.")
+
         # Create Cognito user
         try:
             cognito.admin_create_user(
                 UserPoolId=POOL_ID, Username=email,
                 TemporaryPassword=temp_password,
                 UserAttributes=[
-                    {"Name": "email",           "Value": email},
-                    {"Name": "email_verified",  "Value": "true"},
-                    {"Name": "given_name",      "Value": first_name},
-                    {"Name": "family_name",     "Value": last_name},
-                    {"Name": "custom:role",     "Value": "EMPLOYEE"},
-                    {"Name": "custom:tenantId", "Value": tenant_id},
+                    {"Name": "email",             "Value": email},
+                    {"Name": "email_verified",    "Value": "true"},
+                    {"Name": "given_name",        "Value": first_name},
+                    {"Name": "family_name",       "Value": last_name},
+                    {"Name": "custom:role",       "Value": "EMPLOYEE"},
+                    {"Name": "custom:tenantId",   "Value": tenant_id},
+                    {"Name": "custom:tenantName", "Value": tenant_name},
                 ],
                 MessageAction="SUPPRESS"
             )
@@ -323,19 +339,98 @@ def handler(event, context):
               f"Updated {item.get('email','')} fields: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "Employee updated"})
 
-    # ── DELETE /api/hr/employees/{id} ─────────────────────────────────────
+    # ── DELETE /api/hr/employees/{id} — deactivate (no hard delete) ─────────
     if "/employees/" in path and method == "DELETE":
         user_id = path.split("/")[-1]
         item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
         if not item or item.get("tenantId") != tenant_id:
             return err(404, "Employee not found in your organisation")
+        emp_email = item.get("email", "")
+        # Disable in Cognito so they can't login
+        try:
+            cognito.admin_disable_user(UserPoolId=POOL_ID, Username=emp_email)
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "UserNotFoundException":
+                return err(400, f"Deactivation failed: {e.response['Error']['Message']}")
+        now = datetime.now(timezone.utc).isoformat()
         USERS_T.update_item(Key={"userId": user_id},
-            UpdateExpression="SET #s = :v",
+            UpdateExpression="SET #s = :v, deactivatedAt = :at, deactivatedBy = :by",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":v": "inactive"})
+            ExpressionAttributeValues={":v": "inactive", ":at": now, ":by": caller_email})
         audit(tenant_id, caller_email, "EMPLOYEE_DEACTIVATED",
-              f"Deactivated: {item.get('email','')}", ip=ip, device=device)
-        return resp(200, {"message": "Employee deactivated"})
+              f"Deactivated: {emp_email}", ip=ip, device=device, severity="WARNING")
+        return resp(200, {"message": f"Employee {emp_email} deactivated"})
+
+    # ── POST /api/hr/employees/{id}/reactivate ────────────────────────────
+    if "/employees/" in path and path.endswith("/reactivate") and method == "POST":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item or item.get("tenantId") != tenant_id:
+            return err(404, "Employee not found in your organisation")
+        emp_email = item.get("email", "")
+        try:
+            cognito.admin_enable_user(UserPoolId=POOL_ID, Username=emp_email)
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "UserNotFoundException":
+                return err(400, f"Reactivation failed: {e.response['Error']['Message']}")
+        now = datetime.now(timezone.utc).isoformat()
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET #s = :v, reactivatedAt = :at",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "active", ":at": now})
+        audit(tenant_id, caller_email, "EMPLOYEE_REACTIVATED",
+              f"Reactivated: {emp_email}", ip=ip, device=device)
+        return resp(200, {"message": f"Employee {emp_email} reactivated"})
+
+    # ── GET /api/hr/training ──────────────────────────────────────────────
+    if path.endswith("/training") and method == "GET":
+        TRAIN_T  = dynamo.Table("endevo-uat-training")
+        PROG_T   = dynamo.Table("endevo-uat-video-progress")
+        from boto3.dynamodb.conditions import Key as _Key
+        courses_resp = TRAIN_T.query(KeyConditionExpression=_Key("tenantId").eq(tenant_id))
+        courses = courses_resp.get("Items", [])
+        # For each course count employees enrolled / completed
+        employees = scan_all(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("role").eq("EMPLOYEE"))
+        emp_count = len(employees)
+        result = []
+        for c in courses:
+            vid = c.get("videoId", c.get("courseId", ""))
+            enrolled = 0
+            completed_count = 0
+            for emp in employees:
+                prog = PROG_T.get_item(Key={"userId": emp["userId"], "videoId": vid}).get("Item")
+                if prog:
+                    enrolled += 1
+                    if prog.get("completed"):
+                        completed_count += 1
+            result.append({
+                **c,
+                "courseId":       vid,
+                "enrolled":       enrolled,
+                "completed":      completed_count,
+                "not_started":    emp_count - enrolled,
+                "total_employees": emp_count,
+                "completion_rate": round(completed_count / emp_count * 100) if emp_count > 0 else 0,
+                "enrollment_rate": round(enrolled / emp_count * 100) if emp_count > 0 else 0,
+            })
+        return resp(200, {"courses": result, "count": len(result)})
+
+    # ── GET /api/hr/certificates ──────────────────────────────────────────
+    if path.endswith("/certificates") and method == "GET":
+        CERT_T = dynamo.Table("endevo-uat-certificates")
+        certs = scan_all(CERT_T, Attr("tenantId").eq(tenant_id))
+        # Enrich with employee name
+        for c in certs:
+            uid = c.get("userId", "")
+            if uid:
+                user_result = scan_all(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("role").eq("EMPLOYEE"))
+                emp = next((u for u in user_result if u.get("userId") == uid or uid in str(u.get("userId",""))), None)
+                if emp:
+                    c["firstName"] = emp.get("firstName", "")
+                    c["lastName"]  = emp.get("lastName", "")
+                    c["email"]     = emp.get("email", "")
+        certs.sort(key=lambda x: x.get("issuedAt", ""), reverse=True)
+        return resp(200, {"certificates": certs, "count": len(certs)})
 
     # ── GET /api/hr/audit ─────────────────────────────────────────────────
     if path.endswith("/audit") and method == "GET":
