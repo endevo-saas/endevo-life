@@ -445,3 +445,94 @@ These issues occurred before the GitHub-first approach was adopted. Recorded for
 - **Root Cause:** `apiFetch` only handled HTTP error responses (`!res.ok`) but not network-level failures (offline, CORS, DNS). Also, `res.json()` could throw if server returned non-JSON response (e.g., 502 HTML error page from API Gateway).
 - **Fix:** Wrapped `fetch()` in try/catch for network errors. Wrapped `res.json()` in try/catch for parse errors. Improved error message extraction.
 - **Lesson:** Every API call has 3 failure modes: (1) network down, (2) server returns non-JSON, (3) server returns JSON error. All 3 must be handled separately.
+
+---
+
+## Session 7 — Enterprise Control Center + HR Parity (2026-03-29)
+
+### Issue #030
+- **Date:** 2026-03-29
+- **Phase:** 4 — Admin Module
+- **File:** `apps/web/app/(global-admin)/admin/settings/page.tsx`
+- **Error:** `Type error: Argument of type 'PlatformCfg' is not assignable to parameter of type 'Record<string, unknown>'`
+- **Root Cause:** `saveSection()` was typed as `(section: string, values: Record<string, unknown>)`. Passing `cfg.platform` (type `PlatformCfg`) failed TypeScript strict type checking — named interfaces are not assignable to index signatures.
+- **Fix:** Changed param type to `unknown`, cast inside: `await api.adminUpdateConfig(section, values as Record<string, unknown>)`
+- **Lesson:** When passing typed objects to generic API functions, use `unknown` param + internal cast rather than trying to make interfaces extend index signatures.
+
+---
+
+### Issue #031
+- **Date:** 2026-03-29
+- **Phase:** 4 — Tenant Module (Backend)
+- **Lambda:** endevo-uat-fn-admin
+- **Error:** `POST /api/admin/invite` with role=GLOBAL_ADMIN returned 500 — DynamoDB GSI rejected empty string for `tenantId` partition key
+- **Root Cause:** GLOBAL_ADMIN users have no tenant. Invite code set `tenant_id = ""` then wrote it to the `tenantId-index` GSI which rejects empty string partition keys.
+- **Fix:** Added `if user_role == "GLOBAL_ADMIN": tenant_id = "SYSTEM"` before DynamoDB write.
+- **Lesson:** DynamoDB GSI partition keys cannot be empty strings. Always assign a sentinel value (`"SYSTEM"`) for records that logically have no tenant.
+
+---
+
+### Issue #032
+- **Date:** 2026-03-29
+- **Phase:** 4 — Tenant Module (Backend + Frontend)
+- **Error:** Creating a new tenant stored HR admin email as metadata only — no Cognito account created, no login possible, no email sent
+- **Root Cause:** `POST /api/admin/tenants` only created the tenant record. HR admin contact fields were stored as text strings, not user accounts.
+- **Fix:** Rewrote tenant creation to: (1) validate hrEmail as mandatory, (2) create Cognito user for HR admin, (3) write DynamoDB user record, (4) send branded welcome email with temp password. Cognito rollback added if DynamoDB write fails.
+- **Lesson:** Every time a tenant is created in a multi-tenant SaaS, the first HR admin must be auto-provisioned atomically. Never store contact info as metadata without backing accounts.
+
+---
+
+### Issue #033
+- **Date:** 2026-03-29
+- **Phase:** 4 — Auth (Backend + Frontend)
+- **File:** `backend/functions/auth/main.py`, `apps/web/app/(auth)/login/page.tsx`
+- **Error:** OTP login — after entering correct 6-digit code, user was redirected back to login page instead of dashboard
+- **Root Cause:** `api.verifyOtp()` returned JWT tokens but the login page never set cookies. `middleware.ts` checked for `access_token` cookie — which was missing — and bounced user to login.
+- **Fix:** Added cookie-setting code in `onOtpSubmit()`: `Cookies.set('access_token', ...)`, `Cookies.set('user_role', ...)`, `Cookies.set('user_email', ...)`
+- **Lesson:** Token verification and cookie persistence are separate steps. Every login path (password, OTP, MFA) must explicitly set all required cookies before redirecting.
+
+---
+
+### Issue #034
+- **Date:** 2026-03-29
+- **Phase:** 4 — Employee Module (Backend)
+- **Lambda:** endevo-uat-fn-employee
+- **Error:** Employee training page showed empty course list despite courses existing in DynamoDB
+- **Root Cause:** Training table uses composite key `(tenantId PK, videoId SK)`. Code used `scan()` with a FilterExpression string — string-format filter expressions are not valid in boto3 resource API (only Attr() conditions are). Also progress map was keyed by `courseId` but table stores key as `videoId`.
+- **Fix:** Replaced scan with `TRAIN_T.query(KeyConditionExpression=Key("tenantId").eq(tenant_id))`. Fixed progress map to index by both `videoId` and `courseId` for safety.
+- **Lesson:** DynamoDB resource API (boto3) requires `Attr()` and `Key()` condition objects, never plain string FilterExpressions. Always use Query (not Scan) when the partition key is known.
+
+---
+
+### Issue #035
+- **Date:** 2026-03-29
+- **Phase:** 4 — HR Module (Backend)
+- **Lambda:** endevo-uat-fn-hr
+- **Error:** Invited employees could log in but saw blank org name in sidebar (shown as empty string)
+- **Root Cause:** HR invite created Cognito user without setting `custom:tenantName` attribute. Employee Lambda reads `custom:tenantName` from JWT to display org name.
+- **Fix:** Added tenant name lookup from DynamoDB before Cognito user creation. Set `custom:tenantName` in `UserAttributes` list.
+- **Lesson:** All Cognito custom attributes must be set at user creation. They cannot be read from DynamoDB at runtime without an extra API call — store in JWT attributes for efficiency.
+
+---
+
+### Issue #036
+- **Date:** 2026-03-29
+- **Phase:** 4 — HR Module (Backend)
+- **Lambda:** endevo-uat-fn-hr
+- **Error:** Deactivating an employee from HR dashboard only changed DynamoDB status — employee could still login via Cognito
+- **Root Cause:** `DELETE /api/hr/employees/{id}` only wrote `status: inactive` to DynamoDB. Cognito account remained enabled.
+- **Fix:** Added `cognito.admin_disable_user()` call before DynamoDB update. Added `admin_enable_user()` in new reactivate endpoint.
+- **Lesson:** User deactivation in a Cognito-backed system requires TWO operations: (1) disable in Cognito (blocks login), (2) update status in DynamoDB (blocks API). Missing either one leaves a security gap.
+
+---
+
+### Issue #037
+- **Date:** 2026-03-29
+- **Phase:** 4 — Build
+- **File:** `apps/web/app/(global-admin)/admin/subscriptions/page.tsx`
+- **Error:** `Type error: Cannot find name 'Download'` — Amplify build #52 failed
+- **Root Cause:** Added `Download` icon usage (`exportCsv` button) but forgot to add it to the lucide-react import line.
+- **Fix:** Added `Download` to the import: `CreditCard, ..., Settings, Download`
+- **Lesson:** After adding any new Lucide icon, always verify it appears in the import statement. TypeScript only catches this at build time, not during local dev if tsconfig is loose.
+
+---
