@@ -295,7 +295,7 @@ def handler(event, context):
             "maxSeats": max_seats, "employeeCount": 0,
             "tenantCode": tenant_id
         })
-        audit("SYSTEM", caller_email, "TENANT_CREATED", f"Created tenant: {name} ({tenant_id}, ip=ip, device=device)")
+        audit("SYSTEM", caller_email, "TENANT_CREATED", f"Created tenant: {name} ({tenant_id})", ip=ip, device=device)
         return resp(200, {"message": "Tenant created", "tenant_id": tenant_id, "tenant_code": tenant_id})
 
     # ── GET /api/admin/tenants/{id} ───────────────────────────────────────
@@ -453,7 +453,7 @@ def handler(event, context):
             "createdBy": caller_email, "createdAt": now
         })
         audit(tenant_id or "SYSTEM", caller_email, "USER_CREATED",
-              f"Created {user_role}: {email} (tenant: {tenant_name or 'SYSTEM'}, ip=ip, device=device)")
+              f"Created {user_role}: {email} (tenant: {tenant_name or 'SYSTEM'})", ip=ip, device=device)
         return resp(200, {
             "message": "User created", "user_id": user_id,
             "email": email, "role": user_role, "temporary_password": password
@@ -495,8 +495,8 @@ def handler(event, context):
                     UserAttributes=[{"Name": "custom:role", "Value": updates["role"]}])
             except:
                 pass
-        audit(item.get("tenantId", "SYSTEM", ip=ip, device=device), caller_email, "USER_UPDATED",
-              f"Updated user: {item['email']} fields: {list(updates.keys())}")
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_UPDATED",
+              f"Updated user: {item['email']} fields: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "User updated"})
 
     # ── DELETE /api/admin/users/{id} ──────────────────────────────────────
@@ -512,8 +512,8 @@ def handler(event, context):
             if e.response["Error"]["Code"] != "UserNotFoundException":
                 return err(400, f"Cognito delete failed: {e.response['Error']['Message']}")
         USERS_T.delete_item(Key={"userId": user_id})
-        audit(item.get("tenantId", "SYSTEM", ip=ip, device=device), caller_email, "USER_DELETED",
-              f"Permanently deleted: {email}")
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_DELETED",
+              f"Permanently deleted: {email}", ip=ip, device=device)
         return resp(200, {"message": f"User {email} permanently deleted"})
 
     # ── POST /api/admin/users/{id}/lock ───────────────────────────────────
@@ -531,7 +531,7 @@ def handler(event, context):
             UpdateExpression="SET #s = :v",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={":v": "locked"})
-        audit(item.get("tenantId", "SYSTEM", ip=ip, device=device), caller_email, "USER_LOCKED", f"Locked: {email}")
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_LOCKED", f"Locked: {email}", ip=ip, device=device)
         return resp(200, {"message": f"User {email} locked"})
 
     # ── POST /api/admin/users/{id}/unlock ─────────────────────────────────
@@ -549,7 +549,7 @@ def handler(event, context):
             UpdateExpression="SET #s = :v",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={":v": "active"})
-        audit(item.get("tenantId", "SYSTEM", ip=ip, device=device), caller_email, "USER_UNLOCKED", f"Unlocked: {email}")
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_UNLOCKED", f"Unlocked: {email}", ip=ip, device=device)
         return resp(200, {"message": f"User {email} unlocked"})
 
     # ── POST /api/admin/users/{id}/reset-password ─────────────────────────
@@ -565,8 +565,8 @@ def handler(event, context):
                 Password=new_password, Permanent=True)
         except ClientError as e:
             return err(400, f"Password reset failed: {e.response['Error']['Message']}")
-        audit(item.get("tenantId", "SYSTEM", ip=ip, device=device), caller_email, "PASSWORD_RESET",
-              f"Reset password for: {email}")
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "PASSWORD_RESET",
+              f"Reset password for: {email}", ip=ip, device=device)
         return resp(200, {"message": f"Password reset for {email}", "new_password": new_password})
 
     # ── POST /api/admin/invite ────────────────────────────────────────────
@@ -650,7 +650,7 @@ def handler(event, context):
             email_sent = False
 
         audit(tenant_id or "SYSTEM", caller_email, "USER_INVITED",
-              f"Invited {email} as {user_role}" + (f" to {tenant_name}" if tenant_name else "", ip=ip, device=device))
+              f"Invited {email} as {user_role}" + (f" to {tenant_name}" if tenant_name else ""), ip=ip, device=device)
         return resp(200, {
             "message": f"Invitation sent to {email}",
             "user_id": user_id, "email_sent": email_sent,
