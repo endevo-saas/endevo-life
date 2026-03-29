@@ -9,6 +9,7 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Eye, EyeOff, Loader2, Shield, Sparkles, RefreshCw, Mail, KeyRound } from 'lucide-react'
 import Link from 'next/link'
+import Cookies from 'js-cookie'
 import { signIn } from '@/lib/auth/cognito'
 import { api } from '@/lib/api'
 
@@ -46,7 +47,6 @@ export default function LoginPage() {
   const [otpRef, setOtpRef]       = useState('')
   const [otpEmail, setOtpEmail]   = useState('')
   const [otpCode, setOtpCode]     = useState('')
-  const [resending, setResending] = useState(false)
   // MFA (TOTP authenticator) step
   const [mfaCode, setMfaCode]     = useState('')
   const [session, setSession]     = useState('')
@@ -88,20 +88,19 @@ export default function LoginPage() {
     if (otpCode.length !== 6) { setError('Enter the 6-digit code from your email'); return }
     setLoading(true); setError('')
     try {
-      const res = await api.verifyOtp(otpEmail, otpRef, otpCode) as Record<string, unknown>
-      routeByRole(res.role as string, router)
+      const res = await api.verifyOtp(otpEmail, otpRef, otpCode) as Record<string, string>
+      // Set auth cookies — same as signIn() in cognito.ts
+      if (res.access_token) {
+        Cookies.set('access_token', res.access_token, { expires: 1, sameSite: 'strict' })
+        Cookies.set('id_token',     res.id_token,     { expires: 1, sameSite: 'strict' })
+        Cookies.set('user_role',    res.role,          { expires: 1, sameSite: 'strict' })
+        Cookies.set('user_email',   res.email || '',   { expires: 1, sameSite: 'strict' })
+      }
+      routeByRole(res.role, router)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Verification failed')
       setOtpCode('')
     } finally { setLoading(false) }
-  }
-
-  const resendOtp = async () => {
-    setResending(true); setError('')
-    try {
-      // Re-trigger login (user needs to re-enter password for security)
-      setStep('credentials'); setOtpCode(''); setOtpRef(''); refreshCaptcha()
-    } finally { setResending(false) }
   }
 
   const onMfaSubmit = async () => {
