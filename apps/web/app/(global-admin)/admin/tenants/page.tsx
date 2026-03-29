@@ -4,9 +4,10 @@ export const dynamic = 'force-dynamic'
 import React, { useEffect, useState } from 'react'
 import {
   Building2, Plus, Pencil, Trash2, Check, X, Loader2, AlertCircle,
-  RefreshCw, Users, Globe, Mail, Eye, ChevronDown, Tag, Crown
+  RefreshCw, Users, Globe, Mail, Eye, ChevronDown, Tag, Crown, ArrowUpRight
 } from 'lucide-react'
 import { api, Tenant } from '@/lib/api'
+import Link from 'next/link'
 
 type Modal = 'create' | 'edit' | 'view' | 'delete' | null
 
@@ -156,7 +157,7 @@ export default function TenantsPage() {
                         <div className="flex items-center gap-2.5">
                           <div className="w-9 h-9 rounded-xl bg-brand-600/20 flex items-center justify-center text-brand-300 text-sm font-bold flex-shrink-0">{(t.name?.[0] ?? '?').toUpperCase()}</div>
                           <div>
-                            <div className="text-sm font-medium text-white">{t.name}</div>
+                            <Link href={`/admin/tenants/${t.tenantId}`} className="text-sm font-medium text-white hover:text-brand-300 transition-colors">{t.name}</Link>
                             {t.website && <a href={t.website} target="_blank" rel="noreferrer" className="text-xs text-slate-500 hover:text-brand-400 flex items-center gap-1"><Globe className="w-3 h-3"/>{t.website.replace(/^https?:\/\//,'')}</a>}
                           </div>
                         </div>
@@ -175,6 +176,7 @@ export default function TenantsPage() {
                       <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{t.createdAt?new Date(t.createdAt).toLocaleDateString():'—'}</td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Link href={`/admin/tenants/${t.tenantId}`} className="p-1.5 rounded-lg hover:bg-brand-500/20 text-slate-400 hover:text-brand-300 transition-all" title="Open Tenant Dashboard"><ArrowUpRight className="w-3.5 h-3.5"/></Link>
                           <button onClick={()=>openView(t)} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all" title="View"><Eye className="w-3.5 h-3.5"/></button>
                           <button onClick={()=>openEdit(t)} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all" title="Edit"><Pencil className="w-3.5 h-3.5"/></button>
                           <button onClick={()=>openDelete(t)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-slate-400 hover:text-red-400 transition-all" title="Delete"><Trash2 className="w-3.5 h-3.5"/></button>

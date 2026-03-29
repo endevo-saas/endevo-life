@@ -280,12 +280,12 @@ def handler(event, context):
         if hr_email and not validate_email(hr_email):
             return err(400, "Invalid HR admin email format")
 
-        # Sequential tenant ID
+        # Sequential tenant ID — format: tenant-00001 (supports up to 99,999+)
         seq = count_items(TENANTS_T) + 1
-        tenant_id = f"tenant-{seq:03d}"
+        tenant_id = f"tenant-{seq:05d}"
         while TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item"):
             seq += 1
-            tenant_id = f"tenant-{seq:03d}"
+            tenant_id = f"tenant-{seq:05d}"
 
         now = datetime.now(timezone.utc).isoformat()
         TENANTS_T.put_item(Item={
