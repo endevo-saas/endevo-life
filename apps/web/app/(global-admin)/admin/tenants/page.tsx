@@ -154,7 +154,7 @@ export default function TenantsPage() {
                     <tr key={t.tenantId} className="hover:bg-white/3 transition-colors group">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-9 h-9 rounded-xl bg-brand-600/20 flex items-center justify-center text-brand-300 text-sm font-bold flex-shrink-0">{t.name[0].toUpperCase()}</div>
+                          <div className="w-9 h-9 rounded-xl bg-brand-600/20 flex items-center justify-center text-brand-300 text-sm font-bold flex-shrink-0">{(t.name?.[0] ?? '?').toUpperCase()}</div>
                           <div>
                             <div className="text-sm font-medium text-white">{t.name}</div>
                             {t.website && <a href={t.website} target="_blank" rel="noreferrer" className="text-xs text-slate-500 hover:text-brand-400 flex items-center gap-1"><Globe className="w-3 h-3"/>{t.website.replace(/^https?:\/\//,'')}</a>}

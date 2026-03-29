@@ -15,6 +15,7 @@ export async function signIn(email: string, password: string) {
     Cookies.set('access_token', data.access_token, { expires: 1, sameSite: 'strict' })
     Cookies.set('id_token',     data.id_token,     { expires: 1, sameSite: 'strict' })
     Cookies.set('user_role',    data.role,          { expires: 1, sameSite: 'strict' })
+    Cookies.set('user_email',   data.email || '',   { expires: 1, sameSite: 'strict' })
   }
   return data
 }
