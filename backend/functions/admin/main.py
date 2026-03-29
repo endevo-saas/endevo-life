@@ -413,8 +413,18 @@ def handler(event, context):
         if password and len(password) < 8:
             return err(400, "Password must be at least 8 characters")
 
+        # Global admins belong to SYSTEM tenant
+        if user_role == "GLOBAL_ADMIN":
+            tenant_id = "SYSTEM"
+
+        # Enforce email uniqueness across all roles
+        existing = scan_all(USERS_T, Attr("email").eq(email))
+        if existing:
+            existing_role = existing[0].get("role", "unknown")
+            return err(409, f"Email {email} already registered as {existing_role}. One email, one role.")
+
         tenant_name = ""
-        if tenant_id:
+        if tenant_id and tenant_id != "SYSTEM":
             t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
             if not t:
                 return err(404, f"Tenant {tenant_id} not found")
@@ -446,12 +456,19 @@ def handler(event, context):
 
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        USERS_T.put_item(Item={
-            "userId": user_id, "tenantId": tenant_id, "email": email,
-            "firstName": first, "lastName": last, "role": user_role,
-            "status": "active", "department": department, "jobTitle": job_title,
-            "createdBy": caller_email, "createdAt": now
-        })
+        try:
+            USERS_T.put_item(Item={
+                "userId": user_id, "tenantId": tenant_id, "email": email,
+                "firstName": first, "lastName": last, "role": user_role,
+                "status": "active", "department": department, "jobTitle": job_title,
+                "createdBy": caller_email, "createdAt": now
+            })
+        except Exception as e:
+            try:
+                cognito.admin_delete_user(UserPoolId=POOL_ID, Username=email)
+            except Exception:
+                pass
+            return err(500, f"Failed to save user record: {str(e)}")
         audit(tenant_id or "SYSTEM", caller_email, "USER_CREATED",
               f"Created {user_role}: {email} (tenant: {tenant_name or 'SYSTEM'})", ip=ip, device=device)
         return resp(200, {
@@ -586,8 +603,18 @@ def handler(event, context):
         if user_role in ("HR_ADMIN", "EMPLOYEE") and not tenant_id:
             return err(400, "tenantId required for HR_ADMIN/EMPLOYEE")
 
+        # Global admins belong to SYSTEM tenant (not a real tenant)
+        if user_role == "GLOBAL_ADMIN":
+            tenant_id = "SYSTEM"
+
+        # Check email uniqueness across ALL roles globally
+        existing = scan_all(USERS_T, Attr("email").eq(email))
+        if existing:
+            existing_role = existing[0].get("role", "unknown")
+            return err(409, f"Email {email} is already registered as {existing_role}. One email can only hold one role.")
+
         tenant_name = ""
-        if tenant_id:
+        if tenant_id and tenant_id != "SYSTEM":
             t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
             if not t:
                 return err(404, f"Tenant {tenant_id} not found")
@@ -616,17 +643,25 @@ def handler(event, context):
         except ClientError as e:
             code = e.response["Error"]["Code"]
             if code == "UsernameExistsException":
-                return err(409, f"User {email} already exists")
+                return err(409, f"User {email} already exists in Cognito")
             return err(400, str(e.response["Error"]["Message"]))
 
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
-        USERS_T.put_item(Item={
-            "userId": user_id, "tenantId": tenant_id, "email": email,
-            "firstName": first, "lastName": last, "role": user_role,
-            "status": "pending", "inviteToken": invite_token,
-            "createdBy": caller_email, "createdAt": now
-        })
+        try:
+            USERS_T.put_item(Item={
+                "userId": user_id, "tenantId": tenant_id, "email": email,
+                "firstName": first, "lastName": last, "role": user_role,
+                "status": "pending", "inviteToken": invite_token,
+                "createdBy": caller_email, "createdAt": now
+            })
+        except Exception as e:
+            # DynamoDB write failed — clean up Cognito user to avoid orphan
+            try:
+                cognito.admin_delete_user(UserPoolId=POOL_ID, Username=email)
+            except Exception:
+                pass
+            return err(500, f"Failed to save user record: {str(e)}")
 
         invite_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/register?token={invite_token}&email={email}"
         try:
