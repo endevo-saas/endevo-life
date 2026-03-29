@@ -6,7 +6,7 @@ import {
   CreditCard, Loader2, AlertCircle, RefreshCw, TrendingUp,
   Building2, CheckCircle, Clock, AlertTriangle, ChevronDown,
   Star, Zap, Crown, Sparkles, ArrowUpRight, Edit3, DollarSign,
-  Users, Plus, Save, X, BarChart3, Calendar, Settings
+  Users, Plus, Save, X, BarChart3, Calendar, Settings, Download
 } from 'lucide-react'
 import { api, Tenant } from '@/lib/api'
 import { exportCsv } from '@/lib/export'
