@@ -103,6 +103,7 @@ export const api = {
   hrDeactivateEmployee: (id: string) =>
     apiFetch(`/api/hr/employees/${id}`, { method: 'DELETE' }),
   hrAudit: () => apiFetch<{ logs: AuditLog[] }>('/api/hr/audit'),
+  hrTenant: () => apiFetch('/api/hr/tenant'),
   hrTraining: () => apiFetch<{ courses: Course[]; count: number }>('/api/hr/training'),
   hrCertificates: () => apiFetch<{ certificates: Certificate[]; count: number }>('/api/hr/certificates'),
   hrReactivateEmployee: (id: string) =>

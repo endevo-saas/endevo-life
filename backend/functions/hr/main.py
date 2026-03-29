@@ -382,6 +382,19 @@ def handler(event, context):
               f"Reactivated: {emp_email}", ip=ip, device=device)
         return resp(200, {"message": f"Employee {emp_email} reactivated"})
 
+    # ── GET /api/hr/tenant ────────────────────────────────────────────────
+    if path.endswith("/tenant") and method == "GET":
+        TENANTS_T = dynamo.Table("endevo-uat-tenants")
+        t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+        if not t:
+            return err(404, "Tenant not found")
+        # Attach live user counts
+        t["user_count"]     = count_items(USERS_T, Attr("tenantId").eq(tenant_id))
+        t["active_count"]   = count_items(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("status").eq("active"))
+        t["employee_count"] = count_items(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("role").eq("EMPLOYEE"))
+        t["hr_count"]       = count_items(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("role").eq("HR_ADMIN"))
+        return resp(200, t)
+
     # ── GET /api/hr/training ──────────────────────────────────────────────
     if path.endswith("/training") and method == "GET":
         TRAIN_T  = dynamo.Table("endevo-uat-training")

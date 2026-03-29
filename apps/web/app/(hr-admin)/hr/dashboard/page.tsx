@@ -4,7 +4,8 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useState, useCallback } from 'react'
 import {
   Users, UserCheck, Clock, TrendingUp, Loader2, RefreshCw,
-  UserPlus, Activity, Award, Target, Zap, Sparkles, ArrowUpRight
+  UserPlus, Activity, Award, Target, Sparkles, ArrowUpRight,
+  BookOpen, CreditCard, FileText, Settings
 } from 'lucide-react'
 import { api, User } from '@/lib/api'
 import Link from 'next/link'
@@ -214,10 +215,13 @@ export default function HrDashboard() {
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { href: '/hr/employees', icon: Users,    label: 'All Employees',   color: 'hover:border-blue-500/50 hover:bg-blue-600/10',    iconColor: 'text-blue-400' },
-              { href: '/hr/invite',    icon: UserPlus, label: 'Invite Employee', color: 'hover:border-green-500/50 hover:bg-green-600/10',   iconColor: 'text-green-400' },
-              { href: '/hr/audit',     icon: Activity, label: 'Audit Log',       color: 'hover:border-yellow-500/50 hover:bg-yellow-600/10', iconColor: 'text-yellow-400' },
-              { href: '/hr/settings',  icon: Award,    label: 'Settings',        color: 'hover:border-purple-500/50 hover:bg-purple-600/10', iconColor: 'text-purple-400' },
+              { href: '/hr/employees',    icon: Users,      label: 'All Employees',     color: 'hover:border-blue-500/50 hover:bg-blue-600/10',    iconColor: 'text-blue-400' },
+              { href: '/hr/invite',       icon: UserPlus,   label: 'Invite Employee',   color: 'hover:border-green-500/50 hover:bg-green-600/10',   iconColor: 'text-green-400' },
+              { href: '/hr/training',     icon: BookOpen,   label: 'Training',          color: 'hover:border-brand-500/50 hover:bg-brand-600/10',   iconColor: 'text-brand-300' },
+              { href: '/hr/certificates', icon: Award,      label: 'Certificates',      color: 'hover:border-purple-500/50 hover:bg-purple-600/10', iconColor: 'text-purple-400' },
+              { href: '/hr/subscription', icon: CreditCard, label: 'Subscription',      color: 'hover:border-orange-500/50 hover:bg-orange-600/10', iconColor: 'text-orange-400' },
+              { href: '/hr/audit',        icon: FileText,   label: 'Audit Log',         color: 'hover:border-yellow-500/50 hover:bg-yellow-600/10', iconColor: 'text-yellow-400' },
+              { href: '/hr/settings',     icon: Settings,   label: 'Settings',          color: 'hover:border-slate-500/50 hover:bg-slate-600/10',   iconColor: 'text-slate-400' },
             ].map(a => {
               const Icon = a.icon
               return (

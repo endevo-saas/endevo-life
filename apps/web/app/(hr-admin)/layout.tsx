@@ -5,19 +5,20 @@ import { usePathname } from 'next/navigation'
 import {
   Users, BarChart3, UserPlus, FileText, LogOut, Settings,
   Globe, Monitor, MapPin, Wifi, ChevronDown, ChevronUp, Camera,
-  BookOpen, Award
+  BookOpen, Award, CreditCard
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
 
 const nav = [
-  { href: '/hr/dashboard',  icon: BarChart3,  label: 'Dashboard' },
-  { href: '/hr/employees',  icon: Users,      label: 'Employees' },
-  { href: '/hr/invite',     icon: UserPlus,   label: 'Invite Employee' },
-  { href: '/hr/training',   icon: BookOpen,   label: 'Training & Courses' },
-  { href: '/hr/certificates', icon: Award,    label: 'Certificates' },
-  { href: '/hr/audit',      icon: FileText,   label: 'Audit Log' },
-  { href: '/hr/settings',   icon: Settings,   label: 'Settings' },
+  { href: '/hr/dashboard',    icon: BarChart3,  label: 'Dashboard' },
+  { href: '/hr/employees',    icon: Users,      label: 'Employees' },
+  { href: '/hr/invite',       icon: UserPlus,   label: 'Invite Employee' },
+  { href: '/hr/training',     icon: BookOpen,   label: 'Training & Courses' },
+  { href: '/hr/certificates', icon: Award,      label: 'Certificates' },
+  { href: '/hr/subscription', icon: CreditCard, label: 'Subscription' },
+  { href: '/hr/audit',        icon: FileText,   label: 'Audit Log' },
+  { href: '/hr/settings',     icon: Settings,   label: 'Settings' },
 ]
 
 interface GeoInfo { ip: string; city: string; region: string; country_name: string; postal: string; org: string; latitude: number; longitude: number }

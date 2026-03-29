@@ -2,7 +2,7 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useState } from 'react'
-import { Users, Search, Pencil, UserX, Check, X, Loader2, AlertCircle, RefreshCw, UserPlus, Download, UserCheck } from 'lucide-react'
+import { Users, Search, Pencil, UserX, Check, X, Loader2, AlertCircle, RefreshCw, UserPlus, Download, UserCheck, Lock, Unlock, KeyRound } from 'lucide-react'
 import { exportCsv } from '@/lib/export'
 import { api, User } from '@/lib/api'
 import Link from 'next/link'
@@ -19,6 +19,7 @@ export default function EmployeesPage() {
   const [editSaving, setEditSaving] = useState(false)
   const [deactivating, setDeactivating] = useState<string | null>(null)
   const [successMsg, setSuccessMsg] = useState('')
+  const [resetPwResult, setResetPwResult] = useState<{ email: string; password: string } | null>(null)
 
   async function load() {
     setLoading(true)
@@ -105,6 +106,38 @@ export default function EmployeesPage() {
     }
   }
 
+  async function toggleLock(emp: User) {
+    const locking = emp.status !== 'locked'
+    setDeactivating(emp.userId)
+    try {
+      if (locking) {
+        await api.adminLockUser(emp.userId)
+        showSuccess(`${emp.email} locked`)
+      } else {
+        await api.adminUnlockUser(emp.userId)
+        showSuccess(`${emp.email} unlocked`)
+      }
+      load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Action failed')
+    } finally {
+      setDeactivating(null)
+    }
+  }
+
+  async function resetPassword(emp: User) {
+    if (!confirm(`Reset password for ${emp.email}? A new temporary password will be generated.`)) return
+    setDeactivating(emp.userId)
+    try {
+      const res = await api.adminResetPassword(emp.userId) as { temporary_password: string }
+      setResetPwResult({ email: emp.email, password: res.temporary_password })
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Reset failed')
+    } finally {
+      setDeactivating(null)
+    }
+  }
+
   return (
     <div className="p-8">
       <div className="max-w-6xl mx-auto">
@@ -132,6 +165,19 @@ export default function EmployeesPage() {
 
         {successMsg && (
           <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-xl text-green-400 text-sm">✓ {successMsg}</div>
+        )}
+        {resetPwResult && (
+          <div className="mb-4 p-4 bg-blue-500/10 border border-blue-500/30 rounded-xl">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-blue-300 text-sm font-medium">Password reset for {resetPwResult.email}</p>
+                <p className="text-xs text-slate-400 mt-1">New temporary password:</p>
+                <code className="text-white font-mono text-sm bg-white/10 px-3 py-1 rounded mt-1 inline-block">{resetPwResult.password}</code>
+                <p className="text-xs text-slate-500 mt-1">Share this securely with the employee. They should change it on next login.</p>
+              </div>
+              <button onClick={() => setResetPwResult(null)} className="text-slate-500 hover:text-white p-1"><X className="w-4 h-4"/></button>
+            </div>
+          </div>
         )}
         {error && (
           <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex items-center gap-2">
@@ -271,12 +317,28 @@ export default function EmployeesPage() {
                           >
                             <Pencil className="w-4 h-4" />
                           </button>
+                          <button
+                            onClick={() => toggleLock(emp)}
+                            disabled={deactivating === emp.userId}
+                            className={`p-1.5 rounded-lg transition-colors ${emp.status==='locked' ? 'text-slate-500 hover:text-green-400 hover:bg-green-500/10' : 'text-slate-500 hover:text-yellow-400 hover:bg-yellow-500/10'}`}
+                            title={emp.status==='locked' ? 'Unlock' : 'Lock'}
+                          >
+                            {emp.status==='locked' ? <Unlock className="w-4 h-4"/> : <Lock className="w-4 h-4"/>}
+                          </button>
+                          <button
+                            onClick={() => resetPassword(emp)}
+                            disabled={deactivating === emp.userId}
+                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
+                            title="Reset password"
+                          >
+                            <KeyRound className="w-4 h-4"/>
+                          </button>
                           {emp.status !== 'inactive' ? (
                             <button
                               onClick={() => deactivate(emp.userId, emp.email)}
                               disabled={deactivating === emp.userId}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-orange-400 hover:bg-orange-500/10 transition-colors"
-                              title="Deactivate employee"
+                              title="Deactivate"
                             >
                               {deactivating === emp.userId ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserX className="w-4 h-4" />}
                             </button>
@@ -285,7 +347,7 @@ export default function EmployeesPage() {
                               onClick={() => reactivate(emp.userId, emp.email)}
                               disabled={deactivating === emp.userId}
                               className="p-1.5 rounded-lg text-slate-500 hover:text-green-400 hover:bg-green-500/10 transition-colors"
-                              title="Reactivate employee"
+                              title="Reactivate"
                             >
                               {deactivating === emp.userId ? <Loader2 className="w-4 h-4 animate-spin" /> : <UserCheck className="w-4 h-4" />}
                             </button>
