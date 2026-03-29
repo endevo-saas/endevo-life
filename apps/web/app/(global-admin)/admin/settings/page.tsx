@@ -136,10 +136,10 @@ export default function AdminSettingsPage() {
 
   function showMsg(msg: string) { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
 
-  async function saveSection(section: string, values: Record<string, unknown>) {
+  async function saveSection(section: string, values: unknown) {
     setSaving(section); setError('')
     try {
-      await api.adminUpdateConfig(section, values)
+      await api.adminUpdateConfig(section, values as Record<string, unknown>)
       showMsg(`${section.charAt(0).toUpperCase() + section.slice(1)} settings saved`)
       loadConfig()
     } catch (e: unknown) {
