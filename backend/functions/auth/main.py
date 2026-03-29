@@ -229,31 +229,38 @@ def handler(event, context):
             tenant_id  = attrs.get("custom:tenantId", "")
             first_name = attrs.get("given_name", "")
 
-            # ── Email OTP step ──────────────────────────────────────
-            otp_code = generate_otp()
-            otp_ref  = str(_uuid.uuid4())
+            role       = attrs.get("custom:role", "EMPLOYEE")
             token_payload = {
                 "access_token":  tokens["AccessToken"],
                 "id_token":      tokens["IdToken"],
                 "refresh_token": tokens["RefreshToken"],
-                "role":          attrs.get("custom:role", "EMPLOYEE"),
+                "role":          role,
                 "tenant_id":     tenant_id,
                 "tenant_name":   attrs.get("custom:tenantName", ""),
                 "email":         attrs.get("email", email),
                 "first_name":    first_name,
                 "last_name":     attrs.get("family_name", "")
             }
-            store_otp(otp_ref, email, otp_code, token_payload)
-            email_ok = send_otp_email(email, otp_code, first_name)
 
-            security_audit("OTP_SENT", email, tenant_id or "AUTH", ip, device,
-                           f"OTP sent for login from {ip} | email_sent={email_ok}")
-            return resp(200, {
-                "otp_required": True,
-                "otp_ref":      otp_ref,
-                "email":        email,
-                "message":      f"Verification code sent to {email}. Please check your inbox."
-            })
+            # ── Email OTP only for GLOBAL_ADMIN ────────────────────
+            if role == "GLOBAL_ADMIN":
+                otp_code = generate_otp()
+                otp_ref  = str(_uuid.uuid4())
+                store_otp(otp_ref, email, otp_code, token_payload)
+                email_ok = send_otp_email(email, otp_code, first_name)
+                security_audit("OTP_SENT", email, tenant_id or "AUTH", ip, device,
+                               f"OTP sent for GLOBAL_ADMIN login from {ip} | email_sent={email_ok}")
+                return resp(200, {
+                    "otp_required": True,
+                    "otp_ref":      otp_ref,
+                    "email":        email,
+                    "message":      f"Verification code sent to {email}. Please check your inbox."
+                })
+
+            # HR_ADMIN and EMPLOYEE — direct login, no OTP
+            security_audit("LOGIN_SUCCESS", email, tenant_id or "AUTH", ip, device,
+                           f"Login from {ip} | {device[:80]}")
+            return resp(200, token_payload)
 
         except ClientError as e:
             code = e.response["Error"]["Code"]
