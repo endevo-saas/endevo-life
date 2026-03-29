@@ -280,6 +280,66 @@ def handler(event, context):
         except ClientError as e:
             return err(400, str(e.response["Error"]["Message"]))
 
+    # ── POST /api/auth/signup ────────────────────────────────────
+    # Individual self-signup — no invite required, assigns to tenant-ind
+    if path.endswith("/signup") and method == "POST":
+        import uuid as _uuid
+        email    = (body.get("email") or "").lower().strip()
+        password = body.get("password") or ""
+        first    = (body.get("first_name") or "").strip()
+        last     = (body.get("last_name") or "").strip()
+        company  = (body.get("company") or "Individual").strip()[:100]
+        if not all([email, password, first, last]):
+            return err(400, "All fields are required")
+        # Basic email validation
+        if not re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", email):
+            return err(400, "Invalid email address")
+        # Check if email already exists in Cognito
+        try:
+            cognito.admin_get_user(UserPoolId=POOL_ID, Username=email)
+            return err(409, "An account with this email already exists")
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "UserNotFoundException":
+                return err(500, "Signup error — please try again")
+        # Create user in Cognito
+        try:
+            cognito.admin_create_user(
+                UserPoolId=POOL_ID, Username=email,
+                TemporaryPassword=password,
+                UserAttributes=[
+                    {"Name": "email",             "Value": email},
+                    {"Name": "email_verified",    "Value": "true"},
+                    {"Name": "given_name",        "Value": first},
+                    {"Name": "family_name",       "Value": last},
+                    {"Name": "custom:role",       "Value": "EMPLOYEE"},
+                    {"Name": "custom:tenantId",   "Value": "tenant-ind"},
+                    {"Name": "custom:tenantName", "Value": "Individual"},
+                ],
+                MessageAction="SUPPRESS"
+            )
+            cognito.admin_set_user_password(
+                UserPoolId=POOL_ID, Username=email, Password=password, Permanent=True
+            )
+        except ClientError as e:
+            return err(400, str(e.response["Error"]["Message"]))
+        # Create DynamoDB record
+        user_id = str(_uuid.uuid4())
+        USERS_T.put_item(Item={
+            "userId":    user_id,
+            "email":     email,
+            "firstName": first,
+            "lastName":  last,
+            "role":      "EMPLOYEE",
+            "tenantId":  "tenant-ind",
+            "company":   company,
+            "status":    "active",
+            "plan":      "individual",
+            "createdAt": datetime.now(timezone.utc).isoformat(),
+        })
+        security_audit("SIGNUP_SUCCESS", email, "tenant-ind", ip, device,
+                       f"Self-signup: {first} {last} <{email}> company={company}")
+        return resp(200, {"message": "Account created successfully"})
+
     # ── POST /api/auth/change-password ───────────────────────────
     if path.endswith("/change-password") and method == "POST":
         access_token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")

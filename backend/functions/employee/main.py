@@ -122,7 +122,15 @@ def handler(event, context):
         now = datetime.now(timezone.utc).isoformat()
         RESP_T.put_item(Item={"responseId": resp_id, "userId": user_sub, "tenantId": tenant_id, "courseId": course_id, "score": score, "passed": passed, "answers": answers, "submittedAt": now})
         if passed:
-            CERT_T.put_item(Item={"certId": str(uuid.uuid4()), "userId": user_sub, "tenantId": tenant_id, "courseId": course_id, "email": email, "score": score, "issuedAt": now})
+            cert_id = f"{user_sub}#{course_id}"
+            try:
+                CERT_T.put_item(
+                    Item={"certId": cert_id, "userId": user_sub, "tenantId": tenant_id, "courseId": course_id, "email": email, "score": score, "issuedAt": now},
+                    ConditionExpression="attribute_not_exists(certId)"
+                )
+            except ClientError as e:
+                if e.response["Error"]["Code"] != "ConditionalCheckFailedException":
+                    raise
             # Auto-mark progress as completed
             PROG_T.put_item(Item={"userId": user_sub, "videoId": course_id, "progressId": str(uuid.uuid4()), "tenantId": tenant_id, "courseId": course_id, "progressPct": 100, "completed": True, "updatedAt": now})
         return resp(200, {"score": score, "passed": passed, "correct": correct, "total": len(qs), "certificate_issued": passed})

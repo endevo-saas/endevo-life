@@ -27,6 +27,8 @@ export const api = {
   // Auth
   login: (email: string, password: string) =>
     apiFetch('/api/auth/login', { method: 'POST', body: JSON.stringify({ email, password }) }),
+  signup: (body: { email: string; password: string; first_name: string; last_name: string; company?: string }) =>
+    apiFetch('/api/auth/signup', { method: 'POST', body: JSON.stringify(body) }),
   me: () => apiFetch('/api/auth/me'),
 
   // Admin — Tenants

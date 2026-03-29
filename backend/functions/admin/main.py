@@ -340,7 +340,7 @@ def handler(event, context):
         vals  = {f":{k}": v for k, v in updates.items()}
         TENANTS_T.update_item(Key={"tenantId": tenant_id}, UpdateExpression=expr,
             ExpressionAttributeNames=names, ExpressionAttributeValues=vals)
-        audit(tenant_id, caller_email, "TENANT_UPDATED", f"Updated {tenant_id}: {list(updates.keys(, ip=ip, device=device))}")
+        audit(tenant_id, caller_email, "TENANT_UPDATED", f"Updated {tenant_id}: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "Tenant updated"})
 
     # ── DELETE /api/admin/tenants/{id} ────────────────────────────────────
@@ -353,7 +353,7 @@ def handler(event, context):
             UpdateExpression="SET #s = :v",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={":v": "deleted"})
-        audit("SYSTEM", caller_email, "TENANT_DELETED", f"Soft-deleted: {t.get('name', ip=ip, device=device)} ({tenant_id})")
+        audit("SYSTEM", caller_email, "TENANT_DELETED", f"Soft-deleted: {t.get('name')} ({tenant_id})", ip=ip, device=device)
         return resp(200, {"message": "Tenant deleted"})
 
     # ── GET /api/admin/users ──────────────────────────────────────────────
