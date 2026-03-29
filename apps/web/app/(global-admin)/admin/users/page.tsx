@@ -49,7 +49,7 @@ export default function AllUsersPage() {
     if (roleFilter !== 'ALL') list = list.filter(u => u.role === roleFilter)
     if (statusFilter !== 'ALL') list = list.filter(u => u.status === statusFilter)
     if (tenantFilter !== 'ALL') list = list.filter(u => u.tenantId === tenantFilter)
-    if (search) { const q = search.toLowerCase(); list = list.filter(u => u.email.toLowerCase().includes(q) || `${u.firstName} ${u.lastName}`.toLowerCase().includes(q) || u.tenantId.toLowerCase().includes(q)) }
+    if (search) { const q = search.toLowerCase(); list = list.filter(u => (u.email||'').toLowerCase().includes(q) || `${u.firstName||''} ${u.lastName||''}`.toLowerCase().includes(q) || (u.tenantId||'').toLowerCase().includes(q)) }
     setFiltered(list)
   }, [users, search, roleFilter, statusFilter, tenantFilter])
 
@@ -151,7 +151,7 @@ export default function AllUsersPage() {
                     <tr key={u.userId} className="hover:bg-white/3 transition-colors group">
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2.5">
-                          <div className="w-8 h-8 rounded-full bg-brand-600/20 flex items-center justify-center text-brand-300 text-xs font-bold flex-shrink-0">{(u.firstName?.[0]||u.email[0]).toUpperCase()}</div>
+                          <div className="w-8 h-8 rounded-full bg-brand-600/20 flex items-center justify-center text-brand-300 text-xs font-bold flex-shrink-0">{(u.firstName?.[0] || u.email?.[0] || '?').toUpperCase()}</div>
                           <div><div className="text-sm font-medium text-white">{u.firstName} {u.lastName}</div><div className="text-xs text-slate-500">{u.email}</div></div>
                         </div>
                       </td>

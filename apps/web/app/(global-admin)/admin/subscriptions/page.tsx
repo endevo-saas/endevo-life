@@ -205,7 +205,7 @@ export default function SubscriptionsPage() {
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
                           <div className="w-7 h-7 rounded-lg bg-brand-600/20 border border-brand-500/20 flex items-center justify-center text-xs font-bold text-brand-400">
-                            {t.name[0]?.toUpperCase()}
+                            {(t.name?.[0] ?? '?').toUpperCase()}
                           </div>
                           <div>
                             <p className="text-sm font-medium text-white">{t.name}</p>

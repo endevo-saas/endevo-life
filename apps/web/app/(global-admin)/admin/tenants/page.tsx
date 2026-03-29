@@ -69,7 +69,7 @@ export default function TenantsPage() {
 
   const filtered = tenants.filter(t => {
     const q = search.toLowerCase()
-    const matchSearch = !search || t.name.toLowerCase().includes(q) || t.tenantId.toLowerCase().includes(q) || (t.website||'').toLowerCase().includes(q)
+    const matchSearch = !search || (t.name||'').toLowerCase().includes(q) || (t.tenantId||'').toLowerCase().includes(q) || (t.website||'').toLowerCase().includes(q)
     const matchPlan = planFilter==='ALL' || t.plan===planFilter
     return matchSearch && matchPlan
   })

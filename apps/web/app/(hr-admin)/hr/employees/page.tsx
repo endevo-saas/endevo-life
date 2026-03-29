@@ -40,8 +40,8 @@ export default function EmployeesPage() {
     if (search) {
       const q = search.toLowerCase()
       list = list.filter(e =>
-        e.email.toLowerCase().includes(q) ||
-        `${e.firstName} ${e.lastName}`.toLowerCase().includes(q) ||
+        (e.email || '').toLowerCase().includes(q) ||
+        `${e.firstName || ''} ${e.lastName || ''}`.toLowerCase().includes(q) ||
         (e.department || '').toLowerCase().includes(q)
       )
     }
