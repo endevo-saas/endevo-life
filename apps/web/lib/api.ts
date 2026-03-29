@@ -54,8 +54,10 @@ export const api = {
     apiFetch('/api/admin/tenants', { method: 'POST', body: JSON.stringify(body) }),
   adminUpdateTenant: (id: string, body: Record<string, unknown>) =>
     apiFetch(`/api/admin/tenants/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  adminDeleteTenant: (id: string) =>
-    apiFetch(`/api/admin/tenants/${id}`, { method: 'DELETE' }),
+  adminDisableTenant: (id: string) =>
+    apiFetch(`/api/admin/tenants/${id}/disable`, { method: 'POST' }),
+  adminEnableTenant: (id: string) =>
+    apiFetch(`/api/admin/tenants/${id}/enable`, { method: 'POST' }),
   adminInvite: (body: Record<string, unknown>) =>
     apiFetch<{ email_sent: boolean; temp_password: string; user_id: string; invite_url: string }>('/api/admin/invite', { method: 'POST', body: JSON.stringify(body) }),
   changePassword: (oldPassword: string, newPassword: string) =>
@@ -69,8 +71,10 @@ export const api = {
     apiFetch('/api/admin/users', { method: 'POST', body: JSON.stringify(body) }),
   adminUpdateUser: (id: string, body: Record<string, unknown>) =>
     apiFetch(`/api/admin/users/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
-  adminDeleteUser: (id: string) =>
-    apiFetch(`/api/admin/users/${id}`, { method: 'DELETE' }),
+  adminDeactivateUser: (id: string) =>
+    apiFetch(`/api/admin/users/${id}/deactivate`, { method: 'POST' }),
+  adminReactivateUser: (id: string) =>
+    apiFetch(`/api/admin/users/${id}/reactivate`, { method: 'POST' }),
   adminLockUser: (id: string) =>
     apiFetch(`/api/admin/users/${id}/lock`, { method: 'POST' }),
   adminUnlockUser: (id: string) =>

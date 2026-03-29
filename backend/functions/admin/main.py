@@ -483,18 +483,71 @@ def handler(event, context):
         audit(tenant_id, caller_email, "TENANT_UPDATED", f"Updated {tenant_id}: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "Tenant updated"})
 
-    # ── DELETE /api/admin/tenants/{id} ────────────────────────────────────
-    if "/tenants/" in path and method == "DELETE":
-        tenant_id = path.split("/")[-1]
+    # ── POST /api/admin/tenants/{id}/disable ─────────────────────────────
+    if "/tenants/" in path and path.endswith("/disable") and method == "POST":
+        tenant_id = path.split("/")[-2]
         t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
         if not t:
             return err(404, "Tenant not found")
+        if tenant_id in ("SYSTEM", "tenant-ind"):
+            return err(400, "System tenants cannot be disabled")
+        if t.get("status") == "disabled":
+            return err(400, "Tenant is already disabled")
+        now = datetime.now(timezone.utc).isoformat()
         TENANTS_T.update_item(Key={"tenantId": tenant_id},
-            UpdateExpression="SET #s = :v",
+            UpdateExpression="SET #s = :v, disabledAt = :at, disabledBy = :by",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":v": "deleted"})
-        audit("SYSTEM", caller_email, "TENANT_DELETED", f"Soft-deleted: {t.get('name')} ({tenant_id})", ip=ip, device=device)
-        return resp(200, {"message": "Tenant deleted"})
+            ExpressionAttributeValues={":v": "disabled", ":at": now, ":by": caller_email})
+        # Disable all users in this tenant in Cognito
+        all_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("status").eq("active"))
+        for u in all_users:
+            try:
+                cognito.admin_disable_user(UserPoolId=POOL_ID, Username=u["email"])
+                USERS_T.update_item(Key={"userId": u["userId"]},
+                    UpdateExpression="SET #s = :v",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={":v": "inactive"})
+            except Exception:
+                pass
+        audit("SYSTEM", caller_email, "TENANT_DISABLED",
+              f"Disabled tenant: {t.get('name')} ({tenant_id}) — {len(all_users)} users deactivated",
+              ip=ip, device=device, severity="WARNING")
+        return resp(200, {"message": f"Tenant '{t.get('name')}' disabled. {len(all_users)} users deactivated."})
+
+    # ── POST /api/admin/tenants/{id}/enable ──────────────────────────────
+    if "/tenants/" in path and path.endswith("/enable") and method == "POST":
+        tenant_id = path.split("/")[-2]
+        t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+        if not t:
+            return err(404, "Tenant not found")
+        if t.get("status") not in ("disabled", "suspended", "inactive"):
+            return err(400, f"Tenant is already active (status: {t.get('status')})")
+        now = datetime.now(timezone.utc).isoformat()
+        TENANTS_T.update_item(Key={"tenantId": tenant_id},
+            UpdateExpression="SET #s = :v, reactivatedAt = :at, reactivatedBy = :by",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
+        # Re-enable all users in Cognito
+        all_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id))
+        reactivated = 0
+        for u in all_users:
+            try:
+                cognito.admin_enable_user(UserPoolId=POOL_ID, Username=u["email"])
+                USERS_T.update_item(Key={"userId": u["userId"]},
+                    UpdateExpression="SET #s = :v",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={":v": "active"})
+                reactivated += 1
+            except Exception:
+                pass
+        audit("SYSTEM", caller_email, "TENANT_ENABLED",
+              f"Re-enabled tenant: {t.get('name')} ({tenant_id}) — {reactivated} users reactivated",
+              ip=ip, device=device, severity="WARNING")
+        return resp(200, {"message": f"Tenant '{t.get('name')}' re-enabled. {reactivated} users reactivated."})
+
+    # ── DELETE /api/admin/tenants/{id} — BLOCKED, no hard delete ─────────
+    if "/tenants/" in path and method == "DELETE":
+        return err(405, "Tenants cannot be deleted. Use POST /disable to disable or /enable to re-activate.")
 
     # ── GET /api/admin/users ──────────────────────────────────────────────
     if path.endswith("/users") and method == "GET":
@@ -656,22 +709,53 @@ def handler(event, context):
               f"Updated user: {item['email']} fields: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "User updated"})
 
-    # ── DELETE /api/admin/users/{id} ──────────────────────────────────────
+    # ── DELETE /api/admin/users/{id} — BLOCKED, no hard delete ───────────
     if "/users/" in path and method == "DELETE" and not any(x in path for x in ["/lock", "/unlock", "/reset-password"]):
-        user_id = path.split("/")[-1]
+        return err(405, "Users cannot be deleted. Use POST /lock to deactivate or /unlock to re-activate.")
+
+    # ── POST /api/admin/users/{id}/deactivate ─────────────────────────────
+    if "/users/" in path and path.endswith("/deactivate") and method == "POST":
+        user_id = path.split("/")[-2]
         item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
         if not item:
             return err(404, "User not found")
+        if item.get("status") == "inactive":
+            return err(400, "User is already inactive")
         email = item.get("email", "")
         try:
-            cognito.admin_delete_user(UserPoolId=POOL_ID, Username=email)
+            cognito.admin_disable_user(UserPoolId=POOL_ID, Username=email)
         except ClientError as e:
-            if e.response["Error"]["Code"] != "UserNotFoundException":
-                return err(400, f"Cognito delete failed: {e.response['Error']['Message']}")
-        USERS_T.delete_item(Key={"userId": user_id})
-        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_DELETED",
-              f"Permanently deleted: {email}", ip=ip, device=device)
-        return resp(200, {"message": f"User {email} permanently deleted"})
+            return err(400, f"Deactivation failed: {e.response['Error']['Message']}")
+        now = datetime.now(timezone.utc).isoformat()
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET #s = :v, deactivatedAt = :at, deactivatedBy = :by",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "inactive", ":at": now, ":by": caller_email})
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_DEACTIVATED",
+              f"Deactivated: {email}", ip=ip, device=device, severity="WARNING")
+        return resp(200, {"message": f"User {email} deactivated"})
+
+    # ── POST /api/admin/users/{id}/reactivate ─────────────────────────────
+    if "/users/" in path and path.endswith("/reactivate") and method == "POST":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item:
+            return err(404, "User not found")
+        if item.get("status") == "active":
+            return err(400, "User is already active")
+        email = item.get("email", "")
+        try:
+            cognito.admin_enable_user(UserPoolId=POOL_ID, Username=email)
+        except ClientError as e:
+            return err(400, f"Reactivation failed: {e.response['Error']['Message']}")
+        now = datetime.now(timezone.utc).isoformat()
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET #s = :v, reactivatedAt = :at, reactivatedBy = :by",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_REACTIVATED",
+              f"Reactivated: {email}", ip=ip, device=device, severity="WARNING")
+        return resp(200, {"message": f"User {email} reactivated"})
 
     # ── POST /api/admin/users/{id}/lock ───────────────────────────────────
     if "/users/" in path and path.endswith("/lock") and method == "POST":

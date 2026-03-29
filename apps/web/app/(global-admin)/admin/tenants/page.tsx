@@ -3,13 +3,14 @@ export const dynamic = 'force-dynamic'
 
 import React, { useEffect, useState } from 'react'
 import {
-  Building2, Plus, Pencil, Trash2, Check, X, Loader2, AlertCircle,
-  RefreshCw, Users, Globe, Mail, Eye, ChevronDown, Tag, Crown, ArrowUpRight
+  Building2, Plus, Pencil, Check, X, Loader2, AlertCircle,
+  RefreshCw, Users, Globe, Mail, Eye, ChevronDown, Tag, Crown, ArrowUpRight,
+  ToggleLeft, ToggleRight
 } from 'lucide-react'
 import { api, Tenant } from '@/lib/api'
 import Link from 'next/link'
 
-type Modal = 'create' | 'edit' | 'view' | 'delete' | null
+type Modal = 'create' | 'edit' | 'view' | 'confirm-toggle' | null
 
 const PLANS = [
   { id: 'trial', label: 'Trial (14 days free)', maxSeats: 10, price: '$0' },
@@ -28,9 +29,11 @@ const planColor = (p: string) =>
   'bg-orange-500/10 text-orange-400 border-orange-500/20'
 
 const statusColor = (s: string) =>
-  s==='active' ? 'bg-green-500/10 text-green-400' :
-  s==='trial' ? 'bg-yellow-500/10 text-yellow-400' :
-  s==='suspended' ? 'bg-red-500/10 text-red-400' :
+  s==='active'   ? 'bg-green-500/10 text-green-400' :
+  s==='trial'    ? 'bg-yellow-500/10 text-yellow-400' :
+  s==='suspended'? 'bg-orange-500/10 text-orange-400' :
+  s==='disabled' ? 'bg-red-500/10 text-red-400' :
+  s==='system'   ? 'bg-brand-500/10 text-brand-300' :
   'bg-slate-500/20 text-slate-400'
 
 interface TenantFull extends Tenant {
@@ -66,7 +69,7 @@ export default function TenantsPage() {
   const openCreate = () => { setForm({name:'',website:'',hrContact:'',hrEmail:'',hrFirstName:'',hrLastName:'',plan:'professional',maxSeats:'50',status:'active'}); setModal('create') }
   const openEdit = (t: TenantFull) => { setSelected(t); setForm({name:t.name,website:t.website||'',hrContact:t.hrContact||'',hrEmail:t.hrEmail||'',hrFirstName:'',hrLastName:'',plan:t.plan,maxSeats:String(t.maxSeats||50),status:t.status}); setModal('edit') }
   const openView = (t: TenantFull) => { setSelected(t); setModal('view') }
-  const openDelete = (t: TenantFull) => { setSelected(t); setModal('delete') }
+  const openToggle = (t: TenantFull) => { setSelected(t); setModal('confirm-toggle') }
 
   const filtered = tenants.filter(t => {
     const q = search.toLowerCase()
@@ -104,12 +107,23 @@ export default function TenantsPage() {
     finally { setSaving(false) }
   }
 
-  async function deleteTenant() {
+  async function toggleTenant() {
     if (!selected) return; setSaving(true); setError('')
-    try { await api.adminDeleteTenant(selected.tenantId); closeModal(); showSuccess(`${selected.name} deleted`); load() }
-    catch (e: unknown) { setError(e instanceof Error ? e.message : 'Delete failed') }
+    const isActive = selected.status === 'active'
+    try {
+      if (isActive) {
+        await api.adminDisableTenant(selected.tenantId)
+        showSuccess(`${selected.name} disabled — all users deactivated`)
+      } else {
+        await api.adminEnableTenant(selected.tenantId)
+        showSuccess(`${selected.name} re-enabled — all users reactivated`)
+      }
+      closeModal(); load()
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Action failed') }
     finally { setSaving(false) }
   }
+
+  const isSystemTenant = (t: TenantFull) => t.tenantId === 'SYSTEM' || t.tenantId === 'tenant-ind'
 
   return (
     <div className="p-6">
@@ -189,7 +203,15 @@ export default function TenantsPage() {
                           <Link href={`/admin/tenants/${t.tenantId}`} className="p-1.5 rounded-lg hover:bg-brand-500/20 text-slate-400 hover:text-brand-300 transition-all" title="Open Tenant Dashboard"><ArrowUpRight className="w-3.5 h-3.5"/></Link>
                           <button onClick={()=>openView(t)} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all" title="View"><Eye className="w-3.5 h-3.5"/></button>
                           <button onClick={()=>openEdit(t)} className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white transition-all" title="Edit"><Pencil className="w-3.5 h-3.5"/></button>
-                          <button onClick={()=>openDelete(t)} className="p-1.5 rounded-lg hover:bg-red-500/10 text-slate-400 hover:text-red-400 transition-all" title="Delete"><Trash2 className="w-3.5 h-3.5"/></button>
+                          {!isSystemTenant(t) && (
+                            <button
+                              onClick={()=>openToggle(t)}
+                              className={`p-1.5 rounded-lg transition-all ${t.status==='active' ? 'hover:bg-orange-500/10 text-slate-400 hover:text-orange-400' : 'hover:bg-green-500/10 text-slate-400 hover:text-green-400'}`}
+                              title={t.status==='active' ? 'Disable tenant' : 'Re-enable tenant'}
+                            >
+                              {t.status==='active' ? <ToggleRight className="w-3.5 h-3.5"/> : <ToggleLeft className="w-3.5 h-3.5"/>}
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -305,20 +327,37 @@ export default function TenantsPage() {
               </div>
             </>}
 
-            {/* DELETE */}
-            {modal==='delete'&&selected&&<>
-              <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-                <h2 className="text-base font-semibold text-red-400">Delete Tenant</h2>
-                <button onClick={closeModal}><X className="w-5 h-5 text-slate-400 hover:text-white"/></button>
-              </div>
-              <div className="p-6">{error&&<ErrBox msg={error}/>}<p className="text-slate-300 text-sm mt-2">Soft-delete <strong className="text-white">{selected.name}</strong> ({selected.tenantId})? Status will be set to &quot;deleted&quot;. Users remain in the system.</p></div>
-              <div className="px-6 pb-6 flex justify-end gap-3">
-                <button onClick={closeModal} className="px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5">Cancel</button>
-                <button onClick={deleteTenant} disabled={saving} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm bg-red-600/80 hover:bg-red-600 text-white disabled:opacity-50">
-                  {saving?<Loader2 className="w-4 h-4 animate-spin"/>:<Trash2 className="w-4 h-4"/>}{saving?'Deleting...':'Delete Tenant'}
-                </button>
-              </div>
-            </>}
+            {/* ENABLE / DISABLE CONFIRM */}
+            {modal==='confirm-toggle'&&selected&&(()=>{
+              const disabling = selected.status === 'active'
+              return <>
+                <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+                  <h2 className={`text-base font-semibold ${disabling ? 'text-orange-400' : 'text-green-400'}`}>
+                    {disabling ? 'Disable Tenant' : 'Re-enable Tenant'}
+                  </h2>
+                  <button onClick={closeModal}><X className="w-5 h-5 text-slate-400 hover:text-white"/></button>
+                </div>
+                <div className="p-6 space-y-3">
+                  {error&&<ErrBox msg={error}/>}
+                  <p className="text-slate-300 text-sm">
+                    {disabling
+                      ? <>Disabling <strong className="text-white">{selected.name}</strong> will immediately deactivate all users and block their access. You can re-enable at any time.</>
+                      : <>Re-enabling <strong className="text-white">{selected.name}</strong> will restore access for all users in this organization.</>
+                    }
+                  </p>
+                  <div className="p-3 bg-white/3 rounded-xl text-xs text-slate-500">
+                    Tenant ID: <span className="font-mono text-slate-300">{selected.tenantId}</span> · Current status: <span className={statusColor(selected.status)+' px-1.5 py-0.5 rounded'}>{selected.status}</span>
+                  </div>
+                </div>
+                <div className="px-6 pb-6 flex justify-end gap-3">
+                  <button onClick={closeModal} className="px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5">Cancel</button>
+                  <button onClick={toggleTenant} disabled={saving} className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm text-white disabled:opacity-50 ${disabling ? 'bg-orange-600/80 hover:bg-orange-600' : 'bg-green-600/80 hover:bg-green-600'}`}>
+                    {saving ? <Loader2 className="w-4 h-4 animate-spin"/> : disabling ? <ToggleLeft className="w-4 h-4"/> : <ToggleRight className="w-4 h-4"/>}
+                    {saving ? 'Processing...' : disabling ? 'Disable Tenant' : 'Re-enable Tenant'}
+                  </button>
+                </div>
+              </>
+            })()}
           </div>
         </div>
       )}

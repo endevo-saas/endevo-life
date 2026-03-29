@@ -4,12 +4,12 @@ export const dynamic = 'force-dynamic'
 import React, { useEffect, useState } from 'react'
 import {
   Users, Search, Loader2, AlertCircle, RefreshCw, Shield, User,
-  Plus, Pencil, Trash2, Lock, Unlock, KeyRound, Mail, X, Check,
-  ChevronDown, Building2, Eye, EyeOff
+  Plus, Pencil, Lock, Unlock, KeyRound, Mail, X, Check,
+  ChevronDown, Building2, Eye, EyeOff, ToggleLeft, ToggleRight
 } from 'lucide-react'
 import { api, User as UserType, Tenant } from '@/lib/api'
 
-type Modal = 'create' | 'edit' | 'delete' | 'resetpw' | 'invite' | null
+type Modal = 'create' | 'edit' | 'confirm-toggle' | 'resetpw' | 'invite' | null
 
 const ROLES = ['GLOBAL_ADMIN', 'HR_ADMIN', 'EMPLOYEE']
 const DEPARTMENTS = ['Engineering','HR','Finance','Legal','Operations','Sales','Marketing','Executive','Other']
@@ -57,7 +57,7 @@ export default function AllUsersPage() {
   const closeModal = () => { setModal(null); setSelected(null); setResetPw(''); setShowPw(false); setError('') }
   const openCreate = () => { setForm({ email:'',firstName:'',lastName:'',role:'EMPLOYEE',tenantId:'',department:'',jobTitle:'',password:'' }); setModal('create') }
   const openEdit = (u: UserType) => { setSelected(u); setForm({ email:u.email,firstName:u.firstName,lastName:u.lastName,role:u.role,tenantId:u.tenantId,department:u.department||'',jobTitle:u.jobTitle||'',password:'' }); setModal('edit') }
-  const openDelete = (u: UserType) => { setSelected(u); setModal('delete') }
+  const openToggle = (u: UserType) => { setSelected(u); setModal('confirm-toggle') }
   const openInvite = () => { setInviteForm({ email:'',role:'EMPLOYEE',tenantId:'',firstName:'',lastName:'' }); setModal('invite') }
 
   async function createUser() {
@@ -76,10 +76,19 @@ export default function AllUsersPage() {
     finally { setSaving(false) }
   }
 
-  async function deleteUser() {
+  async function toggleUser() {
     if (!selected) return; setSaving(true); setError('')
-    try { await api.adminDeleteUser(selected.userId); closeModal(); showSuccess(`${selected.email} deleted`); load() }
-    catch (e: unknown) { setError(e instanceof Error ? e.message : 'Delete failed') }
+    const deactivating = selected.status === 'active'
+    try {
+      if (deactivating) {
+        await api.adminDeactivateUser(selected.userId)
+        showSuccess(`${selected.email} deactivated`)
+      } else {
+        await api.adminReactivateUser(selected.userId)
+        showSuccess(`${selected.email} reactivated`)
+      }
+      closeModal(); load()
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Action failed') }
     finally { setSaving(false) }
   }
 
@@ -165,7 +174,7 @@ export default function AllUsersPage() {
                           <ActionBtn onClick={()=>openEdit(u)} title="Edit"><Pencil className="w-3.5 h-3.5"/></ActionBtn>
                           <ActionBtn onClick={()=>toggleLock(u)} title={u.status==='locked'?'Unlock':'Lock'} color={u.status==='locked'?'hover:text-green-400':'hover:text-yellow-400'}>{u.status==='locked'?<Unlock className="w-3.5 h-3.5"/>:<Lock className="w-3.5 h-3.5"/>}</ActionBtn>
                           <ActionBtn onClick={()=>resetPassword(u)} title="Reset Password" color="hover:text-blue-400"><KeyRound className="w-3.5 h-3.5"/></ActionBtn>
-                          <ActionBtn onClick={()=>openDelete(u)} title="Delete" color="hover:text-red-400 hover:bg-red-500/10"><Trash2 className="w-3.5 h-3.5"/></ActionBtn>
+                          <ActionBtn onClick={()=>openToggle(u)} title={u.status==='active'?'Deactivate user':'Reactivate user'} color={u.status==='active'?'hover:text-orange-400 hover:bg-orange-500/10':'hover:text-green-400 hover:bg-green-500/10'}>{u.status==='active'?<ToggleRight className="w-3.5 h-3.5"/>:<ToggleLeft className="w-3.5 h-3.5"/>}</ActionBtn>
                         </div>
                       </td>
                     </tr>
@@ -216,11 +225,22 @@ export default function AllUsersPage() {
               <MFtr onCancel={closeModal} onOk={updateUser} saving={saving} label="Save Changes"/>
             </>}
 
-            {modal==='delete'&&selected&&<>
-              <MHdr title="Delete User" onClose={closeModal} danger/>
-              <div className="p-6">{error&&<Err msg={error}/>}<p className="text-slate-300 text-sm mt-2">Permanently delete <strong className="text-white">{selected.email}</strong>? This removes them from Cognito and all data. Cannot be undone.</p></div>
-              <MFtr onCancel={closeModal} onOk={deleteUser} saving={saving} label="Delete Permanently" danger/>
-            </>}
+            {modal==='confirm-toggle'&&selected&&(()=>{
+              const deactivating = selected.status === 'active'
+              return <>
+                <MHdr title={deactivating ? 'Deactivate User' : 'Reactivate User'} onClose={closeModal} danger={deactivating}/>
+                <div className="p-6 space-y-3">
+                  {error&&<Err msg={error}/>}
+                  <p className="text-slate-300 text-sm">
+                    {deactivating
+                      ? <>Deactivating <strong className="text-white">{selected.email}</strong> will block their login immediately. Their data and records are preserved. You can reactivate at any time.</>
+                      : <>Reactivating <strong className="text-white">{selected.email}</strong> will restore their access immediately.</>
+                    }
+                  </p>
+                </div>
+                <MFtr onCancel={closeModal} onOk={toggleUser} saving={saving} label={deactivating ? 'Deactivate User' : 'Reactivate User'} danger={deactivating}/>
+              </>
+            })()}
 
             {modal==='resetpw'&&selected&&<>
               <MHdr title="Password Reset" onClose={closeModal}/>
