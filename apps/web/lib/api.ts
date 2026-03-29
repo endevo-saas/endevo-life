@@ -79,6 +79,13 @@ export const api = {
   // Admin — Other
   adminAudit: () => apiFetch<{ logs: AuditLog[] }>('/api/admin/audit'),
   adminHealth: () => apiFetch('/api/admin/health'),
+  adminGetConfig: () => apiFetch('/api/admin/config'),
+  adminUpdateConfig: (section: string, values: Record<string, unknown>) =>
+    apiFetch('/api/admin/config', { method: 'PUT', body: JSON.stringify({ section, values }) }),
+  adminCertificates: (tenantId?: string) =>
+    apiFetch(`/api/admin/certificates${tenantId ? `?tenantId=${tenantId}` : ''}`),
+  adminTrainingEnrollment: (tenantId?: string) =>
+    apiFetch(`/api/admin/training-enrollment${tenantId ? `?tenantId=${tenantId}` : ''}`),
 
   // HR
   hrDashboard: () => apiFetch('/api/hr/dashboard'),

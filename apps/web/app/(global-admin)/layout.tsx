@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   Shield, Building2, Users, FileText, Activity, LogOut,
   BarChart3, Settings, CreditCard, Globe, Monitor, MapPin,
-  Wifi, ChevronDown, ChevronUp, Camera
+  Wifi, ChevronDown, ChevronUp, Camera, Award
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
@@ -15,6 +15,7 @@ const nav = [
   { href: '/admin/tenants',       icon: Building2,   label: 'Tenants' },
   { href: '/admin/users',         icon: Users,       label: 'All Users' },
   { href: '/admin/subscriptions', icon: CreditCard,  label: 'Subscriptions' },
+  { href: '/admin/certificates',  icon: Award,       label: 'Certificates' },
   { href: '/admin/audit',         icon: FileText,    label: 'Audit Log' },
   { href: '/admin/health',        icon: Activity,    label: 'System Health' },
   { href: '/admin/settings',      icon: Settings,    label: 'Settings' },

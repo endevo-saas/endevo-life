@@ -117,10 +117,20 @@ export class DynamoStack extends cdk.Stack {
     })
     tables.push(videoProgress)
 
+    // --- 9. Platform Config ---
+    const config = new dynamodb.Table(this, 'Config', {
+      tableName: 'endevo-uat-config',
+      partitionKey: { name: 'configKey', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    tables.push(config)
+
     this.tableArns = tables.map(t => t.tableArn)
 
     // --- Outputs (IDs must be hardcoded — CDK tokens not allowed in IDs) ---
-    const tableNames = ['tenants','users','training','questions','responses','certificates','audit','videoProgress']
+    const tableNames = ['tenants','users','training','questions','responses','certificates','audit','videoProgress','config']
     tables.forEach((t, i) => {
       new cdk.CfnOutput(this, `TableArn${tableNames[i]}`, {
         value: t.tableArn,

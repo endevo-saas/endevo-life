@@ -24,7 +24,7 @@ Routes:
 import json, os, uuid, base64, re
 import boto3
 from datetime import datetime, timezone
-from boto3.dynamodb.conditions import Attr
+from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 POOL_ID   = os.environ.get("COGNITO_POOL_ID", "us-east-1_DVyEJqgFt")
@@ -33,10 +33,46 @@ REGION    = os.environ.get("AWS_REGION", "us-east-1")
 dynamo    = boto3.resource("dynamodb", region_name=REGION)
 cognito   = boto3.client("cognito-idp", region_name=REGION)
 ses       = boto3.client("ses", region_name=REGION)
-USERS_T   = dynamo.Table("endevo-uat-users")
-TENANTS_T = dynamo.Table("endevo-uat-tenants")
-AUDIT_T   = dynamo.Table("endevo-uat-audit")
-CERT_T    = dynamo.Table("endevo-uat-certificates")
+USERS_T          = dynamo.Table("endevo-uat-users")
+TENANTS_T        = dynamo.Table("endevo-uat-tenants")
+AUDIT_T          = dynamo.Table("endevo-uat-audit")
+CERT_T           = dynamo.Table("endevo-uat-certificates")
+TRAINING_T       = dynamo.Table("endevo-uat-training")
+VIDEO_PROGRESS_T = dynamo.Table("endevo-uat-video-progress")
+CONFIG_T         = dynamo.Table("endevo-uat-config")
+
+# ── Platform Config Defaults ──────────────────────────────────────────────────
+CONFIG_DEFAULTS = {
+    "platform": {
+        "company_name": "Endevo Life",
+        "support_email": "support@endevo.life",
+        "max_tenants": 99999,
+        "platform_name": "Endevo Life",
+        "tagline": "Digital Legacy & Estate Planning"
+    },
+    "pricing": {
+        "trial":           {"price": 0,    "max_seats": 10,   "duration_days": 14, "label": "Trial",          "custom": False},
+        "starter":         {"price": 249,  "max_seats": 25,   "label": "Starter",         "custom": False},
+        "professional":    {"price": 599,  "max_seats": 100,  "label": "Professional",    "custom": False},
+        "enterprise":      {"price": 1499, "max_seats": 500,  "label": "Enterprise",      "custom": False},
+        "enterprise-plus": {"price": 0,    "max_seats": 9999, "label": "Enterprise Plus", "custom": True}
+    },
+    "security": {
+        "otp_enabled": False,
+        "captcha_enabled": False,
+        "session_timeout_hours": 8,
+        "max_login_attempts": 5,
+        "lockout_duration_minutes": 30,
+        "mfa_required": False,
+        "password_expiry_days": 90
+    },
+    "notifications": {
+        "from_email": "noreply@endevo.life",
+        "from_name": "Endevo Life",
+        "invite_email_enabled": True,
+        "welcome_email_enabled": True
+    }
+}
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -177,6 +213,16 @@ def audit(tenant_id, actor, action, details="", ip="", device="", severity="INFO
         AUDIT_T.put_item(Item=item)
     except Exception as e:
         print(f"AUDIT_WRITE_ERROR: {e}")
+
+def get_config(key):
+    """Get config from DynamoDB, fall back to compiled defaults."""
+    try:
+        item = CONFIG_T.get_item(Key={"configKey": key}).get("Item")
+        if item:
+            return item.get("configValue", CONFIG_DEFAULTS.get(key, {}))
+    except Exception:
+        pass
+    return CONFIG_DEFAULTS.get(key, {})
 
 # ── Handler ───────────────────────────────────────────────────────────────────
 
@@ -739,5 +785,116 @@ def handler(event, context):
                 "api_gateway": "ok"
             }
         })
+
+    # ── GET /api/admin/config ─────────────────────────────────────────────
+    if path.endswith("/config") and method == "GET":
+        config = {
+            "platform":      get_config("platform"),
+            "pricing":       get_config("pricing"),
+            "security":      get_config("security"),
+            "notifications": get_config("notifications")
+        }
+        return resp(200, config)
+
+    # ── PUT /api/admin/config ─────────────────────────────────────────────
+    if path.endswith("/config") and method == "PUT":
+        section = body.get("section")
+        values  = body.get("values")
+        allowed_sections = ["platform", "pricing", "security", "notifications"]
+        if section not in allowed_sections:
+            return err(400, f"Section must be one of: {', '.join(allowed_sections)}")
+        if not values or not isinstance(values, dict):
+            return err(400, "Values must be an object")
+        # Merge with existing config (preserve keys not provided)
+        existing = get_config(section)
+        merged = {**existing, **values}
+        now = datetime.now(timezone.utc).isoformat()
+        CONFIG_T.put_item(Item={
+            "configKey":   section,
+            "configValue": merged,
+            "updatedAt":   now,
+            "updatedBy":   caller_email
+        })
+        audit("SYSTEM", caller_email, "CONFIG_UPDATED",
+              f"Updated {section} config: {list(values.keys())}", ip=ip, device=device, severity="WARNING")
+        return resp(200, {"message": f"Config section '{section}' updated", "config": merged})
+
+    # ── GET /api/admin/certificates ───────────────────────────────────────
+    if path.endswith("/certificates") and method == "GET":
+        tenant_filter = qs.get("tenantId", "")
+        fexpr = Attr("tenantId").eq(tenant_filter) if tenant_filter else None
+        certs = scan_all(CERT_T, fexpr)
+        # Enrich with user info (email, name) via batch lookup
+        for c in certs:
+            uid = c.get("userId", "")
+            if uid:
+                u = USERS_T.get_item(Key={"userId": uid}).get("Item")
+                if u:
+                    c["email"]     = u.get("email", "")
+                    c["firstName"] = u.get("firstName", "")
+                    c["lastName"]  = u.get("lastName", "")
+                    c["tenantId"]  = u.get("tenantId", "")
+                    # Enrich tenantName
+                    tid = u.get("tenantId", "")
+                    if tid and tid != "SYSTEM":
+                        t = TENANTS_T.get_item(Key={"tenantId": tid}).get("Item")
+                        c["tenantName"] = t.get("name", tid) if t else tid
+        certs.sort(key=lambda x: x.get("issuedAt", ""), reverse=True)
+        return resp(200, {"certificates": certs, "count": len(certs)})
+
+    # ── GET /api/admin/training-enrollment ───────────────────────────────
+    if path.endswith("/training-enrollment") and method == "GET":
+        tenant_filter = qs.get("tenantId", "")
+        if tenant_filter:
+            t = TENANTS_T.get_item(Key={"tenantId": tenant_filter}).get("Item")
+            tenants_list = [t] if t else []
+        else:
+            tenants_list = scan_all(TENANTS_T, Attr("status").ne("deleted"))
+
+        result = []
+        for tenant in tenants_list:
+            tid = tenant.get("tenantId")
+            if not tid:
+                continue
+            # Courses for this tenant
+            courses_resp = TRAINING_T.query(
+                KeyConditionExpression=Key("tenantId").eq(tid),
+                Limit=50
+            )
+            courses = courses_resp.get("Items", [])
+            # Employees for this tenant
+            employees = scan_all(USERS_T, Attr("tenantId").eq(tid) & Attr("role").eq("EMPLOYEE"))
+            emp_count = len(employees)
+            course_stats = []
+            for course in courses:
+                video_id = course.get("videoId", "")
+                enrolled = 0
+                completed_count = 0
+                for emp in employees:
+                    prog = VIDEO_PROGRESS_T.get_item(
+                        Key={"userId": emp["userId"], "videoId": video_id}
+                    ).get("Item")
+                    if prog:
+                        enrolled += 1
+                        if prog.get("completed"):
+                            completed_count += 1
+                course_stats.append({
+                    "courseId":       video_id,
+                    "title":          course.get("title", ""),
+                    "enrolled":       enrolled,
+                    "completed":      completed_count,
+                    "not_started":    emp_count - enrolled,
+                    "total_employees": emp_count,
+                    "completion_rate": round(completed_count / emp_count * 100) if emp_count > 0 else 0,
+                    "enrollment_rate": round(enrolled / emp_count * 100) if emp_count > 0 else 0
+                })
+            result.append({
+                "tenantId":      tid,
+                "tenantName":    tenant.get("name", ""),
+                "employee_count": emp_count,
+                "course_count":  len(courses),
+                "courses":       course_stats
+            })
+        return resp(200, {"enrollment": result, "count": len(result)})
 
     return err(404, f"Route not found: {method} {path}")
