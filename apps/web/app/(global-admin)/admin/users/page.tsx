@@ -101,8 +101,7 @@ export default function AllUsersPage() {
   async function sendInvite() {
     setSaving(true); setError('')
     try {
-      interface InviteResp { email_sent: boolean; temp_password: string }
-      const r = await (api as unknown as { adminInvite: (b: unknown) => Promise<InviteResp> }).adminInvite(inviteForm)
+      const r = await api.adminInvite(inviteForm)
       closeModal(); showSuccess(`Invite sent to ${inviteForm.email}${r.email_sent ? '' : ' (check spam — SES sandbox)'}`); load()
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Invite failed') }
     finally { setSaving(false) }

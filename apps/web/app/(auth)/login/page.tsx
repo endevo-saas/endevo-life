@@ -41,13 +41,13 @@ export default function LoginPage() {
 
   useEffect(() => { setCaptcha(generateCaptcha()) }, [])
 
-  const refreshCaptcha = () => { setCaptcha(generateCaptcha()); setCaptchaInput(''); setCaptchaErr(false) }
+  const refreshCaptcha = () => { setCaptcha(generateCaptcha()); setCaptchaInput('') }
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({ resolver: zodResolver(schema) })
 
   const onSubmit = async (data: FormData) => {
     setCaptchaErr(false)
-    if (parseInt(captchaInput) !== captcha.answer) { setCaptchaErr(true); refreshCaptcha(); return }
+    if (parseInt(captchaInput) !== captcha.answer) { setCaptchaErr(true); setCaptcha(generateCaptcha()); setCaptchaInput(''); return }
     setLoading(true); setError('')
     try {
       const res = await signIn(data.email, data.password)
@@ -68,7 +68,7 @@ export default function LoginPage() {
   const onMfaSubmit = async () => {
     setLoading(true); setError('')
     try {
-      const res = await fetch('/api/auth/mfa', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: mfaCode, session }) })
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/mfa`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: mfaCode, session }) })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'MFA failed')
       const role = data.role
