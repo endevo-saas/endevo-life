@@ -1,17 +1,17 @@
 'use client'
-
 export const dynamic = 'force-dynamic'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Eye, EyeOff, Loader2, Shield, Sparkles, RefreshCw, Mail, KeyRound } from 'lucide-react'
+import { Eye, EyeOff, Loader2, Shield, RefreshCw, Mail, KeyRound, Sparkles, Lock } from 'lucide-react'
 import Link from 'next/link'
 import Cookies from 'js-cookie'
 import { signIn } from '@/lib/auth/cognito'
 import { api } from '@/lib/api'
+import { useTheme } from '@/components/ThemePicker'
 
 const schema = z.object({
   email:    z.string().email('Enter a valid email'),
@@ -37,33 +37,86 @@ function routeByRole(role: string, router: ReturnType<typeof useRouter>) {
   else router.push('/employee/dashboard')
 }
 
+// Animated orbs background
+function Orbs() {
+  return (
+    <div className="fixed inset-0 overflow-hidden pointer-events-none">
+      <div className="blur-orb w-[600px] h-[600px] -top-40 -left-40 animate-pulse-slow"
+        style={{ background: 'var(--accent-1)', opacity: 0.12 }} />
+      <div className="blur-orb w-[500px] h-[500px] -bottom-40 -right-40 animate-pulse-slow"
+        style={{ background: 'var(--accent-2)', opacity: 0.10, animationDelay: '2s' }} />
+      <div className="blur-orb w-[300px] h-[300px] top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2"
+        style={{ background: 'var(--accent-1)', opacity: 0.06 }} />
+      {/* Floating particles */}
+      {[...Array(8)].map((_, i) => (
+        <div key={i}
+          className="absolute w-1.5 h-1.5 rounded-full animate-float"
+          style={{
+            background: `var(--accent-${i % 2 === 0 ? '1' : '2'})`,
+            left: `${10 + i * 11}%`,
+            top: `${15 + (i % 4) * 20}%`,
+            animationDelay: `${i * 0.7}s`,
+            animationDuration: `${5 + i}s`,
+            opacity: 0.4,
+          }}
+        />
+      ))}
+    </div>
+  )
+}
+
+// Step indicator
+function StepDot({ active, done }: { active: boolean; done: boolean }) {
+  return (
+    <div className={`w-2.5 h-2.5 rounded-full transition-all duration-500 ${
+      done   ? 'scale-100' :
+      active ? 'scale-125 shadow-lg' : 'scale-75 opacity-30'
+    }`}
+      style={{
+        background: done || active ? 'var(--gradient-brand)' : 'var(--bg-elevated)',
+        boxShadow: active ? '0 0 12px var(--accent-glow)' : 'none',
+      }}
+    />
+  )
+}
+
 export default function LoginPage() {
+  useTheme() // apply saved theme
   const router = useRouter()
   const [step, setStep]           = useState<Step>('credentials')
   const [showPwd, setShowPwd]     = useState(false)
   const [loading, setLoading]     = useState(false)
   const [error, setError]         = useState('')
-  // OTP step
   const [otpRef, setOtpRef]       = useState('')
   const [otpEmail, setOtpEmail]   = useState('')
   const [otpCode, setOtpCode]     = useState('')
-  // MFA (TOTP authenticator) step
   const [mfaCode, setMfaCode]     = useState('')
   const [session, setSession]     = useState('')
-  // CAPTCHA
   const [captcha, setCaptcha]     = useState({ question: '', answer: 0 })
   const [captchaInput, setCaptchaInput] = useState('')
   const [captchaErr, setCaptchaErr]     = useState(false)
+  const [mounted, setMounted]     = useState(false)
+  const otpRefs = [useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null), useRef<HTMLInputElement>(null)]
 
-  useEffect(() => { setCaptcha(generateCaptcha()) }, [])
-  const refreshCaptcha = () => { setCaptcha(generateCaptcha()); setCaptchaInput('') }
+  useEffect(() => { setCaptcha(generateCaptcha()); setMounted(true) }, [])
+  const refreshCaptcha = () => { setCaptcha(generateCaptcha()); setCaptchaInput(''); setCaptchaErr(false) }
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({ resolver: zodResolver(schema) })
+
+  // OTP digit input handling
+  function handleOtpDigit(i: number, val: string) {
+    const digit = val.replace(/\D/g, '').slice(-1)
+    const next = otpCode.split('')
+    next[i] = digit
+    setOtpCode(next.join(''))
+    if (digit && i < 5) otpRefs[i + 1].current?.focus()
+    if (!digit && i > 0) otpRefs[i - 1].current?.focus()
+  }
 
   const onSubmit = async (data: FormData) => {
     setCaptchaErr(false)
     if (parseInt(captchaInput) !== captcha.answer) {
-      setCaptchaErr(true); setCaptcha(generateCaptcha()); setCaptchaInput(''); return
+      setCaptchaErr(true); refreshCaptcha(); return
     }
     setLoading(true); setError('')
     try {
@@ -71,7 +124,6 @@ export default function LoginPage() {
       if (res.ChallengeName === 'SOFTWARE_TOKEN_MFA') {
         setSession(res.Session as string || ''); setStep('mfa')
       } else if (res.otp_required) {
-        // Backend sent OTP to email — show OTP entry step
         setOtpRef(res.otp_ref as string)
         setOtpEmail(data.email)
         setStep('otp')
@@ -85,11 +137,10 @@ export default function LoginPage() {
   }
 
   const onOtpSubmit = async () => {
-    if (otpCode.length !== 6) { setError('Enter the 6-digit code from your email'); return }
+    if (otpCode.length !== 6) { setError('Enter all 6 digits'); return }
     setLoading(true); setError('')
     try {
       const res = await api.verifyOtp(otpEmail, otpRef, otpCode) as Record<string, string>
-      // Set auth cookies — same as signIn() in cognito.ts
       if (res.access_token) {
         Cookies.set('access_token', res.access_token, { expires: 1, sameSite: 'strict' })
         Cookies.set('id_token',     res.id_token,     { expires: 1, sameSite: 'strict' })
@@ -100,6 +151,7 @@ export default function LoginPage() {
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Verification failed')
       setOtpCode('')
+      otpRefs[0].current?.focus()
     } finally { setLoading(false) }
   }
 
@@ -117,145 +169,226 @@ export default function LoginPage() {
     finally { setLoading(false) }
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -left-40 w-96 h-96 bg-brand-600/20 rounded-full blur-3xl animate-pulse-slow" />
-        <div className="absolute -bottom-40 -right-40 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl animate-pulse-slow" style={{ animationDelay: '2s' }} />
-      </div>
+  if (!mounted) return null
 
-      <div className="relative w-full max-w-md animate-slide-up">
+  return (
+    <div className="bg-hero min-h-screen flex items-center justify-center p-4">
+      <Orbs />
+
+      <div className={`relative w-full max-w-md transition-all duration-700 ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
+        style={{ animation: 'fadeUp 0.7s ease-out both' }}>
+
+        {/* Logo + brand */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-600/20 border border-brand-500/30 rounded-2xl mb-4">
-            <Shield className="w-8 h-8 text-brand-400" />
+          <div className="relative inline-flex mb-5">
+            {/* Outer ring */}
+            <div className="absolute inset-0 rounded-3xl animate-pulse-slow"
+              style={{ background: 'var(--gradient-brand)', opacity: 0.3, filter: 'blur(12px)' }} />
+            <div className="relative w-20 h-20 rounded-3xl flex items-center justify-center"
+              style={{ background: 'var(--gradient-brand)', boxShadow: '0 0 40px var(--accent-glow), 0 0 80px var(--accent-glow-2)' }}>
+              <Shield className="w-10 h-10 text-white drop-shadow-lg" />
+            </div>
+            {/* Orbit dot */}
+            <div className="absolute w-3 h-3 rounded-full animate-orbit"
+              style={{ background: 'var(--gold)', boxShadow: '0 0 8px var(--gold-glow)', top: '50%', left: '50%', marginTop: '-6px', marginLeft: '-6px' }} />
           </div>
-          <h1 className="text-3xl font-bold text-white">Endevo Life</h1>
-          <p className="text-slate-400 mt-1 text-sm">Digital Legacy Platform</p>
+
+          <h1 className="text-4xl font-black tracking-tight text-white mb-1">
+            Endevo <span className="text-gradient">Life</span>
+          </h1>
+          <p className="text-sm" style={{ color: 'var(--text-muted)' }}>
+            Digital Legacy & Estate Planning Platform
+          </p>
+
+          {/* Step indicator */}
+          <div className="flex items-center justify-center gap-2 mt-4">
+            <StepDot active={step === 'credentials'} done={step === 'otp' || step === 'mfa'} />
+            <div className="w-6 h-px" style={{ background: 'var(--border-subtle)' }} />
+            <StepDot active={step === 'otp' || step === 'mfa'} done={false} />
+          </div>
         </div>
 
-        <div className="glass p-8">
+        {/* Card */}
+        <div className="glass-elevated" style={{ padding: '2rem' }}>
+
+          {/* Step label */}
           <div className="flex items-center gap-2 mb-6">
-            {step === 'otp' ? <Mail className="w-4 h-4 text-brand-400" /> : step === 'mfa' ? <KeyRound className="w-4 h-4 text-brand-400" /> : <Sparkles className="w-4 h-4 text-brand-400" />}
-            <h2 className="text-lg font-semibold text-white">
-              {step === 'otp' ? 'Email Verification' : step === 'mfa' ? 'Authenticator Verification' : 'Sign in to your account'}
+            <div className="w-8 h-8 rounded-xl flex items-center justify-center"
+              style={{ background: 'var(--gradient-card)', border: '1px solid var(--border)' }}>
+              {step === 'otp' ? <Mail className="w-4 h-4" style={{ color: 'var(--accent-1)' }} />
+               : step === 'mfa' ? <KeyRound className="w-4 h-4" style={{ color: 'var(--accent-1)' }} />
+               : <Sparkles className="w-4 h-4" style={{ color: 'var(--accent-1)' }} />}
+            </div>
+            <h2 className="text-lg font-black text-white">
+              {step === 'otp' ? 'Email Verification'
+               : step === 'mfa' ? 'Authenticator Code'
+               : 'Sign in'}
             </h2>
           </div>
 
-          {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">{error}</div>}
+          {/* Error */}
+          {error && (
+            <div className="mb-5 p-3 rounded-xl flex items-center gap-2 text-sm font-medium animate-fade-in"
+              style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#fb7185' }}>
+              <Lock className="w-4 h-4 flex-shrink-0" />
+              {error}
+            </div>
+          )}
 
-          {/* ── Step 1: Email + Password + CAPTCHA ── */}
+          {/* ── CREDENTIALS ── */}
           {step === 'credentials' && (
-            <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Email</label>
-                <input {...register('email')} type="email" placeholder="you@company.com" className="input-field" autoComplete="email" />
-                {errors.email && <p className="mt-1 text-xs text-red-400">{errors.email.message}</p>}
+                <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+                  Email Address
+                </label>
+                <input {...register('email')} type="email" placeholder="you@company.com"
+                  className="input-field" autoComplete="email" />
+                {errors.email && <p className="mt-1.5 text-xs" style={{ color: '#fb7185' }}>{errors.email.message}</p>}
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
+                <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+                  Password
+                </label>
                 <div className="relative">
-                  <input {...register('password')} type={showPwd ? 'text' : 'password'} placeholder="••••••••••••" className="input-field pr-12" autoComplete="current-password" />
-                  <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white transition-colors">
+                  <input {...register('password')} type={showPwd ? 'text' : 'password'}
+                    placeholder="••••••••••••" className="input-field pr-12" autoComplete="current-password" />
+                  <button type="button" onClick={() => setShowPwd(!showPwd)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 transition-colors"
+                    style={{ color: 'var(--text-muted)' }}>
                     {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                   </button>
                 </div>
-                {errors.password && <p className="mt-1 text-xs text-red-400">{errors.password.message}</p>}
+                {errors.password && <p className="mt-1.5 text-xs" style={{ color: '#fb7185' }}>{errors.password.message}</p>}
               </div>
 
-              {/* Math CAPTCHA */}
+              {/* CAPTCHA */}
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Security Check</label>
+                <label className="block text-sm font-semibold mb-2" style={{ color: 'var(--text-secondary)' }}>
+                  Security Check
+                </label>
                 <div className="flex items-center gap-3">
-                  <div className="flex-1 flex items-center gap-2">
-                    <div className="px-4 py-2 bg-white/5 border border-white/10 rounded-xl text-white font-mono text-base font-bold tracking-wider select-none">
+                  <div className="flex-1 flex items-center gap-3">
+                    <div className="px-4 py-2.5 font-black text-lg select-none rounded-xl font-mono"
+                      style={{ background: 'var(--gradient-card)', border: '1px solid var(--border)', color: 'var(--text-primary)' }}>
                       {captcha.question} = ?
                     </div>
-                    <input
-                      type="number"
-                      value={captchaInput}
+                    <input type="number" value={captchaInput}
                       onChange={e => { setCaptchaInput(e.target.value); setCaptchaErr(false) }}
-                      placeholder="Answer"
-                      className={`input-field w-24 text-center font-mono ${captchaErr ? 'border-red-500/50' : ''}`}
+                      placeholder="?"
+                      className={`input-field w-20 text-center font-black text-lg ${captchaErr ? 'border-rose-500' : ''}`}
                     />
                   </div>
-                  <button type="button" onClick={refreshCaptcha} className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all" title="New question">
+                  <button type="button" onClick={refreshCaptcha}
+                    className="p-2.5 rounded-xl transition-all hover:scale-110"
+                    style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
                     <RefreshCw className="w-4 h-4" />
                   </button>
                 </div>
-                {captchaErr && <p className="mt-1 text-xs text-red-400">Incorrect answer — try again</p>}
+                {captchaErr && <p className="mt-1.5 text-xs" style={{ color: '#fb7185' }}>Incorrect — try again</p>}
               </div>
 
               <div className="flex justify-end">
-                <Link href="/forgot-password" className="text-sm text-brand-400 hover:text-brand-300 transition-colors">Forgot password?</Link>
+                <Link href="/forgot-password" className="text-sm font-medium transition-colors hover:opacity-80"
+                  style={{ color: 'var(--accent-1)' }}>
+                  Forgot password?
+                </Link>
               </div>
 
               <button type="submit" disabled={loading} className="btn-primary w-full flex items-center justify-center gap-2 ripple">
-                {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Sending verification code...</> : 'Sign In →'}
+                {loading
+                  ? <><Loader2 className="w-4 h-4 animate-spin" />Sending verification code...</>
+                  : <><Sparkles className="w-4 h-4" />Sign In</>
+                }
               </button>
             </form>
           )}
 
-          {/* ── Step 2: Email OTP ── */}
+          {/* ── OTP ── */}
           {step === 'otp' && (
             <div className="space-y-5">
-              <div className="p-4 bg-brand-500/10 border border-brand-500/20 rounded-xl flex items-start gap-3">
-                <Mail className="w-5 h-5 text-brand-400 flex-shrink-0 mt-0.5" />
+              <div className="p-4 rounded-xl flex items-start gap-3"
+                style={{ background: 'rgba(99,102,241,0.08)', border: '1px solid var(--border)' }}>
+                <Mail className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: 'var(--accent-1)' }} />
                 <div>
-                  <p className="text-sm text-white font-medium">Verification code sent</p>
-                  <p className="text-xs text-slate-400 mt-0.5">We emailed a 6-digit code to <strong className="text-brand-300">{otpEmail}</strong>. Check your inbox and enter the code below.</p>
+                  <p className="text-sm font-semibold text-white">Check your inbox</p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    6-digit code sent to <strong style={{ color: 'var(--accent-2)' }}>{otpEmail}</strong>
+                  </p>
                 </div>
               </div>
 
+              {/* 6 individual digit boxes */}
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">6-Digit Verification Code</label>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={otpCode}
-                  onChange={e => { setOtpCode(e.target.value.replace(/\D/g, '')); setError('') }}
-                  placeholder="000000"
-                  className="input-field text-center text-3xl tracking-[0.5em] font-mono"
-                  autoFocus
-                />
-                <p className="mt-1 text-xs text-slate-500">Code expires in 10 minutes</p>
+                <label className="block text-sm font-semibold mb-3 text-center" style={{ color: 'var(--text-secondary)' }}>
+                  Enter verification code
+                </label>
+                <div className="flex justify-center gap-2">
+                  {[0,1,2,3,4,5].map(i => (
+                    <input
+                      key={i}
+                      ref={otpRefs[i]}
+                      type="text"
+                      inputMode="numeric"
+                      maxLength={1}
+                      value={otpCode[i] || ''}
+                      onChange={e => handleOtpDigit(i, e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Backspace' && !otpCode[i] && i > 0) otpRefs[i-1].current?.focus() }}
+                      className="w-12 h-14 text-center text-xl font-black rounded-xl transition-all"
+                      style={{
+                        background: 'var(--bg-elevated)',
+                        border: `2px solid ${otpCode[i] ? 'var(--accent-1)' : 'var(--border-subtle)'}`,
+                        color: 'var(--text-primary)',
+                        outline: 'none',
+                        boxShadow: otpCode[i] ? '0 0 12px var(--accent-glow)' : 'none',
+                      }}
+                      autoFocus={i === 0}
+                    />
+                  ))}
+                </div>
+                <p className="text-xs text-center mt-2" style={{ color: 'var(--text-muted)' }}>Expires in 10 minutes</p>
               </div>
 
-              <button
-                onClick={onOtpSubmit}
-                disabled={loading || otpCode.length !== 6}
-                className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50"
-              >
-                {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Verifying...</> : 'Verify & Sign In'}
+              <button onClick={onOtpSubmit} disabled={loading || otpCode.length !== 6}
+                className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
+                {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Verifying...</> : '✓ Verify & Sign In'}
               </button>
 
-              <button
-                onClick={() => { setStep('credentials'); setOtpCode(''); setError(''); refreshCaptcha() }}
-                className="w-full text-sm text-slate-400 hover:text-white transition-colors"
-              >
-                ← Back to login (re-enter password to resend code)
+              <button onClick={() => { setStep('credentials'); setOtpCode(''); setError(''); refreshCaptcha() }}
+                className="w-full text-sm font-medium transition-colors" style={{ color: 'var(--text-muted)' }}>
+                ← Back to login
               </button>
             </div>
           )}
 
-          {/* ── Step 3: TOTP MFA (authenticator app) ── */}
+          {/* ── MFA ── */}
           {step === 'mfa' && (
-            <div className="space-y-4">
-              <p className="text-sm text-slate-400">Enter the 6-digit code from your authenticator app.</p>
-              <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Authentication Code</label>
-                <input type="text" maxLength={6} value={mfaCode} onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))} placeholder="000000" className="input-field text-center text-2xl tracking-widest font-mono" autoFocus />
-              </div>
-              <button onClick={onMfaSubmit} disabled={loading || mfaCode.length !== 6} className="btn-primary w-full flex items-center justify-center gap-2">
+            <div className="space-y-5">
+              <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+                Enter the 6-digit code from your authenticator app.
+              </p>
+              <input type="text" maxLength={6} value={mfaCode}
+                onChange={e => setMfaCode(e.target.value.replace(/\D/g, ''))}
+                placeholder="000000"
+                className="input-field text-center text-3xl tracking-[0.6em] font-black"
+                autoFocus />
+              <button onClick={onMfaSubmit} disabled={loading || mfaCode.length !== 6}
+                className="btn-primary w-full flex items-center justify-center gap-2 disabled:opacity-50">
                 {loading ? <><Loader2 className="w-4 h-4 animate-spin" />Verifying...</> : 'Verify Code'}
               </button>
-              <button onClick={() => setStep('credentials')} className="w-full text-sm text-slate-400 hover:text-white transition-colors">← Back to login</button>
+              <button onClick={() => setStep('credentials')}
+                className="w-full text-sm font-medium transition-colors" style={{ color: 'var(--text-muted)' }}>
+                ← Back
+              </button>
             </div>
           )}
         </div>
 
-        <p className="text-center text-xs text-slate-500 mt-6">Protected by AWS Cognito · TLS 1.3 · Email OTP · Math CAPTCHA</p>
+        {/* Footer */}
+        <p className="text-center text-xs mt-6" style={{ color: 'var(--text-muted)' }}>
+          Protected by AWS Cognito · TLS 1.3 · Email OTP · Math CAPTCHA
+        </p>
       </div>
     </div>
   )

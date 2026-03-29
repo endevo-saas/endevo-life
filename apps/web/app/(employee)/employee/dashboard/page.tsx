@@ -1,10 +1,11 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import React, { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import {
-  PlayCircle, Award, CheckCircle, TrendingUp, Loader2, RefreshCw,
-  Star, Flame, Target, Zap, Trophy, ClipboardList, User, Sparkles
+  PlayCircle, Award, CheckCircle, Loader2, RefreshCw,
+  Star, Flame, Target, Zap, Trophy, ClipboardList, User, Sparkles,
+  TrendingUp, ArrowRight, Lock
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
@@ -17,80 +18,193 @@ interface EmpDashData {
   progress_pct: number
 }
 
+// Count-up hook
+function useCountUp(target: number, duration = 1200) {
+  const [count, setCount] = useState(0)
+  useEffect(() => {
+    if (target === 0) { setCount(0); return }
+    let start = 0
+    const step = target / (duration / 16)
+    const timer = setInterval(() => {
+      start += step
+      if (start >= target) { setCount(target); clearInterval(timer) }
+      else setCount(Math.floor(start))
+    }, 16)
+    return () => clearInterval(timer)
+  }, [target, duration])
+  return count
+}
+
+// Confetti burst
+function burst(x: number, y: number) {
+  const colors = ['#6366f1','#8b5cf6','#f59e0b','#10b981','#f43f5e','#22d3ee','#fbbf24']
+  for (let i = 0; i < 30; i++) {
+    const el = document.createElement('div')
+    el.className = 'confetti-piece'
+    el.style.cssText = `
+      left: ${x}px; top: ${y}px;
+      background: ${colors[i % colors.length]};
+      transform: rotate(${Math.random()*360}deg);
+      animation-duration: ${0.8 + Math.random() * 1.2}s;
+      animation-delay: ${Math.random() * 0.3}s;
+    `
+    document.body.appendChild(el)
+    setTimeout(() => el.remove(), 2000)
+  }
+}
+
+// Streak dots (last 7 days mock — will be real in v2)
+function StreakRow({ streak }: { streak: number }) {
+  const days = ['M','T','W','T','F','S','S']
+  return (
+    <div className="flex items-center gap-2">
+      {days.map((d, i) => (
+        <div key={i} className="flex flex-col items-center gap-1">
+          <div className={`streak-dot ${i < streak ? 'streak-dot-active' : 'streak-dot-inactive'}`} />
+          <span className="text-[9px] font-medium" style={{ color: 'var(--text-muted)' }}>{d}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// XP / Level bar — animated
 function XPBar({ pct }: { pct: number }) {
-  const level = pct < 20 ? 1 : pct < 40 ? 2 : pct < 60 ? 3 : pct < 80 ? 4 : 5
+  const [filled, setFilled] = useState(0)
+  const level  = pct < 20 ? 1 : pct < 40 ? 2 : pct < 60 ? 3 : pct < 80 ? 4 : 5
   const labels = ['', 'Beginner', 'Learner', 'Practitioner', 'Expert', 'Master']
-  const next   = Math.min(level * 20, 100)
-  const within = pct - (level - 1) * 20
+  const within    = pct - (level - 1) * 20
   const pctWithin = Math.min(Math.round((within / 20) * 100), 100)
 
+  useEffect(() => {
+    const t = setTimeout(() => setFilled(pctWithin), 300)
+    return () => clearTimeout(t)
+  }, [pctWithin])
+
   return (
-    <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-600/15 to-brand-600/10 p-6">
-      <div className="flex items-center justify-between mb-4">
+    <div className="glass-accent rounded-2xl p-6">
+      <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-purple-500 to-brand-500 flex items-center justify-center shadow-lg shadow-purple-500/30">
-            <span className="text-xl font-black text-white">{level}</span>
+          {/* Level badge */}
+          <div className="relative">
+            <div className="w-16 h-16 rounded-2xl flex items-center justify-center font-black text-2xl text-white"
+              style={{ background: 'var(--gradient-brand)', boxShadow: '0 0 24px var(--accent-glow)' }}>
+              {level}
+            </div>
+            <div className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-yellow-400 flex items-center justify-center"
+              style={{ boxShadow: '0 0 8px rgba(251,191,36,0.8)' }}>
+              <Star className="w-3 h-3 text-yellow-900" />
+            </div>
           </div>
           <div>
-            <p className="text-xs text-slate-400 font-medium">Current Level</p>
-            <p className="text-lg font-black text-white">{labels[level]}</p>
+            <p className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>Current Level</p>
+            <p className="text-xl font-black text-white">{labels[level]}</p>
+            <div className="flex items-center gap-1 mt-0.5">
+              <Flame className="w-3.5 h-3.5 text-orange-400" />
+              <span className="text-xs font-semibold text-orange-400">3 day streak</span>
+            </div>
           </div>
         </div>
         <div className="text-right">
-          <p className="text-3xl font-black text-white">{pct}%</p>
-          <p className="text-xs text-slate-400">Overall Progress</p>
+          <p className="text-4xl font-black text-white">{pct}%</p>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>Overall Progress</p>
         </div>
       </div>
 
       {/* XP bar */}
-      <div className="mb-2">
-        <div className="flex justify-between text-xs text-slate-500 mb-1.5">
-          <span>Level {level}</span>
-          <span>{pctWithin}% to Level {Math.min(level + 1, 5)}</span>
-          <span>Level {Math.min(level + 1, 5)}</span>
-        </div>
-        <div className="h-3 bg-white/5 rounded-full overflow-hidden border border-white/5">
-          <div
-            className="h-full rounded-full bg-gradient-to-r from-purple-500 via-brand-500 to-cyan-400 transition-all duration-1000 relative"
-            style={{ width: `${pctWithin}%` }}
-          >
-            <div className="absolute inset-0 bg-white/20 animate-pulse rounded-full" />
-          </div>
-        </div>
+      <div className="xp-bar-track mb-2">
+        <div className="xp-bar-fill" style={{ width: `${filled}%`, transition: 'width 1.5s cubic-bezier(0.22,1,0.36,1)' }} />
+      </div>
+      <div className="flex justify-between text-xs" style={{ color: 'var(--text-muted)' }}>
+        <span>Level {level}</span>
+        <span className="font-semibold text-white">{pctWithin}% to Level {Math.min(level + 1, 5)}</span>
+        <span>Level {Math.min(level + 1, 5)}</span>
       </div>
 
-      {/* Level dots */}
-      <div className="flex items-center gap-1 mt-3">
+      {/* Level milestone dots */}
+      <div className="flex items-center gap-1 mt-4">
         {[1,2,3,4,5].map(l => (
-          <div key={l} className={`flex-1 h-1 rounded-full transition-all ${l <= level ? 'bg-brand-500' : 'bg-white/10'}`} />
+          <div key={l} className="flex-1 h-1.5 rounded-full transition-all duration-500"
+            style={{
+              background: l <= level ? 'var(--gradient-brand)' : 'var(--bg-elevated)',
+              boxShadow: l === level ? '0 0 8px var(--accent-glow)' : 'none',
+            }} />
         ))}
+      </div>
+
+      {/* Streak */}
+      <div className="mt-4 pt-4" style={{ borderTop: '1px solid var(--border-subtle)' }}>
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>Login Streak</span>
+          <span className="text-xs font-bold text-orange-400">🔥 3 days</span>
+        </div>
+        <StreakRow streak={3} />
       </div>
     </div>
   )
 }
 
-function AchievementBadge({ icon: Icon, label, unlocked, color }: { icon: React.ElementType; label: string; unlocked: boolean; color: string }) {
+// Achievement badge
+function Badge({ icon: Icon, label, sublabel, unlocked, gradient, glow }: {
+  icon: React.ElementType; label: string; sublabel: string
+  unlocked: boolean; gradient: string; glow: string
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+
+  function handleUnlock(e: React.MouseEvent) {
+    if (!unlocked) return
+    const rect = ref.current?.getBoundingClientRect()
+    if (rect) burst(rect.left + rect.width / 2, rect.top + rect.height / 2)
+  }
+
   return (
-    <div className={`flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${
-      unlocked
-        ? `border-${color}-500/30 bg-${color}-500/10`
-        : 'border-white/5 bg-white/3 opacity-40 grayscale'
-    }`}>
-      <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
-        unlocked ? `bg-${color}-500/20` : 'bg-white/5'
-      }`}>
-        <Icon className={`w-5 h-5 ${unlocked ? `text-${color}-400` : 'text-slate-500'}`} />
+    <div ref={ref} onClick={handleUnlock}
+      className={`${unlocked ? 'badge badge-unlocked' : 'badge badge-locked'} cursor-pointer`}
+      title={unlocked ? label : `Complete more to unlock: ${label}`}>
+      <div className={`badge-icon ${unlocked ? 'badge-icon-glow' : ''}`}
+        style={unlocked ? { background: gradient, boxShadow: glow } : {}}>
+        {unlocked
+          ? <Icon className="w-5 h-5 text-white" />
+          : <Lock className="w-4 h-4" style={{ color: 'var(--text-muted)' }} />
+        }
       </div>
-      <span className={`text-xs font-medium text-center ${unlocked ? 'text-white' : 'text-slate-600'}`}>{label}</span>
-      {unlocked && <div className={`w-1.5 h-1.5 rounded-full bg-${color}-400`} />}
+      <span className="text-xs font-semibold text-center leading-tight text-white">{label}</span>
+      {unlocked
+        ? <span className="text-[10px] font-medium" style={{ color: 'var(--accent-2)' }}>{sublabel}</span>
+        : <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Locked</span>
+      }
     </div>
+  )
+}
+
+// Stat card with count-up
+function StatCard({ icon: Icon, label, value, sub, href, gradient, glow }: {
+  icon: React.ElementType; label: string; value: number; sub: string
+  href: string; gradient: string; glow: string
+}) {
+  const count = useCountUp(value)
+  return (
+    <Link href={href} className="stat-card group block">
+      <div className="relative z-10">
+        <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4 transition-transform group-hover:scale-110"
+          style={{ background: gradient, boxShadow: glow }}>
+          <Icon className="w-5 h-5 text-white" />
+        </div>
+        <div className="text-4xl font-black text-white mb-1">{count}</div>
+        <div className="text-sm font-bold text-white mb-0.5">{label}</div>
+        <div className="text-xs" style={{ color: 'var(--text-muted)' }}>{sub}</div>
+      </div>
+      <ArrowRight className="absolute bottom-4 right-4 w-4 h-4 opacity-0 group-hover:opacity-100 transition-all group-hover:translate-x-1"
+        style={{ color: 'var(--accent-1)' }} />
+    </Link>
   )
 }
 
 export default function EmployeeDashboard() {
   const [data, setData] = useState<EmpDashData | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [error, setError]     = useState('')
+  const [entered, setEntered] = useState(false)
   const name = Cookies.get('user_email')?.split('@')[0] || 'Learner'
 
   const load = useCallback(async () => {
@@ -98,6 +212,7 @@ export default function EmployeeDashboard() {
     try {
       const d = await api.employeeDashboard() as EmpDashData
       setData(d)
+      setTimeout(() => setEntered(true), 100)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally { setLoading(false) }
@@ -110,116 +225,123 @@ export default function EmployeeDashboard() {
   const total     = data?.total_courses ?? 0
   const certs     = data?.certificates ?? 0
 
+  const badges = [
+    { icon: Zap,         label: 'First Login',   sublabel: 'Day 1!',       unlocked: true,             gradient: 'linear-gradient(135deg,#6366f1,#8b5cf6)', glow: '0 0 16px rgba(99,102,241,0.5)' },
+    { icon: PlayCircle,  label: 'First Course',  sublabel: 'Getting started', unlocked: completed > 0,  gradient: 'linear-gradient(135deg,#06b6d4,#0ea5e9)', glow: '0 0 16px rgba(6,182,212,0.5)' },
+    { icon: CheckCircle, label: 'Completed One', sublabel: 'Milestone!',    unlocked: completed >= 1,  gradient: 'linear-gradient(135deg,#10b981,#34d399)', glow: '0 0 16px rgba(16,185,129,0.5)' },
+    { icon: Award,       label: 'Certified',     sublabel: 'Official!',    unlocked: certs > 0,        gradient: 'linear-gradient(135deg,#f59e0b,#fbbf24)', glow: '0 0 16px rgba(245,158,11,0.5)' },
+    { icon: Star,        label: '5 Courses',     sublabel: 'Star learner', unlocked: completed >= 5,   gradient: 'linear-gradient(135deg,#8b5cf6,#a78bfa)', glow: '0 0 16px rgba(139,92,246,0.5)' },
+    { icon: Flame,       label: 'All Done!',     sublabel: 'Legend!',      unlocked: total > 0 && completed >= total, gradient: 'linear-gradient(135deg,#f43f5e,#fb7185)', glow: '0 0 16px rgba(244,63,94,0.5)' },
+  ]
+
   return (
-    <div className="min-h-screen p-6">
-      {/* Glow */}
+    <div className="min-h-screen p-6" style={{ background: 'var(--bg-base)' }}>
+      {/* Background orbs */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute top-0 left-0 w-80 h-80 bg-purple-600/8 rounded-full blur-3xl" />
-        <div className="absolute bottom-0 right-0 w-96 h-96 bg-brand-600/8 rounded-full blur-3xl" />
+        <div className="blur-orb w-96 h-96 top-0 left-0 animate-pulse-slow" style={{ background: 'var(--accent-1)', opacity: 0.08 }} />
+        <div className="blur-orb w-80 h-80 bottom-0 right-0 animate-pulse-slow" style={{ background: 'var(--accent-2)', opacity: 0.07, animationDelay: '2s' }} />
+        <div className="blur-orb w-64 h-64 top-1/2 right-1/4 animate-float" style={{ background: 'var(--gold)', opacity: 0.04 }} />
       </div>
 
-      <div className="relative max-w-5xl mx-auto space-y-5">
+      <div className={`relative max-w-5xl mx-auto space-y-5 transition-all duration-700 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
 
         {/* Header */}
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between" style={{ animationDelay: '0s' }}>
           <div>
-            <h1 className="text-3xl font-black text-white tracking-tight">
-              Hey, <span className="capitalize text-purple-400">{name}</span> <span className="animate-pulse">👋</span>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ background: 'var(--success)' }} />
+              <span className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Live session</span>
+            </div>
+            <h1 className="text-3xl font-black tracking-tight text-white">
+              Hey, <span className="capitalize text-gradient">{name}</span>! 👋
             </h1>
-            <p className="text-slate-400 text-sm mt-0.5">Your digital legacy journey continues</p>
+            <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+              Your digital legacy journey — keep the momentum going!
+            </p>
           </div>
           <button onClick={load} disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white text-sm transition-all disabled:opacity-50">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            className="p-2.5 rounded-xl transition-all hover:scale-105 disabled:opacity-50"
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} style={{ color: 'var(--text-muted)' }} />
           </button>
         </div>
 
         {error && (
-          <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-sm">
-            {error} <button onClick={load} className="ml-2 underline">Retry</button>
+          <div className="p-4 rounded-2xl text-sm flex items-center gap-3 animate-fade-in"
+            style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#fb7185' }}>
+            {error}
+            <button onClick={load} className="ml-auto underline font-medium">Retry</button>
           </div>
         )}
 
-        {/* XP / Level bar */}
-        {loading ? (
-          <div className="h-36 rounded-2xl bg-white/3 border border-white/5 animate-pulse" />
-        ) : (
-          <XPBar pct={pct} />
-        )}
+        {/* XP bar */}
+        {loading
+          ? <div className="skeleton h-52" />
+          : <XPBar pct={pct} />
+        }
 
-        {/* Stats row */}
+        {/* Stat cards */}
         <div className="grid grid-cols-3 gap-4">
-          {[
-            {
-              icon: PlayCircle, label: 'Courses', value: total, sub: 'available to you',
-              color: 'text-blue-400', gradient: 'from-blue-600/20 to-blue-800/10 border-blue-500/30', href: '/employee/training'
-            },
-            {
-              icon: CheckCircle, label: 'Completed', value: completed, sub: `${total > 0 ? Math.round((completed/total)*100) : 0}% done`,
-              color: 'text-green-400', gradient: 'from-green-600/20 to-green-800/10 border-green-500/30', href: '/employee/training'
-            },
-            {
-              icon: Award, label: 'Certificates', value: certs, sub: 'earned so far',
-              color: 'text-yellow-400', gradient: 'from-yellow-600/20 to-yellow-800/10 border-yellow-500/30', href: '/employee/certificates'
-            },
-          ].map(s => {
-            const Icon = s.icon
-            return (
-              <Link key={s.label} href={s.href}
-                className={`group relative overflow-hidden rounded-2xl p-5 border bg-gradient-to-br ${s.gradient} transition-all hover:-translate-y-1 hover:shadow-2xl`}>
-                <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/10 flex items-center justify-center mb-3">
-                  <Icon className={`w-5 h-5 ${s.color}`} />
-                </div>
-                <div className="text-3xl font-black text-white">{loading ? <Loader2 className="w-5 h-5 animate-spin" /> : s.value}</div>
-                <div className="text-sm font-semibold text-white/80 mt-0.5">{s.label}</div>
-                <div className="text-xs text-white/40">{s.sub}</div>
-              </Link>
-            )
-          })}
+          {loading ? [1,2,3].map(i => <div key={i} className="skeleton h-36 rounded-2xl" />)
+          : [
+            { icon: PlayCircle, label: 'Courses',    value: total,     sub: 'available to you',           href: '/employee/training',     gradient: 'linear-gradient(135deg,#06b6d4,#0ea5e9)', glow: '0 0 20px rgba(6,182,212,0.4)' },
+            { icon: CheckCircle,label: 'Completed',  value: completed, sub: `${total > 0 ? Math.round(completed/total*100) : 0}% complete`, href: '/employee/training', gradient: 'linear-gradient(135deg,#10b981,#34d399)', glow: '0 0 20px rgba(16,185,129,0.4)' },
+            { icon: Award,      label: 'Certs Earned',value: certs,   sub: 'official certificates',        href: '/employee/certificates', gradient: 'linear-gradient(135deg,#f59e0b,#fbbf24)', glow: '0 0 20px rgba(245,158,11,0.4)' },
+          ].map(s => <StatCard key={s.label} {...s} />)
+          }
         </div>
 
-        {/* Achievements + Actions */}
+        {/* Achievements + Quick nav */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
 
           {/* Achievements */}
-          <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
-            <h2 className="text-base font-bold text-white flex items-center gap-2 mb-4">
-              <Trophy className="w-4 h-4 text-yellow-400" /> Achievements
-            </h2>
-            <div className="grid grid-cols-3 gap-2">
-              <AchievementBadge icon={Zap}         label="First Login"     unlocked={true}           color="brand" />
-              <AchievementBadge icon={PlayCircle}  label="First Course"    unlocked={completed > 0}  color="blue" />
-              <AchievementBadge icon={CheckCircle} label="Completed One"   unlocked={completed >= 1}  color="green" />
-              <AchievementBadge icon={Award}       label="Certified"       unlocked={certs > 0}       color="yellow" />
-              <AchievementBadge icon={Star}        label="5 Courses"       unlocked={completed >= 5}  color="purple" />
-              <AchievementBadge icon={Flame}       label="All Done"        unlocked={total > 0 && completed >= total} color="red" />
+          <div className="glass rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h2 className="text-base font-black text-white flex items-center gap-2">
+                <Trophy className="w-4 h-4 text-yellow-400" /> Achievements
+              </h2>
+              <span className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                style={{ background: 'var(--gradient-card)', border: '1px solid var(--border)', color: 'var(--accent-1)' }}>
+                {badges.filter(b => b.unlocked).length}/{badges.length}
+              </span>
             </div>
+            <div className="grid grid-cols-3 gap-2">
+              {badges.map(b => <Badge key={b.label} {...b} />)}
+            </div>
+            <p className="text-xs mt-3 text-center" style={{ color: 'var(--text-muted)' }}>
+              Click unlocked badges for a celebration! 🎉
+            </p>
           </div>
 
           {/* Quick nav */}
-          <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
-            <h2 className="text-base font-bold text-white flex items-center gap-2 mb-4">
-              <Sparkles className="w-4 h-4 text-purple-400" /> What's Next
+          <div className="glass rounded-2xl p-6">
+            <h2 className="text-base font-black text-white flex items-center gap-2 mb-5">
+              <Sparkles className="w-4 h-4" style={{ color: 'var(--accent-1)' }} /> What&apos;s Next
             </h2>
             <div className="space-y-2">
               {[
-                { href: '/employee/training',     icon: PlayCircle,   label: 'Continue Training',    sub: `${total - completed} courses remaining`,  color: 'hover:border-blue-500/50 hover:bg-blue-600/8',    iconColor: 'text-blue-400' },
-                { href: '/employee/assessment',   icon: ClipboardList,label: 'Take an Assessment',   sub: 'Test what you know',                      color: 'hover:border-purple-500/50 hover:bg-purple-600/8', iconColor: 'text-purple-400' },
-                { href: '/employee/certificates', icon: Award,        label: 'My Certificates',      sub: `${certs} earned`,                          color: 'hover:border-yellow-500/50 hover:bg-yellow-600/8', iconColor: 'text-yellow-400' },
-                { href: '/employee/profile',      icon: User,         label: 'Update Profile',       sub: 'Keep your info current',                  color: 'hover:border-green-500/50 hover:bg-green-600/8',   iconColor: 'text-green-400' },
+                { href: '/employee/training',     icon: PlayCircle,    label: 'Continue Training',   sub: `${total - completed} course${total - completed !== 1 ? 's' : ''} remaining`,  gradient: 'linear-gradient(135deg,#06b6d4,#0ea5e9)' },
+                { href: '/employee/assessment',   icon: ClipboardList, label: 'Take an Assessment',  sub: 'Test your knowledge',    gradient: 'linear-gradient(135deg,#8b5cf6,#a78bfa)' },
+                { href: '/employee/certificates', icon: Award,         label: 'View Certificates',   sub: `${certs} earned`,         gradient: 'linear-gradient(135deg,#f59e0b,#fbbf24)' },
+                { href: '/employee/profile',      icon: User,          label: 'Update Profile',      sub: 'Keep your info current',  gradient: 'linear-gradient(135deg,#10b981,#34d399)' },
               ].map(a => {
                 const Icon = a.icon
                 return (
                   <Link key={a.href} href={a.href}
-                    className={`flex items-center gap-3 p-3 rounded-xl border border-white/5 bg-white/3 transition-all hover:-translate-x-0.5 ${a.color}`}>
-                    <div className="w-9 h-9 rounded-xl bg-white/5 flex items-center justify-center flex-shrink-0">
-                      <Icon className={`w-4 h-4 ${a.iconColor}`} />
+                    className="group flex items-center gap-3 p-3 rounded-xl transition-all hover:-translate-x-0.5"
+                    style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
+                    onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border)' }}
+                    onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-subtle)' }}>
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 transition-transform group-hover:scale-110"
+                      style={{ background: a.gradient, boxShadow: '0 0 12px rgba(99,102,241,0.3)' }}>
+                      <Icon className="w-4 h-4 text-white" />
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white">{a.label}</p>
-                      <p className="text-xs text-slate-500">{a.sub}</p>
+                      <p className="text-sm font-bold text-white">{a.label}</p>
+                      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{a.sub}</p>
                     </div>
-                    <TrendingUp className="w-3 h-3 text-slate-600" />
+                    <ArrowRight className="w-4 h-4 opacity-0 group-hover:opacity-100 transition-all group-hover:translate-x-1"
+                      style={{ color: 'var(--accent-1)' }} />
                   </Link>
                 )
               })}
@@ -227,27 +349,31 @@ export default function EmployeeDashboard() {
           </div>
         </div>
 
-        {/* Motivational footer */}
-        <div className="rounded-2xl border border-brand-500/20 bg-gradient-to-r from-brand-600/10 to-purple-600/10 p-5 flex items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-brand-600/20 flex items-center justify-center flex-shrink-0">
-            <Target className="w-5 h-5 text-brand-400" />
+        {/* Motivational banner */}
+        <div className="rounded-2xl p-5 flex items-center gap-4"
+          style={{ background: 'var(--gradient-brand)', boxShadow: '0 0 40px var(--accent-glow)' }}>
+          <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center flex-shrink-0">
+            <Target className="w-6 h-6 text-white" />
           </div>
-          <div>
-            <p className="text-sm font-bold text-white">
-              {pct >= 100 ? '🎉 You completed everything! Outstanding work.' :
-               pct >= 50  ? `You're ${pct}% through — keep the momentum going!` :
-               pct > 0    ? `Great start! ${100 - pct}% more to go.` :
-                            'Start your first course to begin your journey.'}
+          <div className="flex-1">
+            <p className="text-base font-black text-white">
+              {pct >= 100 ? '🎉 You completed everything! You\'re a Digital Legacy Champion!' :
+               pct >= 75  ? `Almost there! Just ${100 - pct}% more to become a champion 🔥` :
+               pct >= 50  ? `Halfway there! ${100 - pct}% left — you\'ve got this! 💪` :
+               pct > 0    ? `Great start! Keep going — ${100 - pct}% more to unlock your certificate 🎯` :
+                            'Start your first course and begin your digital legacy journey 🚀'}
             </p>
-            <p className="text-xs text-slate-400 mt-0.5">Digital legacy planning protects the people you love most</p>
+            <p className="text-sm text-white/70 mt-0.5">Digital legacy planning protects the people you love most</p>
           </div>
           {pct < 100 && (
             <Link href="/employee/training"
-              className="ml-auto flex-shrink-0 px-4 py-2 rounded-xl bg-brand-600/30 border border-brand-500/40 text-brand-300 text-sm font-medium hover:bg-brand-600/50 transition-all">
-              Continue →
+              className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all hover:scale-105"
+              style={{ background: 'rgba(255,255,255,0.2)', color: 'white', border: '1px solid rgba(255,255,255,0.3)' }}>
+              Continue <ArrowRight className="w-4 h-4" />
             </Link>
           )}
         </div>
+
       </div>
     </div>
   )

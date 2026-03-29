@@ -9,6 +9,7 @@ import {
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
+import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 
 const nav = [
   { href: '/hr/dashboard',    icon: BarChart3,  label: 'Dashboard' },
@@ -40,6 +41,7 @@ function getOS(ua: string) {
 }
 
 function SessionPanel() {
+  useTheme()
   const [geo, setGeo] = useState<GeoInfo | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [avatar, setAvatar] = useState<string | null>(null)
@@ -99,8 +101,16 @@ function SessionPanel() {
           {geo?.latitude && <p className="text-[10px] text-slate-600 font-mono pt-1 border-t border-white/5">{geo.latitude.toFixed(4)}, {geo.longitude.toFixed(4)}</p>}
         </div>
       )}
+      {/* Theme picker */}
+      <div className="px-2 pb-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider px-1 mb-1" style={{ color: 'var(--text-muted)' }}>Theme</p>
+        <ThemePickerInline />
+      </div>
       <div className="px-3 pb-3">
-        <button onClick={signOut} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all w-full">
+        <button onClick={signOut} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all w-full"
+          style={{ color: 'var(--text-muted)' }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#fb7185'; e.currentTarget.style.background = 'rgba(244,63,94,0.1)' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}>
           <LogOut className="w-3.5 h-3.5" />Sign Out
         </button>
       </div>
@@ -133,7 +143,7 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
             return (
               <Link key={item.href} href={item.href}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                  active ? 'bg-green-600/20 text-green-300 border border-green-500/30' : 'text-slate-400 hover:text-white hover:bg-white/5'
+                  active ? 'nav-active' : 'nav-inactive'
                 }`}>
                 <item.icon className="w-4 h-4" />{item.label}
               </Link>

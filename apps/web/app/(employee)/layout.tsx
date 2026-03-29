@@ -4,10 +4,11 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   PlayCircle, ClipboardList, Award, User, BarChart3, LogOut, Settings,
-  MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera
+  MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera, Zap
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
+import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 
 const nav = [
   { href: '/employee/dashboard',    icon: BarChart3,     label: 'Dashboard' },
@@ -23,10 +24,11 @@ function getBrowser(ua: string) { if (ua.includes('Edg/')) return 'Edge'; if (ua
 function getOS(ua: string) { if (ua.includes('Windows')) return 'Windows'; if (ua.includes('Mac OS')) return 'macOS'; if (ua.includes('iPhone')) return 'iOS'; if (ua.includes('Android')) return 'Android'; return 'Unknown' }
 
 function SessionPanel() {
-  const [geo, setGeo] = useState<GeoInfo | null>(null)
+  useTheme()
+  const [geo, setGeo]         = useState<GeoInfo | null>(null)
   const [expanded, setExpanded] = useState(false)
-  const [avatar, setAvatar] = useState<string | null>(null)
-  const email = Cookies.get('user_email') || 'Employee'
+  const [avatar, setAvatar]   = useState<string | null>(null)
+  const email    = Cookies.get('user_email') || 'Employee'
   const initials = email.split('@')[0].slice(0, 2).toUpperCase()
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
 
@@ -44,44 +46,59 @@ function SessionPanel() {
   }
 
   return (
-    <div className="border-t border-white/10">
+    <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
       <div className="p-3 flex items-center gap-2">
         <div className="relative flex-shrink-0">
-          <div className="w-9 h-9 rounded-xl overflow-hidden bg-purple-600/30 border border-purple-500/30 flex items-center justify-center">
-            {avatar ? <img src={avatar} alt="avatar" className="w-full h-full object-cover" /> : <span className="text-xs font-black text-purple-300">{initials}</span>}
+          <div className="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center"
+            style={{ background: 'var(--gradient-card)', border: '1px solid var(--border)' }}>
+            {avatar
+              ? <img src={avatar} alt="avatar" className="w-full h-full object-cover" />
+              : <span className="text-xs font-black text-white">{initials}</span>}
           </div>
-          <label className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-slate-700 border border-white/20 rounded-full flex items-center justify-center cursor-pointer hover:bg-purple-600/50 transition-colors">
-            <Camera className="w-2.5 h-2.5 text-slate-300" />
+          <label className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full flex items-center justify-center cursor-pointer transition-colors"
+            style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
+            <Camera className="w-2.5 h-2.5" style={{ color: 'var(--text-muted)' }} />
             <input type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
           </label>
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-xs font-semibold text-white truncate capitalize">{email.split('@')[0]}</p>
-          <p className="text-[10px] text-slate-500 truncate">{email}</p>
+          <p className="text-[10px] truncate" style={{ color: 'var(--text-muted)' }}>{email}</p>
         </div>
-        <button onClick={() => setExpanded(!expanded)} className="p-1 rounded-lg hover:bg-white/5 transition-colors flex-shrink-0">
-          {expanded ? <ChevronUp className="w-3 h-3 text-slate-500" /> : <ChevronDown className="w-3 h-3 text-slate-500" />}
+        <button onClick={() => setExpanded(!expanded)} className="p-1 rounded-lg transition-colors flex-shrink-0"
+          style={{ color: 'var(--text-muted)' }}>
+          {expanded ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
         </button>
       </div>
       {expanded && (
-        <div className="px-3 pb-3 space-y-1.5 border-t border-white/5 pt-2">
-          <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide mb-2">Session Info</p>
+        <div className="px-3 pb-3 space-y-1.5 pt-2" style={{ borderTop: '1px solid var(--border-subtle)' }}>
           <div className="flex items-start gap-2">
-            <Wifi className="w-3 h-3 text-purple-400 mt-0.5 flex-shrink-0" />
-            <div><p className="text-[10px] text-slate-500">IP</p><p className="text-[11px] font-mono text-slate-300">{geo?.ip || '...'}</p></div>
+            <Wifi className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: 'var(--accent-1)' }} />
+            <div><p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>IP</p><p className="text-[11px] font-mono" style={{ color: 'var(--text-secondary)' }}>{geo?.ip || '...'}</p></div>
           </div>
           <div className="flex items-start gap-2">
-            <MapPin className="w-3 h-3 text-purple-400 mt-0.5 flex-shrink-0" />
-            <div><p className="text-[10px] text-slate-500">Location</p><p className="text-[11px] text-slate-300">{geo ? `${geo.city}, ${geo.region}` : '...'}</p><p className="text-[11px] text-slate-400">{geo?.country_name || ''}</p></div>
+            <MapPin className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: 'var(--accent-1)' }} />
+            <div><p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Location</p><p className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{geo ? `${geo.city}, ${geo.region}` : '...'}</p></div>
           </div>
           <div className="flex items-start gap-2">
-            <Monitor className="w-3 h-3 text-purple-400 mt-0.5 flex-shrink-0" />
-            <div><p className="text-[10px] text-slate-500">Device</p><p className="text-[11px] text-slate-300">{getBrowser(ua)} · {getOS(ua)}</p></div>
+            <Monitor className="w-3 h-3 mt-0.5 flex-shrink-0" style={{ color: 'var(--accent-1)' }} />
+            <div><p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Device</p><p className="text-[11px]" style={{ color: 'var(--text-secondary)' }}>{getBrowser(ua)} · {getOS(ua)}</p></div>
           </div>
         </div>
       )}
+
+      {/* Theme picker */}
+      <div className="px-2 pb-2">
+        <p className="text-[10px] font-semibold uppercase tracking-wider px-1 mb-1" style={{ color: 'var(--text-muted)' }}>Theme</p>
+        <ThemePickerInline />
+      </div>
+
       <div className="px-3 pb-3">
-        <button onClick={signOut} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-slate-400 hover:text-red-400 hover:bg-red-500/10 transition-all w-full">
+        <button onClick={signOut}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium transition-all w-full"
+          style={{ color: 'var(--text-muted)' }}
+          onMouseEnter={e => { e.currentTarget.style.color = '#fb7185'; e.currentTarget.style.background = 'rgba(244,63,94,0.1)' }}
+          onMouseLeave={e => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'transparent' }}>
           <LogOut className="w-3.5 h-3.5" />Sign Out
         </button>
       </div>
@@ -92,30 +109,33 @@ function SessionPanel() {
 export default function EmployeeLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname()
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-64 flex-shrink-0 glass border-r border-white/10 flex flex-col">
-        <div className="p-5 border-b border-white/10">
+    <div className="min-h-screen flex" style={{ background: 'var(--bg-base)' }}>
+      <aside className="w-64 flex-shrink-0 flex flex-col"
+        style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)' }}>
+        {/* Brand */}
+        <div className="p-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-purple-600/20 border border-purple-500/30 rounded-xl flex items-center justify-center">
-              <User className="w-5 h-5 text-purple-400" />
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{ background: 'var(--gradient-brand)', boxShadow: '0 0 16px var(--accent-glow)' }}>
+              <Zap className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="text-sm font-semibold text-white">Endevo Life</div>
-              <div className="text-xs text-purple-400 flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-purple-400 inline-block animate-pulse" />
+              <div className="text-sm font-bold text-white">Endevo Life</div>
+              <div className="text-xs flex items-center gap-1" style={{ color: 'var(--accent-1)' }}>
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: 'var(--success)' }} />
                 Employee Portal
               </div>
             </div>
           </div>
         </div>
+
+        {/* Nav */}
         <nav className="flex-1 p-3 space-y-0.5">
           {nav.map(item => {
             const active = path.startsWith(item.href)
             return (
               <Link key={item.href} href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                  active ? 'bg-purple-600/20 text-purple-300 border border-purple-500/30' : 'text-slate-400 hover:text-white hover:bg-white/5'
-                }`}>
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active ? 'nav-active' : 'nav-inactive'}`}>
                 <item.icon className="w-4 h-4" />{item.label}
               </Link>
             )
@@ -123,7 +143,7 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
         </nav>
         <SessionPanel />
       </aside>
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>{children}</main>
     </div>
   )
 }
