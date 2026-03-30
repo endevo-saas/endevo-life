@@ -6,7 +6,8 @@
 
 /* ═══════════════════════════════════════════════════════
    ENDEVO LIFE — DESIGN SYSTEM v2.0
-   4 Themes: cosmic (default), ocean, forest, sunset
+   6 Themes: cosmic, ocean, forest, sunset (dark)
+             pearl, dawn (light)
 ═══════════════════════════════════════════════════════ */
 
 /* ── Theme: Cosmic (Default — deep space purple) ────── */
@@ -142,6 +143,72 @@
   --gradient-brand: linear-gradient(135deg, #f43f5e 0%, #f59e0b 50%, #8b5cf6 100%);
   --gradient-card:  linear-gradient(145deg, rgba(244,63,94,0.12), rgba(245,158,11,0.06));
   --shimmer-color:  rgba(244,63,94,0.2);
+}
+
+/* ── Theme: Pearl (Clean white — professional light) ── */
+[data-theme="pearl"] {
+  --bg-base:       #f8fafc;
+  --bg-card:       #ffffff;
+  --bg-elevated:   #f1f5f9;
+  --bg-hover:      rgba(99,102,241,0.06);
+  --border:        rgba(99,102,241,0.2);
+  --border-subtle: rgba(0,0,0,0.08);
+
+  --text-primary:  #0f172a;
+  --text-secondary:#475569;
+  --text-muted:    #94a3b8;
+
+  --accent-1:      #6366f1;
+  --accent-2:      #8b5cf6;
+  --accent-glow:   rgba(99,102,241,0.25);
+  --accent-glow-2: rgba(139,92,246,0.15);
+
+  --success:       #10b981;
+  --success-glow:  rgba(16,185,129,0.2);
+  --gold:          #f59e0b;
+  --gold-glow:     rgba(245,158,11,0.2);
+  --danger:        #f43f5e;
+  --danger-glow:   rgba(244,63,94,0.2);
+
+  --gradient-hero: radial-gradient(ellipse at 20% 50%, rgba(99,102,241,0.08) 0%, transparent 60%),
+                   radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.06) 0%, transparent 50%),
+                   #f8fafc;
+  --gradient-brand: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #06b6d4 100%);
+  --gradient-card:  linear-gradient(145deg, rgba(99,102,241,0.06), rgba(139,92,246,0.03));
+  --shimmer-color:  rgba(99,102,241,0.12);
+}
+
+/* ── Theme: Dawn (Warm cream — cozy light) ──────────── */
+[data-theme="dawn"] {
+  --bg-base:       #fffbf5;
+  --bg-card:       #ffffff;
+  --bg-elevated:   #fef3e2;
+  --bg-hover:      rgba(245,158,11,0.08);
+  --border:        rgba(245,158,11,0.25);
+  --border-subtle: rgba(0,0,0,0.07);
+
+  --text-primary:  #1c1917;
+  --text-secondary:#57534e;
+  --text-muted:    #a8a29e;
+
+  --accent-1:      #d97706;
+  --accent-2:      #ea580c;
+  --accent-glow:   rgba(217,119,6,0.3);
+  --accent-glow-2: rgba(234,88,12,0.2);
+
+  --success:       #16a34a;
+  --success-glow:  rgba(22,163,74,0.2);
+  --gold:          #d97706;
+  --gold-glow:     rgba(217,119,6,0.3);
+  --danger:        #dc2626;
+  --danger-glow:   rgba(220,38,38,0.2);
+
+  --gradient-hero: radial-gradient(ellipse at 30% 50%, rgba(245,158,11,0.1) 0%, transparent 60%),
+                   radial-gradient(ellipse at 80% 20%, rgba(234,88,12,0.07) 0%, transparent 50%),
+                   #fffbf5;
+  --gradient-brand: linear-gradient(135deg, #f59e0b 0%, #ea580c 50%, #d97706 100%);
+  --gradient-card:  linear-gradient(145deg, rgba(245,158,11,0.08), rgba(234,88,12,0.04));
+  --shimmer-color:  rgba(245,158,11,0.15);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -525,6 +592,122 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════
+   LIGHT MODE OVERRIDES (pearl + dawn)
+═══════════════════════════════════════════════════════ */
+
+.light-mode body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+}
+
+.light-mode .glass {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 24px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.8);
+}
+
+.light-mode .glass-elevated {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 8px 40px rgba(0,0,0,0.08), 0 2px 6px rgba(0,0,0,0.04);
+}
+
+.light-mode .glass-accent {
+  background: linear-gradient(145deg, rgba(99,102,241,0.05), rgba(139,92,246,0.02));
+  border: 1px solid var(--border);
+  box-shadow: 0 4px 20px rgba(99,102,241,0.1);
+}
+
+.light-mode .input-field {
+  background: #f8fafc;
+  border-color: rgba(0,0,0,0.12);
+  color: var(--text-primary);
+}
+
+.light-mode .input-field:focus {
+  background: white;
+  border-color: var(--accent-1);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.light-mode .nav-active {
+  background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(139,92,246,0.06));
+  border: 1px solid rgba(99,102,241,0.2);
+  color: var(--accent-1);
+  box-shadow: 0 2px 12px var(--accent-glow);
+}
+
+.light-mode .nav-inactive {
+  color: var(--text-secondary);
+}
+
+.light-mode .nav-inactive:hover {
+  color: var(--accent-1);
+  background: var(--bg-hover);
+}
+
+.light-mode .stat-card {
+  background: white;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 4px 20px rgba(0,0,0,0.06);
+}
+
+.light-mode .stat-card:hover {
+  box-shadow: 0 12px 40px rgba(0,0,0,0.1), 0 0 0 1px var(--border);
+}
+
+.light-mode .badge {
+  background: white;
+  border: 1px solid var(--border-subtle);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+}
+
+.light-mode .badge-unlocked {
+  border-color: var(--accent-1);
+  background: linear-gradient(145deg, rgba(99,102,241,0.06), rgba(139,92,246,0.03));
+  box-shadow: 0 4px 16px var(--accent-glow);
+}
+
+.light-mode .progress-bar {
+  background: rgba(0,0,0,0.06);
+}
+
+.light-mode .xp-bar-track {
+  background: rgba(0,0,0,0.06);
+  border-color: rgba(0,0,0,0.04);
+}
+
+/* Dawn theme specific adjustments */
+[data-theme="dawn"] .nav-active {
+  background: linear-gradient(135deg, rgba(217,119,6,0.1), rgba(234,88,12,0.06));
+  border-color: rgba(217,119,6,0.25);
+  color: var(--accent-1);
+}
+
+[data-theme="dawn"] .nav-inactive:hover {
+  color: var(--accent-1);
+}
+
+[data-theme="dawn"] .glass-accent {
+  background: linear-gradient(145deg, rgba(245,158,11,0.06), rgba(234,88,12,0.03));
+  border-color: rgba(245,158,11,0.2);
+}
+
+/* ═══════════════════════════════════════════════════════
+   THEME SWATCHES — updated with light themes
+═══════════════════════════════════════════════════════ */
+
+.theme-pearl {
+  background: linear-gradient(135deg, #e0e7ff, #f8fafc);
+  border: 1.5px solid #c7d2fe !important;
+}
+
+.theme-dawn {
+  background: linear-gradient(135deg, #fde68a, #fed7aa);
+  border: 1.5px solid #fbbf24 !important;
+}
+
+/* ═══════════════════════════════════════════════════════
    SCROLLBAR
 ═══════════════════════════════════════════════════════ */
 
@@ -532,6 +715,10 @@ body {
 ::-webkit-scrollbar-track { background: var(--bg-base); }
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--accent-1); }
+
+.light-mode ::-webkit-scrollbar-track { background: #f1f5f9; }
+.light-mode ::-webkit-scrollbar-thumb { background: #cbd5e1; }
+.light-mode ::-webkit-scrollbar-thumb:hover { background: var(--accent-1); }
 
 /* ═══════════════════════════════════════════════════════
    ANIMATIONS

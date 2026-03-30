@@ -121,8 +121,9 @@ function SessionPanel() {
 export default function HrLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname()
   return (
-    <div className="min-h-screen flex">
-      <aside className="w-64 flex-shrink-0 glass border-r border-white/10 flex flex-col">
+    <div className="min-h-screen flex" style={{ background: 'var(--bg-base)' }}>
+      <aside className="w-64 flex-shrink-0 flex flex-col"
+        style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)' }}>
         <div className="p-5 border-b border-white/10">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 bg-green-600/20 border border-green-500/30 rounded-xl flex items-center justify-center">
@@ -152,7 +153,7 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
         </nav>
         <SessionPanel />
       </aside>
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>{children}</main>
     </div>
   )
 }

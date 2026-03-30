@@ -193,9 +193,10 @@ function SessionPanel() {
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname()
   return (
-    <div className="min-h-screen flex">
+    <div className="min-h-screen flex" style={{ background: 'var(--bg-base)' }}>
       {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 glass border-r border-white/10 flex flex-col">
+      <aside className="w-64 flex-shrink-0 flex flex-col"
+        style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)' }}>
         {/* Brand */}
         <div className="p-5 border-b border-white/10">
           <div className="flex items-center gap-3">
@@ -234,7 +235,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto">{children}</main>
+      <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>{children}</main>
     </div>
   )
 }

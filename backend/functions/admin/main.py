@@ -895,11 +895,28 @@ def handler(event, context):
                 Message={
                     "Subject": {"Data": f"You're invited to Endevo Life — {tenant_name or 'Platform'}"},
                     "Body": {"Html": {"Data": f"""
-                        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:24px">
-                          <h2 style="color:#6366f1">Welcome to Endevo Life</h2>
-                          <p>You've been invited as <strong>{user_role.replace('_',' ')}</strong>{' at ' + tenant_name if tenant_name else ''}.</p>
-                          <a href="{invite_url}" style="display:inline-block;padding:12px 24px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;margin:16px 0">Accept Invitation</a>
-                          <p style="color:#666;font-size:12px">Temporary password: <code>{temp_password}</code><br>Login at: <a href="https://main.d1vgn9nzfx4cxk.amplifyapp.com/login">Endevo Life Login</a></p>
+                        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px;background:#0f172a;color:#e2e8f0;border-radius:12px">
+                          <div style="text-align:center;margin-bottom:24px">
+                            <h1 style="color:#818cf8;font-size:26px;margin:0">Endevo Life</h1>
+                            <p style="color:#64748b;font-size:13px;margin:4px 0 0">Digital Legacy & Estate Planning</p>
+                          </div>
+                          <h2 style="color:#e2e8f0;font-size:20px">You've been invited!</h2>
+                          <p style="color:#94a3b8">You've been added as <strong style="color:#fff">{user_role.replace('_',' ')}</strong>{(' at <strong style="color:#fff">' + tenant_name + '</strong>') if tenant_name else ' to the Endevo Life platform'}.</p>
+                          <div style="background:#1e293b;border-radius:8px;padding:16px;margin:20px 0;border-left:4px solid #6366f1">
+                            <p style="margin:0;color:#64748b;font-size:12px">Your role:</p>
+                            <p style="margin:4px 0 0;color:#e2e8f0;font-weight:600">{user_role.replace('_',' ')}</p>
+                            {('<p style="margin:4px 0 0;color:#64748b;font-size:12px">Organisation: <span style="color:#e2e8f0">' + tenant_name + '</span></p>') if tenant_name else ''}
+                          </div>
+                          <p style="color:#94a3b8;font-size:14px">Click below to accept your invitation and create your own secure password:</p>
+                          <div style="text-align:center;margin:28px 0">
+                            <a href="{invite_url}" style="display:inline-block;padding:16px 36px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:16px">
+                              Accept Invitation &rarr;
+                            </a>
+                          </div>
+                          <p style="color:#475569;font-size:12px;text-align:center">This link is personal to you. Click it once to set your password and activate your account.</p>
+                          <p style="color:#334155;font-size:11px;margin-top:24px;border-top:1px solid #1e293b;padding-top:16px;text-align:center">
+                            Questions? <a href="mailto:support@endevo.life" style="color:#818cf8">support@endevo.life</a>
+                          </p>
                         </div>"""}}
                 }
             )
