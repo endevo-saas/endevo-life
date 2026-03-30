@@ -2,33 +2,41 @@
 
 import { useEffect, useState } from 'react'
 
-export type Theme = 'cosmic' | 'ocean' | 'forest' | 'sunset' | 'pearl' | 'dawn'
+export type Theme = 'eclipse' | 'canvas' | 'neon'
 
-const THEMES: { id: Theme; label: string; desc: string; cls: string; dark: boolean }[] = [
-  // ── Dark themes ──
-  { id: 'cosmic', label: 'Cosmic',  desc: 'Deep space purple',  cls: 'theme-cosmic',  dark: true  },
-  { id: 'ocean',  label: 'Ocean',   desc: 'Electric teal-blue', cls: 'theme-ocean',   dark: true  },
-  { id: 'forest', label: 'Forest',  desc: 'Vibrant emerald',    cls: 'theme-forest',  dark: true  },
-  { id: 'sunset', label: 'Sunset',  desc: 'Fiery rose-orange',  cls: 'theme-sunset',  dark: true  },
-  // ── Light themes ──
-  { id: 'pearl',  label: 'Pearl',   desc: 'Clean white light',  cls: 'theme-pearl',   dark: false },
-  { id: 'dawn',   label: 'Dawn',    desc: 'Warm cream & gold',  cls: 'theme-dawn',    dark: false },
+const THEMES: { id: Theme; label: string; desc: string; preview: string }[] = [
+  {
+    id: 'eclipse',
+    label: 'Eclipse',
+    desc: 'Dark • Linear-style',
+    preview: 'linear-gradient(135deg, #0F0F10 50%, #5E6AD2 50%)',
+  },
+  {
+    id: 'canvas',
+    label: 'Canvas',
+    desc: 'Light • Notion-style',
+    preview: 'linear-gradient(135deg, #FFFFFF 50%, #487CA5 50%)',
+  },
+  {
+    id: 'neon',
+    label: 'Neon',
+    desc: 'Vibrant • Duolingo-style',
+    preview: 'linear-gradient(135deg, #0A0A0A 40%, #58CC02 70%, #FF6B35 100%)',
+  },
 ]
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>('cosmic')
+  const [theme, setThemeState] = useState<Theme>('eclipse')
 
   useEffect(() => {
-    const saved = (localStorage.getItem('endevo-theme') as Theme) || 'cosmic'
+    const saved = (localStorage.getItem('endevo-theme') as Theme) || 'eclipse'
     applyTheme(saved)
     setThemeState(saved)
   }, [])
 
   function applyTheme(t: Theme) {
     document.documentElement.setAttribute('data-theme', t)
-    // Toggle dark/light class on body for Tailwind
-    const isLight = t === 'pearl' || t === 'dawn'
-    document.documentElement.classList.toggle('light-mode', isLight)
+    document.documentElement.classList.toggle('light-mode', t === 'canvas')
   }
 
   function setTheme(t: Theme) {
@@ -40,75 +48,78 @@ export function useTheme() {
   return { theme, setTheme }
 }
 
-// Compact inline swatches for sidebars — 2 rows: dark | light
+// Compact sidebar picker — 3 small squares, drag not needed, auto-applies
 export function ThemePickerInline() {
   const { theme, setTheme } = useTheme()
-  const dark  = THEMES.filter(t => t.dark)
-  const light = THEMES.filter(t => !t.dark)
 
   return (
-    <div className="px-3 py-1.5 space-y-1.5">
-      <div className="flex items-center gap-1.5">
-        {dark.map(t => (
-          <button key={t.id} onClick={() => setTheme(t.id)}
-            className={`theme-swatch ${t.cls} ${theme === t.id ? 'active' : ''}`}
-            title={`${t.label} — ${t.desc}`} />
-        ))}
-        <div className="w-px h-4 mx-0.5" style={{ background: 'var(--border-subtle)' }} />
-        {light.map(t => (
-          <button key={t.id} onClick={() => setTheme(t.id)}
-            className={`theme-swatch ${t.cls} ${theme === t.id ? 'active' : ''}`}
-            title={`${t.label} — ${t.desc}`} />
+    <div className="px-3 pb-3">
+      <p className="text-[10px] font-semibold uppercase tracking-wider mb-2"
+        style={{ color: 'var(--text-muted)' }}>Theme</p>
+      <div className="flex items-center gap-2">
+        {THEMES.map(t => (
+          <button
+            key={t.id}
+            onClick={() => setTheme(t.id)}
+            title={`${t.label} — ${t.desc}`}
+            className="flex flex-col items-center gap-1 group"
+          >
+            {/* Square preview swatch */}
+            <div
+              className="w-8 h-8 rounded-lg transition-all duration-200"
+              style={{
+                background: t.preview,
+                outline: theme === t.id ? '2px solid white' : '2px solid transparent',
+                outlineOffset: '2px',
+                transform: theme === t.id ? 'scale(1.1)' : 'scale(1)',
+                boxShadow: theme === t.id ? '0 0 12px rgba(255,255,255,0.25)' : 'none',
+              }}
+            />
+            <span className="text-[9px] font-medium transition-colors"
+              style={{ color: theme === t.id ? 'var(--text-primary)' : 'var(--text-muted)' }}>
+              {t.label}
+            </span>
+          </button>
         ))}
       </div>
-      <p className="text-[9px] font-medium" style={{ color: 'var(--text-muted)' }}>
-        {THEMES.find(t => t.id === theme)?.label} theme active
-      </p>
     </div>
   )
 }
 
-// Full picker for Settings page
+// Full picker for settings page
 export function ThemePickerFull() {
   const { theme, setTheme } = useTheme()
-  const dark  = THEMES.filter(t => t.dark)
-  const light = THEMES.filter(t => !t.dark)
 
-  function Section({ label, items }: { label: string; items: typeof THEMES }) {
-    return (
-      <div>
-        <p className="text-xs font-bold uppercase tracking-widest mb-3" style={{ color: 'var(--text-muted)' }}>{label}</p>
-        <div className="grid grid-cols-2 gap-3">
-          {items.map(t => (
-            <button key={t.id} onClick={() => setTheme(t.id)}
-              className={`relative flex items-center gap-3 p-4 rounded-2xl border transition-all text-left ${
-                theme === t.id ? 'scale-[1.02]' : 'hover:scale-[1.01]'
-              }`}
-              style={{
-                background: theme === t.id ? 'var(--gradient-card)' : 'var(--bg-elevated)',
-                border: `1px solid ${theme === t.id ? 'var(--accent-1)' : 'var(--border-subtle)'}`,
-                boxShadow: theme === t.id ? '0 0 16px var(--accent-glow)' : 'none',
-              }}>
-              <div className={`theme-swatch ${t.cls} flex-shrink-0 w-9 h-9 rounded-xl ${theme === t.id ? 'active' : ''}`} />
+  return (
+    <div className="grid grid-cols-3 gap-4">
+      {THEMES.map(t => (
+        <button
+          key={t.id}
+          onClick={() => setTheme(t.id)}
+          className="relative rounded-2xl overflow-hidden transition-all duration-300 text-left"
+          style={{
+            border: `2px solid ${theme === t.id ? 'white' : 'var(--border-subtle)'}`,
+            transform: theme === t.id ? 'scale(1.03)' : 'scale(1)',
+            boxShadow: theme === t.id ? '0 0 24px rgba(255,255,255,0.15)' : 'none',
+          }}
+        >
+          {/* Big preview */}
+          <div className="h-20 w-full" style={{ background: t.preview }} />
+          <div className="p-3" style={{ background: 'var(--bg-elevated)' }}>
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>{t.label}</p>
                 <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{t.desc}</p>
               </div>
               {theme === t.id && (
-                <div className="absolute top-2 right-2 w-2 h-2 rounded-full animate-pulse"
-                  style={{ background: 'var(--accent-1)' }} />
+                <div className="w-5 h-5 rounded-full bg-white flex items-center justify-center flex-shrink-0">
+                  <span className="text-black text-xs font-black">✓</span>
+                </div>
               )}
-            </button>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="space-y-5">
-      <Section label="Dark Themes" items={dark} />
-      <Section label="Light Themes" items={light} />
+            </div>
+          </div>
+        </button>
+      ))}
     </div>
   )
 }
