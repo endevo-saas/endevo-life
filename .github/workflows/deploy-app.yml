@@ -23,33 +23,45 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      - name: Get Amplify App ID from CDK outputs
+      - name: Get Amplify App ID
         id: amplify
         run: |
           APP_ID=$(aws amplify list-apps --region ${{ secrets.AWS_REGION }} \
             --query 'apps[?name==`endevo-uat-frontend`].appId' \
             --output text)
           echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
+          echo "Amplify App ID: $APP_ID"
 
-      - name: Trigger Amplify build
-        run: |
-          aws amplify start-job \
-            --app-id ${{ steps.amplify.outputs.app_id }} \
-            --branch-name main \
-            --job-type RELEASE \
-            --region ${{ secrets.AWS_REGION }}
-          echo "Amplify build triggered for app: ${{ steps.amplify.outputs.app_id }}"
-
-      - name: Wait and check build status
+      - name: Trigger Amplify build (skip if already running)
         run: |
           APP_ID=${{ steps.amplify.outputs.app_id }}
-          echo "Waiting 30s for build to start..."
-          sleep 30
-          STATUS=$(aws amplify list-jobs \
+          # Check if a build is already running — if so, skip gracefully
+          RUNNING=$(aws amplify list-jobs \
             --app-id $APP_ID \
             --branch-name main \
             --max-results 1 \
             --region ${{ secrets.AWS_REGION }} \
             --query 'jobSummaries[0].status' \
             --output text)
-          echo "Build status: $STATUS"
+          if [ "$RUNNING" = "RUNNING" ] || [ "$RUNNING" = "PENDING" ]; then
+            echo "✅ Amplify build already in progress (status: $RUNNING) — skipping trigger"
+          else
+            aws amplify start-job \
+              --app-id $APP_ID \
+              --branch-name main \
+              --job-type RELEASE \
+              --region ${{ secrets.AWS_REGION }}
+            echo "✅ Amplify build triggered"
+          fi
+
+      - name: Show current build status
+        run: |
+          APP_ID=${{ steps.amplify.outputs.app_id }}
+          STATUS=$(aws amplify list-jobs \
+            --app-id $APP_ID \
+            --branch-name main \
+            --max-results 1 \
+            --region ${{ secrets.AWS_REGION }} \
+            --query 'jobSummaries[0].{Status:status,JobId:jobId}' \
+            --output table)
+          echo "$STATUS"
