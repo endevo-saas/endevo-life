@@ -42,8 +42,16 @@ export class IamStack extends cdk.Stack {
     this.lambdaRole.addToPolicy(new iam.PolicyStatement({
       sid: 'S3Access',
       effect: iam.Effect.ALLOW,
-      actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject', 's3:GeneratePresignedUrl'],
+      actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
       resources: props.s3BucketArns.map(arn => `${arn}/*`),
+    }))
+
+    // S3 — list buckets (required for presigned URL generation + bucket-level checks)
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'S3ListAccess',
+      effect: iam.Effect.ALLOW,
+      actions: ['s3:ListBucket', 's3:GetBucketLocation'],
+      resources: props.s3BucketArns,
     }))
 
     // SES — send emails
@@ -68,6 +76,17 @@ export class IamStack extends cdk.Stack {
         'cognito-idp:GetUser',
       ],
       resources: [props.cognitoPoolArn],
+    }))
+
+    // CloudFront signed URLs — LMS video delivery
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'CloudFrontSignedUrls',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'cloudfront:CreateInvalidation',
+        'cloudfront:GetDistribution',
+      ],
+      resources: ['*'],
     }))
 
     new cdk.CfnOutput(this, 'LambdaRoleArn', {

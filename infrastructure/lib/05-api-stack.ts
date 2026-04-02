@@ -69,6 +69,15 @@ export class ApiStack extends cdk.Stack {
       description: 'Global Admin: tenant management, system stats',
     })
 
+    // --- LMS Lambda ---
+    const lmsFn = new lambda.Function(this, 'LmsFn', {
+      ...lambdaDefaults,
+      functionName: 'endevo-uat-fn-lms',
+      handler: 'main.handler',
+      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/functions/lms')),
+      description: 'LMS: assessment, week content, video progress, quiz, admin, certificates',
+    })
+
     // --- API Gateway HTTP API ---
     const api = new apigw.HttpApi(this, 'HttpApi', {
       apiName: 'endevo-uat-api',
@@ -86,6 +95,7 @@ export class ApiStack extends cdk.Stack {
     api.addRoutes({ path: '/api/hr/{proxy+}',   methods: [apigw.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration('HrInt',   hrFn) })
     api.addRoutes({ path: '/api/employee/{proxy+}', methods: [apigw.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration('EmpInt', employeeFn) })
     api.addRoutes({ path: '/api/admin/{proxy+}', methods: [apigw.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration('AdminInt', adminFn) })
+    api.addRoutes({ path: '/api/lms/{proxy+}', methods: [apigw.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration('LmsInt', lmsFn) })
 
     this.apiUrl = api.url!
 

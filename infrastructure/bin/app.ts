@@ -7,6 +7,7 @@ import { S3Stack } from '../lib/03-s3-stack'
 import { IamStack } from '../lib/04-iam-stack'
 import { ApiStack } from '../lib/05-api-stack'
 import { AmplifyStack } from '../lib/06-amplify-stack'
+import { CloudFrontLmsStack } from '../lib/07-cloudfront-lms-stack'
 
 const app = new cdk.App()
 
@@ -53,4 +54,10 @@ new AmplifyStack(app, 'EndevoUatAmplify', {
   apiUrl: api.apiUrl,
   userPoolId: cognito.userPoolId,
   userPoolClientId: cognito.userPoolClientId,
+})
+
+// Stack 7 — CloudFront LMS (secure video delivery)
+new CloudFrontLmsStack(app, 'EndevoUatCloudFrontLms', {
+  env, tags,
+  lambdaRoleArn: iam.lambdaRole.roleArn,
 })

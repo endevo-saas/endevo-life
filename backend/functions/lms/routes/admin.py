@@ -1,0 +1,523 @@
+"""
+Admin routes — super admin / admin CRUD for questions, modules, and user progress.
+
+All routes require role in ("super_admin", "admin").
+
+Schema notes:
+  - endevo-uat-lms-user-modules: field lockStatus (locked|unlocked|complete).
+  - endevo-uat-questions: PK=tenantId SK=questionId.
+    answers=[{label,text,score}], correctLabel, type (assessment|inline).
+  - endevo-uat-lms-modules: PK=tenantId SK=moduleNum.
+    Fields: title, description, videoIds[], pdfKey, objectives[], isActive, status.
+
+Routes handled:
+  GET    /api/lms/admin/questions                    — list questions (type filter)
+  POST   /api/lms/admin/questions                    — create question
+  PUT    /api/lms/admin/questions/{id}               — update question
+  DELETE /api/lms/admin/questions/{id}               — delete question
+  GET    /api/lms/admin/modules                      — list all module configs
+  POST   /api/lms/admin/modules                      — create or update module config
+  GET    /api/lms/admin/users/progress               — list all users with module progress summary
+  GET    /api/lms/admin/users/{userId}/progress      — full progress for a specific user
+  POST   /api/lms/admin/users/{userId}/unlock        — manually unlock a module for a user
+"""
+import json
+import logging
+import re
+import uuid
+from datetime import datetime, timezone
+from typing import Optional
+
+from boto3.dynamodb.conditions import Key, Attr
+from botocore.exceptions import ClientError
+
+from utils.auth import require_auth, require_admin
+from utils.db import (
+    QUESTIONS_T,
+    MODULES_T,
+    USER_MODULES_T,
+    USERS_T,
+    VIDEO_PROG_T,
+    RESPONSES_T,
+    CERTS_T,
+)
+from utils.response import ok, err
+
+logger = logging.getLogger(__name__)
+
+VALID_QUESTION_TYPES: frozenset[str] = frozenset({"assessment", "inline"})
+TOTAL_MODULES: int = 6
+
+
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def get_body(event: dict) -> dict:
+    try:
+        return json.loads(event.get("body") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        return {}
+
+
+def _now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _paginate_query(table, **kwargs) -> list[dict]:
+    """Run a query and transparently follow pagination."""
+    resp = table.query(**kwargs)
+    items = resp.get("Items", [])
+    while "LastEvaluatedKey" in resp:
+        resp = table.query(
+            **{**kwargs, "ExclusiveStartKey": resp["LastEvaluatedKey"]}
+        )
+        items.extend(resp.get("Items", []))
+    return items
+
+
+def _paginate_scan(table, **kwargs) -> list[dict]:
+    """Run a scan and transparently follow pagination."""
+    resp = table.scan(**kwargs)
+    items = resp.get("Items", [])
+    while "LastEvaluatedKey" in resp:
+        resp = table.scan(
+            **{**kwargs, "ExclusiveStartKey": resp["LastEvaluatedKey"]}
+        )
+        items.extend(resp.get("Items", []))
+    return items
+
+
+# ── Question CRUD ─────────────────────────────────────────────────────────────
+
+def _list_questions(event: dict, tenant_id: str) -> dict:
+    """GET /api/lms/admin/questions"""
+    qs_params = event.get("queryStringParameters") or {}
+    type_filter: Optional[str] = qs_params.get("type")
+
+    try:
+        filter_expr = None
+        if type_filter:
+            if type_filter not in VALID_QUESTION_TYPES:
+                return err(400, f"type must be one of {sorted(VALID_QUESTION_TYPES)}")
+            filter_expr = Attr("type").eq(type_filter)
+
+        kwargs: dict = {
+            "KeyConditionExpression": Key("tenantId").eq(tenant_id),
+        }
+        if filter_expr is not None:
+            kwargs["FilterExpression"] = filter_expr
+
+        questions = _paginate_query(QUESTIONS_T, **kwargs)
+        return ok({"questions": questions, "total": len(questions)})
+    except ClientError:
+        return err(500, "Failed to list questions")
+
+
+def _create_question(event: dict, tenant_id: str) -> dict:
+    """POST /api/lms/admin/questions
+
+    Schema: answers=[{label, text, score}], correctLabel.
+    """
+    body = get_body(event)
+
+    q_type: str = str(body.get("type", "")).strip()
+    text: str = str(body.get("text", "")).strip()
+    answers: list = body.get("answers", [])
+
+    if not q_type or q_type not in VALID_QUESTION_TYPES:
+        return err(400, f"type must be one of {sorted(VALID_QUESTION_TYPES)}")
+    if not text:
+        return err(400, "text is required")
+    if not isinstance(answers, list) or len(answers) < 2:
+        return err(400, "answers must be a list with at least 2 items")
+
+    # Validate answer objects
+    for a in answers:
+        if not isinstance(a, dict) or "label" not in a or "text" not in a:
+            return err(400, "Each answer must have 'label' and 'text' fields")
+
+    question_id = str(uuid.uuid4())
+    now = _now_iso()
+
+    item: dict = {
+        "tenantId": tenant_id,
+        "questionId": question_id,
+        "type": q_type,
+        "text": text,
+        "answers": answers,
+        "createdAt": now,
+        "updatedAt": now,
+    }
+
+    # Optional fields
+    if q_type == "inline":
+        video_id = str(body.get("videoId", "")).strip()
+        if not video_id:
+            return err(400, "videoId is required for inline questions")
+        item["videoId"] = video_id
+        timestamp = body.get("timestamp")
+        if timestamp is not None:
+            item["timestamp"] = int(timestamp)
+
+    domain = str(body.get("domain", "")).strip()
+    if domain:
+        item["domain"] = domain
+
+    number = body.get("number")
+    if number is not None:
+        item["number"] = int(number)
+
+    weight = body.get("weight")
+    if weight is not None:
+        item["weight"] = int(weight)
+
+    correct_label = str(body.get("correctLabel", "")).strip()
+    if correct_label:
+        item["correctLabel"] = correct_label
+
+    explanation = str(body.get("explanation", "")).strip()
+    if explanation:
+        item["explanation"] = explanation
+
+    order = body.get("order")
+    if order is not None:
+        item["order"] = int(order)
+
+    try:
+        QUESTIONS_T.put_item(Item=item)
+        logger.info(
+            "Question created: %s type=%s tenant=%s", question_id, q_type, tenant_id
+        )
+        return ok(item, status=201)
+    except ClientError:
+        return err(500, "Failed to create question")
+
+
+def _update_question(event: dict, tenant_id: str, question_id: str) -> dict:
+    """PUT /api/lms/admin/questions/{id}"""
+    body = get_body(event)
+
+    update_exprs: list[str] = ["updatedAt = :now"]
+    expr_vals: dict = {":now": _now_iso()}
+    expr_names: dict = {}
+
+    # Map body field names to DynamoDB expression fields.
+    # Fields that are DynamoDB reserved words need expression attribute name aliases.
+    allowed_fields: dict[str, str] = {
+        "text": "text",
+        "answers": "answers",
+        "domain": "domain",
+        "number": "#num",
+        "weight": "weight",
+        "correctLabel": "correctLabel",
+        "explanation": "explanation",
+        "videoId": "videoId",
+        "timestamp": "#ts",
+        "order": "#ord",
+    }
+    # Expression attribute name mappings for reserved words
+    reserved_aliases: dict[str, str] = {
+        "#num": "number",
+        "#ts": "timestamp",
+        "#ord": "order",
+    }
+
+    for field, expr_field in allowed_fields.items():
+        if field in body:
+            if expr_field.startswith("#"):
+                expr_names[expr_field] = reserved_aliases[expr_field]
+            update_exprs.append(f"{expr_field} = :{field}")
+            expr_vals[f":{field}"] = body[field]
+
+    if len(update_exprs) == 1:
+        return err(400, "No updatable fields provided")
+
+    update_expression = "SET " + ", ".join(update_exprs)
+
+    try:
+        kwargs: dict = {
+            "Key": {"tenantId": tenant_id, "questionId": question_id},
+            "UpdateExpression": update_expression,
+            "ExpressionAttributeValues": expr_vals,
+            "ConditionExpression": "attribute_exists(questionId)",
+            "ReturnValues": "ALL_NEW",
+        }
+        if expr_names:
+            kwargs["ExpressionAttributeNames"] = expr_names
+
+        resp = QUESTIONS_T.update_item(**kwargs)
+        return ok(resp.get("Attributes", {}))
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return err(404, "Question not found")
+        logger.error("Failed to update question %s: %s", question_id, exc)
+        return err(500, "Failed to update question")
+
+
+def _delete_question(tenant_id: str, question_id: str) -> dict:
+    """DELETE /api/lms/admin/questions/{id}"""
+    try:
+        QUESTIONS_T.delete_item(
+            Key={"tenantId": tenant_id, "questionId": question_id},
+            ConditionExpression="attribute_exists(questionId)",
+        )
+        logger.info("Question deleted: %s", question_id)
+        return ok({"message": "Question deleted", "questionId": question_id})
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return err(404, "Question not found")
+        logger.error("Failed to delete question %s: %s", question_id, exc)
+        return err(500, "Failed to delete question")
+
+
+# ── Module config CRUD ────────────────────────────────────────────────────────
+
+def _list_modules(tenant_id: str) -> dict:
+    """GET /api/lms/admin/modules"""
+    try:
+        modules = _paginate_query(
+            MODULES_T,
+            KeyConditionExpression=Key("tenantId").eq(tenant_id),
+        )
+        return ok({"modules": modules, "total": len(modules)})
+    except ClientError:
+        return err(500, "Failed to list modules")
+
+
+def _upsert_module(event: dict, tenant_id: str) -> dict:
+    """POST /api/lms/admin/modules — create or update a module config.
+
+    Schema: PK=tenantId SK=moduleNum.
+    Fields: title, description, videoIds[], pdfKey, objectives[], isActive, status.
+    """
+    body = get_body(event)
+    module_num: str = str(body.get("moduleNum", "")).strip()
+
+    if not module_num or not module_num.isdigit():
+        return err(400, "moduleNum must be a positive integer string")
+
+    if int(module_num) < 1 or int(module_num) > TOTAL_MODULES:
+        return err(400, f"moduleNum must be between 1 and {TOTAL_MODULES}")
+
+    title: str = str(body.get("title", f"Module {module_num}")).strip()
+    now = _now_iso()
+
+    item: dict = {
+        "tenantId": tenant_id,
+        "moduleNum": module_num,
+        "title": title,
+        "description": str(body.get("description", "")).strip(),
+        "videoIds": body.get("videoIds", []),
+        "objectives": body.get("objectives", []),
+        "isActive": bool(body.get("isActive", True)),
+        "status": str(body.get("status", "draft")).strip(),
+        "updatedAt": now,
+    }
+
+    pdf_key = str(body.get("pdfKey", "")).strip()
+    if pdf_key:
+        item["pdfKey"] = pdf_key
+
+    if "quizPassThreshold" in body:
+        item["quizPassThreshold"] = int(body["quizPassThreshold"])
+
+    try:
+        MODULES_T.put_item(Item=item)
+        logger.info("Module config upserted: module=%s tenant=%s", module_num, tenant_id)
+        return ok(item)
+    except ClientError:
+        return err(500, "Failed to save module configuration")
+
+
+# ── User progress views ───────────────────────────────────────────────────────
+
+def _list_users_progress(tenant_id: str) -> dict:
+    """GET /api/lms/admin/users/progress"""
+    try:
+        # Scan all user-module records for this tenant.
+        # Schema: lockStatus field (not "status").
+        user_module_records = _paginate_scan(
+            USER_MODULES_T,
+            FilterExpression=Attr("tenantId").eq(tenant_id),
+        )
+
+        # Group by userId
+        by_user: dict[str, list] = {}
+        for record in user_module_records:
+            uid = record.get("userId", "")
+            by_user.setdefault(uid, []).append(record)
+
+        summary = []
+        for uid, modules in by_user.items():
+            completed_modules = [
+                m for m in modules if m.get("lockStatus") == "complete"
+            ]
+            unlocked_modules = [
+                m for m in modules if m.get("lockStatus") in ("unlocked", "complete")
+            ]
+            summary.append(
+                {
+                    "userId": uid,
+                    "modulesUnlocked": len(unlocked_modules),
+                    "modulesCompleted": len(completed_modules),
+                    "latestModuleCompleted": (
+                        max(
+                            (int(m["moduleNum"]) for m in completed_modules),
+                            default=None,
+                        )
+                    ),
+                }
+            )
+
+        return ok({"users": summary, "total": len(summary)})
+    except ClientError:
+        return err(500, "Failed to retrieve user progress summary")
+
+
+def _get_user_progress(user_id: str, tenant_id: str) -> dict:
+    """GET /api/lms/admin/users/{userId}/progress"""
+    try:
+        # Module-level records
+        module_records = _paginate_query(
+            USER_MODULES_T,
+            KeyConditionExpression=Key("userId").eq(user_id),
+        )
+
+        # Video progress records
+        video_records = _paginate_query(
+            VIDEO_PROG_T,
+            KeyConditionExpression=Key("userId").eq(user_id),
+        )
+
+        # Latest assessment (most recent attempt with scorecard)
+        resp = RESPONSES_T.query(
+            KeyConditionExpression=Key("userId").eq(user_id),
+            ScanIndexForward=False,
+            Limit=1,
+        )
+        latest_assessment = (resp.get("Items") or [None])[0]
+
+        # Certificate
+        cert_resp = CERTS_T.query(
+            KeyConditionExpression=Key("userId").eq(user_id),
+            ScanIndexForward=False,
+            Limit=1,
+        )
+        certificate = (cert_resp.get("Items") or [None])[0]
+
+        return ok(
+            {
+                "userId": user_id,
+                "moduleProgress": module_records,
+                "videoProgress": video_records,
+                "latestAssessment": latest_assessment,
+                "certificate": certificate,
+            }
+        )
+    except ClientError:
+        return err(500, "Failed to retrieve user progress")
+
+
+def _manual_unlock(event: dict, target_user_id: str, tenant_id: str) -> dict:
+    """POST /api/lms/admin/users/{userId}/unlock — emergency module bypass.
+
+    Schema: endevo-uat-lms-user-modules lockStatus field.
+    """
+    body = get_body(event)
+    module_num: str = str(body.get("moduleNum", "")).strip()
+    reason: str = str(body.get("reason", "manual admin override")).strip()
+
+    if not module_num or not module_num.isdigit():
+        return err(400, "moduleNum must be a positive integer string")
+
+    now = _now_iso()
+    try:
+        USER_MODULES_T.put_item(
+            Item={
+                "userId": target_user_id,
+                "moduleNum": module_num,
+                "lockStatus": "unlocked",
+                "tenantId": tenant_id,
+                "unlockedAt": now,
+                "unlockedBy": "admin",
+                "unlockReason": reason,
+            }
+        )
+        logger.info(
+            "Manual unlock — module=%s user=%s reason=%s",
+            module_num,
+            target_user_id,
+            reason,
+        )
+        return ok(
+            {
+                "message": (
+                    f"Module {module_num} manually unlocked for user {target_user_id}"
+                ),
+                "moduleNum": module_num,
+                "userId": target_user_id,
+                "unlockedAt": now,
+            }
+        )
+    except ClientError:
+        return err(500, "Failed to unlock module")
+
+
+# ── Dispatcher ────────────────────────────────────────────────────────────────
+
+def handle(
+    event: dict,
+    method: str,
+    path: str,
+    tenant_id: Optional[str],
+    email: Optional[str],
+    user_id: Optional[str],
+    role: Optional[str],
+) -> dict:
+    auth_err = require_auth(tenant_id, user_id)
+    if auth_err:
+        return auth_err
+
+    admin_err = require_admin(role)
+    if admin_err:
+        return admin_err
+
+    # ── Question routes ────────────────────────────────────────────────────────
+    # GET/POST /api/lms/admin/questions
+    if re.search(r"/admin/questions$", path):
+        if method == "GET":
+            return _list_questions(event, tenant_id)
+        if method == "POST":
+            return _create_question(event, tenant_id)
+
+    # PUT/DELETE /api/lms/admin/questions/{id}
+    q_id_match = re.search(r"/admin/questions/([^/]+)$", path)
+    if q_id_match:
+        q_id = q_id_match.group(1)
+        if method == "PUT":
+            return _update_question(event, tenant_id, q_id)
+        if method == "DELETE":
+            return _delete_question(tenant_id, q_id)
+
+    # ── Module routes ──────────────────────────────────────────────────────────
+    if re.search(r"/admin/modules$", path):
+        if method == "GET":
+            return _list_modules(tenant_id)
+        if method == "POST":
+            return _upsert_module(event, tenant_id)
+
+    # ── User progress routes ───────────────────────────────────────────────────
+    # GET /api/lms/admin/users/progress  (must be checked before {userId}/progress)
+    if method == "GET" and re.search(r"/admin/users/progress$", path):
+        return _list_users_progress(tenant_id)
+
+    # GET /api/lms/admin/users/{userId}/progress
+    user_prog_match = re.search(r"/admin/users/([^/]+)/progress$", path)
+    if method == "GET" and user_prog_match:
+        return _get_user_progress(user_prog_match.group(1), tenant_id)
+
+    # POST /api/lms/admin/users/{userId}/unlock
+    user_unlock_match = re.search(r"/admin/users/([^/]+)/unlock$", path)
+    if method == "POST" and user_unlock_match:
+        return _manual_unlock(event, user_unlock_match.group(1), tenant_id)
+
+    return err(404, "Admin route not found")

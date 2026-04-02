@@ -122,6 +122,48 @@ export const api = {
   employeeSubmitAssessment: (courseId: string, answers: Record<string, string>) =>
     apiFetch(`/api/employee/assessment/${courseId}/submit`, { method: 'POST', body: JSON.stringify({ answers }) }),
   employeeCertificates: () => apiFetch<{ certificates: Certificate[]; count: number }>('/api/employee/certificates'),
+
+  // LMS — Assessment
+  lmsGetAssessmentQuestions: () => apiFetch('/api/lms/assessment/questions'),
+  lmsSubmitAssessment: (answers: AssessmentAnswer[]) =>
+    apiFetch('/api/lms/assessment/submit', { method: 'POST', body: JSON.stringify({ answers }) }),
+  lmsGetAssessmentStatus: () => apiFetch('/api/lms/assessment/status'),
+
+  // LMS — Course
+  lmsGetModules: () => apiFetch('/api/lms/course/modules'),
+  lmsGetModule: (moduleNum: string) => apiFetch(`/api/lms/course/modules/${moduleNum}`),
+  lmsGetVideoUrl: (videoId: string) => apiFetch(`/api/lms/course/video/${videoId}/url`),
+  lmsGetAssetUrl: (key: string) => apiFetch(`/api/lms/course/asset/${encodeURIComponent(key)}/url`),
+
+  // LMS — Progress
+  lmsUpdateVideoProgress: (body: { videoId: string; percent: number; completed: boolean }) =>
+    apiFetch('/api/lms/progress/video', { method: 'POST', body: JSON.stringify(body) }),
+  lmsCompleteModule: (moduleNum: string) =>
+    apiFetch('/api/lms/progress/module/complete', { method: 'POST', body: JSON.stringify({ moduleNum }) }),
+
+  // LMS — Quiz
+  lmsGetQuizQuestions: (videoId: string) => apiFetch(`/api/lms/quiz/video/${videoId}`),
+  lmsSubmitQuizAnswer: (body: { videoId: string; questionId: string; selectedLabel: string }) =>
+    apiFetch('/api/lms/quiz/answer', { method: 'POST', body: JSON.stringify(body) }),
+
+  // LMS — Assessment history
+  lmsGetAssessmentHistory: () => apiFetch('/api/lms/assessment/history'),
+
+  // LMS — Admin
+  lmsAdminGetQuestions: (type?: string) => apiFetch(`/api/lms/admin/questions${type ? `?type=${type}` : ''}`),
+  lmsAdminCreateQuestion: (body: Record<string, unknown>) =>
+    apiFetch('/api/lms/admin/questions', { method: 'POST', body: JSON.stringify(body) }),
+  lmsAdminUpdateQuestion: (id: string, body: Record<string, unknown>) =>
+    apiFetch(`/api/lms/admin/questions/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  lmsAdminDeleteQuestion: (id: string) =>
+    apiFetch(`/api/lms/admin/questions/${id}`, { method: 'DELETE' }),
+  lmsAdminGetModules: () => apiFetch('/api/lms/admin/modules'),
+  lmsAdminUpsertModule: (body: Record<string, unknown>) =>
+    apiFetch('/api/lms/admin/modules', { method: 'POST', body: JSON.stringify(body) }),
+  lmsAdminGetUsersProgress: () => apiFetch('/api/lms/admin/users/progress'),
+  lmsAdminGetUserProgress: (userId: string) => apiFetch(`/api/lms/admin/users/${userId}/progress`),
+  lmsAdminUnlockModule: (userId: string, moduleNum: string) =>
+    apiFetch(`/api/lms/admin/users/${userId}/unlock`, { method: 'POST', body: JSON.stringify({ moduleNum }) }),
 }
 
 // Types
@@ -194,4 +236,9 @@ export interface Certificate {
   courseId: string
   score: number
   issuedAt: string
+}
+
+export interface AssessmentAnswer {
+  questionId: string
+  selectedLabel: string
 }

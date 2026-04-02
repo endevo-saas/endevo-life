@@ -20,6 +20,8 @@ jobs:
             path: backend/functions/employee
           - name: endevo-uat-fn-admin
             path: backend/functions/admin
+          - name: endevo-uat-fn-lms
+            path: backend/functions/lms
 
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +53,7 @@ jobs:
           else
             echo "No 3rd-party deps (boto3 pre-installed in Lambda runtime)"
           fi
-          cp ${{ matrix.function.path }}/main.py /tmp/build/
+          cp -r ${{ matrix.function.path }}/. /tmp/build/
           cd /tmp/build && zip -r /tmp/function.zip . -q
           aws lambda update-function-code \
             --function-name ${{ matrix.function.name }} \
