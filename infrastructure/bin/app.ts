@@ -27,16 +27,16 @@ const tags = {
 const cognito = new CognitoStack(app, 'EndevoUatCognito', { env, tags })
 
 // Stack 2 — DynamoDB (database)
-const dynamo = new DynamoStack(app, 'EndevoUatDynamo', { env, tags })
+new DynamoStack(app, 'EndevoUatDynamo', { env, tags })
 
 // Stack 3 — S3 (storage)
-const s3 = new S3Stack(app, 'EndevoUatS3', { env, tags })
+new S3Stack(app, 'EndevoUatS3', { env, tags })
 
 // Stack 4 — IAM (roles + policies)
+// Note: no dynamoTableArns/s3BucketArns props — IAM uses wildcard endevo-uat-* ARNs
+// to avoid cross-stack ResourceExistenceCheck failures when new tables are added
 const iam = new IamStack(app, 'EndevoUatIam', {
   env, tags,
-  dynamoTableArns: dynamo.tableArns,
-  s3BucketArns: s3.bucketArns,
   cognitoPoolArn: cognito.userPoolArn,
 })
 

@@ -3,9 +3,11 @@ import * as iam from 'aws-cdk-lib/aws-iam'
 import { Construct } from 'constructs'
 
 interface IamStackProps extends cdk.StackProps {
-  dynamoTableArns: string[]
-  s3BucketArns: string[]
   cognitoPoolArn: string
+  // dynamoTableArns and s3BucketArns removed — IAM now uses wildcard patterns
+  // to avoid cross-stack CloudFormation ResourceExistenceCheck failures when
+  // new tables/buckets are added. Pattern endevo-uat-* covers all current and
+  // future resources automatically.
 }
 
 export class IamStack extends cdk.Stack {
@@ -23,7 +25,7 @@ export class IamStack extends cdk.Stack {
       ],
     })
 
-    // DynamoDB — all tables
+    // DynamoDB — all endevo tables (wildcard covers current + future tables)
     this.lambdaRole.addToPolicy(new iam.PolicyStatement({
       sid: 'DynamoDBAccess',
       effect: iam.Effect.ALLOW,
@@ -33,25 +35,25 @@ export class IamStack extends cdk.Stack {
         'dynamodb:BatchGetItem', 'dynamodb:BatchWriteItem',
       ],
       resources: [
-        ...props.dynamoTableArns,
-        ...props.dynamoTableArns.map(arn => `${arn}/index/*`),
+        `arn:aws:dynamodb:${this.region}:${this.account}:table/endevo-uat-*`,
+        `arn:aws:dynamodb:${this.region}:${this.account}:table/endevo-uat-*/index/*`,
       ],
     }))
 
-    // S3 — assets + videos
+    // S3 — all endevo buckets (wildcard covers current + future buckets)
     this.lambdaRole.addToPolicy(new iam.PolicyStatement({
       sid: 'S3Access',
       effect: iam.Effect.ALLOW,
       actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
-      resources: props.s3BucketArns.map(arn => `${arn}/*`),
+      resources: [`arn:aws:s3:::endevo-uat-*/*`],
     }))
 
-    // S3 — list buckets (required for presigned URL generation + bucket-level checks)
+    // S3 — list buckets
     this.lambdaRole.addToPolicy(new iam.PolicyStatement({
       sid: 'S3ListAccess',
       effect: iam.Effect.ALLOW,
       actions: ['s3:ListBucket', 's3:GetBucketLocation'],
-      resources: props.s3BucketArns,
+      resources: [`arn:aws:s3:::endevo-uat-*`],
     }))
 
     // SES — send emails
