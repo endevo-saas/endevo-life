@@ -5,21 +5,40 @@ import { usePathname } from 'next/navigation'
 import {
   Shield, Building2, Users, FileText, Activity, LogOut,
   BarChart3, Settings, CreditCard, Globe, Monitor, MapPin,
-  Wifi, ChevronDown, ChevronUp, Camera, Award
+  Wifi, ChevronDown, ChevronUp, Camera, Award, BookOpen,
+  ClipboardList, TrendingUp
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 
-const nav = [
-  { href: '/admin/dashboard',     icon: BarChart3,   label: 'Dashboard' },
-  { href: '/admin/tenants',       icon: Building2,   label: 'Tenants' },
-  { href: '/admin/users',         icon: Users,       label: 'All Users' },
-  { href: '/admin/subscriptions', icon: CreditCard,  label: 'Subscriptions' },
-  { href: '/admin/certificates',  icon: Award,       label: 'Certificates' },
-  { href: '/admin/audit',         icon: FileText,    label: 'Audit Log' },
-  { href: '/admin/health',        icon: Activity,    label: 'System Health' },
-  { href: '/admin/settings',      icon: Settings,    label: 'Settings' },
+const navGroups = [
+  {
+    label: 'Platform',
+    items: [
+      { href: '/admin/dashboard',     icon: BarChart3,      label: 'Dashboard' },
+      { href: '/admin/tenants',       icon: Building2,      label: 'Tenants' },
+      { href: '/admin/users',         icon: Users,          label: 'All Users' },
+      { href: '/admin/subscriptions', icon: CreditCard,     label: 'Subscriptions' },
+      { href: '/admin/certificates',  icon: Award,          label: 'Certificates' },
+      { href: '/admin/audit',         icon: FileText,       label: 'Audit Log' },
+    ]
+  },
+  {
+    label: 'LMS',
+    items: [
+      { href: '/admin/lms/modules',   icon: BookOpen,       label: 'Modules' },
+      { href: '/admin/lms/questions', icon: ClipboardList,  label: 'Questions' },
+      { href: '/admin/lms/progress',  icon: TrendingUp,     label: 'User Progress' },
+    ]
+  },
+  {
+    label: 'System',
+    items: [
+      { href: '/admin/health',        icon: Activity,       label: 'System Health' },
+      { href: '/admin/settings',      icon: Settings,       label: 'Settings' },
+    ]
+  },
 ]
 
 interface GeoInfo {
@@ -214,20 +233,24 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 p-3 space-y-0.5">
-          {nav.map(item => {
-            const active = path === item.href || path.startsWith(item.href + '/')
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active ? 'nav-active' : 'nav-inactive'}`}
-              >
-                <item.icon className="w-4 h-4" />
-                {item.label}
-              </Link>
-            )
-          })}
+        <nav className="flex-1 p-3 space-y-4 overflow-y-auto">
+          {navGroups.map(group => (
+            <div key={group.label}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider px-3 mb-1 text-slate-500">{group.label}</p>
+              <div className="space-y-0.5">
+                {group.items.map(item => {
+                  const active = path === item.href || path.startsWith(item.href + '/')
+                  return (
+                    <Link key={item.href} href={item.href}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active ? 'nav-active' : 'nav-inactive'}`}>
+                      <item.icon className="w-4 h-4" />
+                      {item.label}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
 
         {/* Session + Avatar panel */}

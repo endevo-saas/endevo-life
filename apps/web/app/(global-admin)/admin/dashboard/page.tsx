@@ -5,7 +5,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import {
   Building2, Users, Award, Activity, Loader2, RefreshCw,
   TrendingUp, Shield, Zap, Globe, CreditCard, ArrowUpRight,
-  CheckCircle, AlertTriangle, Clock, Sparkles
+  CheckCircle, AlertTriangle, Clock, Sparkles, BookOpen, ClipboardList
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
@@ -18,6 +18,9 @@ interface DashboardData {
   active_users: number
   total_certificates: number
   system_status: string
+  lms_assessments_taken?: number
+  lms_modules_completed?: number
+  lms_certificates_issued?: number
 }
 
 function PulseRing({ color = 'brand' }: { color?: string }) {
@@ -146,7 +149,7 @@ export default function AdminDashboard() {
         {/* Primary KPI cards */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {loading ? (
-            [1,2,3,4].map(i => <SkeletonCard key={i} />)
+            [1,2,3,4,5,6,7].map(i => <SkeletonCard key={i} />)
           ) : (
             <>
               <StatCard
@@ -178,6 +181,33 @@ export default function AdminDashboard() {
                   ? "bg-gradient-to-br from-emerald-600/20 to-emerald-800/10 border-emerald-500/30"
                   : "bg-gradient-to-br from-red-600/20 to-red-800/10 border-red-500/30"
                 }
+              />
+              <StatCard
+                icon={BookOpen}
+                label="Assessments Taken"
+                value={data?.lms_assessments_taken ?? 0}
+                sub="readiness diagnostics completed"
+                color="text-teal-400"
+                href="/admin/lms/progress"
+                gradient="border-teal-500/20 bg-gradient-to-br from-teal-900/20 to-teal-800/10"
+              />
+              <StatCard
+                icon={TrendingUp}
+                label="Modules Completed"
+                value={data?.lms_modules_completed ?? 0}
+                sub="across all users"
+                color="text-indigo-400"
+                href="/admin/lms/modules"
+                gradient="border-indigo-500/20 bg-gradient-to-br from-indigo-900/20 to-indigo-800/10"
+              />
+              <StatCard
+                icon={Award}
+                label="LMS Certificates"
+                value={data?.lms_certificates_issued ?? 0}
+                sub="issued for module 6 completion"
+                color="text-amber-400"
+                href="/admin/certificates"
+                gradient="border-amber-500/20 bg-gradient-to-br from-amber-900/20 to-amber-800/10"
               />
             </>
           )}
@@ -272,6 +302,34 @@ export default function AdminDashboard() {
                 </Link>
               )
             })}
+          </div>
+        </div>
+
+        {/* LMS Management quick links */}
+        <div className="mt-8">
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">LMS Management</h2>
+          <div className="grid grid-cols-3 gap-3">
+            <Link href="/admin/lms/modules" className="flex items-center gap-3 p-4 rounded-xl border border-white/5 bg-white/3 hover:bg-white/5 transition-colors">
+              <BookOpen className="w-5 h-5 text-teal-400" />
+              <div>
+                <p className="text-sm font-semibold text-white">Manage Modules</p>
+                <p className="text-xs text-slate-500">Edit module content &amp; settings</p>
+              </div>
+            </Link>
+            <Link href="/admin/lms/questions" className="flex items-center gap-3 p-4 rounded-xl border border-white/5 bg-white/3 hover:bg-white/5 transition-colors">
+              <ClipboardList className="w-5 h-5 text-blue-400" />
+              <div>
+                <p className="text-sm font-semibold text-white">Assessment Questions</p>
+                <p className="text-xs text-slate-500">40 questions across 4 domains</p>
+              </div>
+            </Link>
+            <Link href="/admin/lms/progress" className="flex items-center gap-3 p-4 rounded-xl border border-white/5 bg-white/3 hover:bg-white/5 transition-colors">
+              <TrendingUp className="w-5 h-5 text-purple-400" />
+              <div>
+                <p className="text-sm font-semibold text-white">User Progress</p>
+                <p className="text-xs text-slate-500">Scorecard &amp; module completion</p>
+              </div>
+            </Link>
           </div>
         </div>
 
