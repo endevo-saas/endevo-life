@@ -18,6 +18,12 @@ interface EmpDashData {
   progress_pct: number
 }
 
+interface LmsStatus {
+  assessmentTaken?: boolean
+  score?: number
+  tier?: { label: string; color: string }
+}
+
 // Count-up hook
 function useCountUp(target: number, duration = 1200) {
   const [count, setCount] = useState(0)
@@ -205,6 +211,7 @@ export default function EmployeeDashboard() {
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState('')
   const [entered, setEntered] = useState(false)
+  const [lmsStatus, setLmsStatus] = useState<LmsStatus | null>(null)
   const name = Cookies.get('user_email')?.split('@')[0] || 'Learner'
 
   const load = useCallback(async () => {
@@ -219,6 +226,12 @@ export default function EmployeeDashboard() {
   }, [])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    api.lmsGetAssessmentStatus()
+      .then((d: unknown) => setLmsStatus(d as LmsStatus))
+      .catch(() => { /* silently ignore — banner is optional */ })
+  }, [])
 
   const pct       = data?.progress_pct ?? 0
   const completed = data?.completed_courses ?? 0
@@ -271,6 +284,45 @@ export default function EmployeeDashboard() {
             style={{ background: 'rgba(244,63,94,0.1)', border: '1px solid rgba(244,63,94,0.3)', color: '#fb7185' }}>
             {error}
             <button onClick={load} className="ml-auto underline font-medium">Retry</button>
+          </div>
+        )}
+
+        {/* LMS Banner */}
+        {lmsStatus && !lmsStatus.assessmentTaken && (
+          <div className="rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4"
+            style={{ background: 'linear-gradient(135deg, rgba(20,184,166,0.15) 0%, rgba(249,115,22,0.15) 100%)', border: '1px solid rgba(20,184,166,0.3)' }}>
+            <div className="text-3xl flex-shrink-0">🎯</div>
+            <div className="flex-1">
+              <p className="text-base font-black text-white">Start Your Readiness Assessment</p>
+              <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
+                Discover exactly where your legacy stands — 40 questions, 4 domains, your personalised plan in under 20 minutes.
+              </p>
+            </div>
+            <Link href="/employee/lms/assessment"
+              className="flex-shrink-0 flex items-center gap-2 px-4 py-2.5 rounded-xl font-bold text-sm transition-all hover:scale-105 whitespace-nowrap"
+              style={{ background: 'linear-gradient(135deg,#14b8a6,#f97316)', color: 'white', boxShadow: '0 0 20px rgba(20,184,166,0.3)' }}>
+              Start Assessment <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        )}
+
+        {lmsStatus && lmsStatus.assessmentTaken && lmsStatus.score !== undefined && (
+          <div className="rounded-2xl px-5 py-3.5 flex items-center gap-3"
+            style={{ background: 'rgba(20,184,166,0.12)', border: '1px solid rgba(20,184,166,0.3)' }}>
+            <span className="text-lg">✅</span>
+            <p className="text-sm font-semibold text-white flex-1">
+              Your Readiness Score: <span className="text-teal-400">{lmsStatus.score}%</span>
+              {lmsStatus.tier?.label && (
+                <span className="ml-2 font-medium" style={{ color: 'var(--text-secondary)' }}>
+                  — {lmsStatus.tier.label} 💡
+                </span>
+              )}
+            </p>
+            <Link href="/employee/lms"
+              className="flex-shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105"
+              style={{ background: 'rgba(20,184,166,0.2)', border: '1px solid rgba(20,184,166,0.4)', color: '#2dd4bf' }}>
+              View My Modules <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
           </div>
         )}
 

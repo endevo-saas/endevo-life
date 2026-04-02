@@ -3,20 +3,30 @@ import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
-  PlayCircle, ClipboardList, Award, User, BarChart3, LogOut, Settings,
-  MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera, Zap
+  ClipboardList, Award, User, BarChart3, LogOut, Settings,
+  MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera, Zap, BookOpen
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 
-const nav = [
-  { href: '/employee/dashboard',    icon: BarChart3,     label: 'Dashboard' },
-  { href: '/employee/training',     icon: PlayCircle,    label: 'Training' },
-  { href: '/employee/assessment',   icon: ClipboardList, label: 'Assessment' },
-  { href: '/employee/certificates', icon: Award,         label: 'Certificates' },
-  { href: '/employee/profile',      icon: User,          label: 'My Profile' },
-  { href: '/employee/settings',     icon: Settings,      label: 'Settings' },
+const navGroups = [
+  {
+    label: 'My Journey',
+    items: [
+      { href: '/employee/dashboard',      icon: BarChart3,     label: 'Dashboard' },
+      { href: '/employee/lms',            icon: BookOpen,      label: 'My Modules' },
+      { href: '/employee/lms/assessment', icon: ClipboardList, label: 'Readiness Assessment' },
+      { href: '/employee/certificates',   icon: Award,         label: 'My Certificates' },
+    ],
+  },
+  {
+    label: 'Account',
+    items: [
+      { href: '/employee/profile',  icon: User,     label: 'My Profile' },
+      { href: '/employee/settings', icon: Settings, label: 'Settings' },
+    ],
+  },
 ]
 
 interface GeoInfo { ip: string; city: string; region: string; country_name: string; postal: string; latitude: number; longitude: number }
@@ -130,16 +140,25 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 p-3 space-y-0.5">
-          {nav.map(item => {
-            const active = path.startsWith(item.href)
-            return (
-              <Link key={item.href} href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active ? 'nav-active' : 'nav-inactive'}`}>
-                <item.icon className="w-4 h-4" />{item.label}
-              </Link>
-            )
-          })}
+        <nav className="flex-1 p-3 space-y-4">
+          {navGroups.map(group => (
+            <div key={group.label}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider px-3 mb-1" style={{ color: 'var(--text-muted)' }}>
+                {group.label}
+              </p>
+              <div className="space-y-0.5">
+                {group.items.map(item => {
+                  const active = path === item.href || path.startsWith(item.href + '/')
+                  return (
+                    <Link key={item.href} href={item.href}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${active ? 'nav-active' : 'nav-inactive'}`}>
+                      <item.icon className="w-4 h-4" />{item.label}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
         <SessionPanel />
       </aside>

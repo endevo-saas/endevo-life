@@ -5,21 +5,36 @@ import { usePathname } from 'next/navigation'
 import {
   Users, BarChart3, UserPlus, FileText, LogOut, Settings,
   Globe, Monitor, MapPin, Wifi, ChevronDown, ChevronUp, Camera,
-  BookOpen, Award, CreditCard
+  BookOpen, Award, CreditCard, TrendingUp
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 
-const nav = [
-  { href: '/hr/dashboard',    icon: BarChart3,  label: 'Dashboard' },
-  { href: '/hr/employees',    icon: Users,      label: 'Employees' },
-  { href: '/hr/invite',       icon: UserPlus,   label: 'Invite Employee' },
-  { href: '/hr/training',     icon: BookOpen,   label: 'Training & Courses' },
-  { href: '/hr/certificates', icon: Award,      label: 'Certificates' },
-  { href: '/hr/subscription', icon: CreditCard, label: 'Subscription' },
-  { href: '/hr/audit',        icon: FileText,   label: 'Audit Log' },
-  { href: '/hr/settings',     icon: Settings,   label: 'Settings' },
+const navGroups = [
+  {
+    label: 'HR Management',
+    items: [
+      { href: '/hr/dashboard',    icon: BarChart3,  label: 'Dashboard' },
+      { href: '/hr/employees',    icon: Users,      label: 'Employees' },
+      { href: '/hr/invite',       icon: UserPlus,   label: 'Invite Employee' },
+      { href: '/hr/certificates', icon: Award,      label: 'Certificates' },
+      { href: '/hr/audit',        icon: FileText,   label: 'Audit Log' },
+    ],
+  },
+  {
+    label: 'LMS',
+    items: [
+      { href: '/hr/lms/progress', icon: TrendingUp, label: 'Module Progress' },
+    ],
+  },
+  {
+    label: 'Admin',
+    items: [
+      { href: '/hr/subscription', icon: CreditCard, label: 'Subscription' },
+      { href: '/hr/settings',     icon: Settings,   label: 'Settings' },
+    ],
+  },
 ]
 
 interface GeoInfo { ip: string; city: string; region: string; country_name: string; postal: string; org: string; latitude: number; longitude: number }
@@ -138,18 +153,27 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
             </div>
           </div>
         </div>
-        <nav className="flex-1 p-3 space-y-0.5">
-          {nav.map(item => {
-            const active = path === item.href || path.startsWith(item.href + '/')
-            return (
-              <Link key={item.href} href={item.href}
-                className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
-                  active ? 'nav-active' : 'nav-inactive'
-                }`}>
-                <item.icon className="w-4 h-4" />{item.label}
-              </Link>
-            )
-          })}
+        <nav className="flex-1 p-3 space-y-4">
+          {navGroups.map(group => (
+            <div key={group.label}>
+              <p className="text-[10px] font-semibold uppercase tracking-wider px-3 mb-1 text-slate-500">
+                {group.label}
+              </p>
+              <div className="space-y-0.5">
+                {group.items.map(item => {
+                  const active = path === item.href || path.startsWith(item.href + '/')
+                  return (
+                    <Link key={item.href} href={item.href}
+                      className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all ${
+                        active ? 'nav-active' : 'nav-inactive'
+                      }`}>
+                      <item.icon className="w-4 h-4" />{item.label}
+                    </Link>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </nav>
         <SessionPanel />
       </aside>
