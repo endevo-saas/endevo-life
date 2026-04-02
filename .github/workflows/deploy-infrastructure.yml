@@ -40,14 +40,14 @@ jobs:
         working-directory: infrastructure
         run: npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ secrets.AWS_REGION }}
 
-      - name: CDK Diff (show what will change)
+      - name: CDK Deploy IAM first (removes old cross-stack imports before other stacks update)
         working-directory: infrastructure
-        run: npx cdk diff --all
+        run: npx cdk deploy EndevoUatIam --require-approval never
         env:
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
           GH_TOKEN_AMPLIFY: ${{ secrets.GH_TOKEN_AMPLIFY }}
 
-      - name: CDK Deploy (create/update all AWS resources)
+      - name: CDK Deploy all stacks (now safe — cross-stack imports already cleared)
         working-directory: infrastructure
         run: npx cdk deploy --all --require-approval never --outputs-file ../cdk-outputs.json
         env:
