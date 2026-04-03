@@ -57,6 +57,12 @@ const DOMAIN_ICONS: Record<string, string> = {
   Financial: '💰',
   Physical: '🏠',
   Digital: '💻',
+  'Legal Readiness': '⚖️',
+  'Financial Readiness': '💰',
+  'Physical Readiness': '🏠',
+  'Digital Readiness': '💻',
+  Foundation: '🏛️',
+  'Communicate Your Wishes': '💬',
 }
 
 function UrgencyBadge({ urgency }: { urgency: ScorecardUrgency }) {

@@ -135,7 +135,7 @@ export default function AssessmentPage() {
             <div className="grid grid-cols-2 gap-3">
               {[
                 { label: 'Questions', value: '40', icon: '❓' },
-                { label: 'Pass Score', value: '90%', icon: '🎯' },
+                { label: 'Unlocks All', value: '6 Modules', icon: '🔓' },
                 { label: 'Domains', value: '4', icon: '📚' },
                 { label: 'Est. Time', value: '20 min', icon: '⏱️' },
               ].map(s => (

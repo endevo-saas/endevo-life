@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useState, useCallback } from 'react'
 import { api } from '@/lib/api'
 
-type QuestionType = 'assessment' | 'quiz'
+type QuestionType = 'assessment' | 'inline'
 
 interface AnswerOption {
   label: string
@@ -28,7 +28,7 @@ interface LmsQuestion {
 const DOMAINS = ['Legal', 'Financial', 'Physical', 'Digital']
 
 const EMPTY_QUESTION: Omit<LmsQuestion, 'questionId'> = {
-  type: 'assessment',
+  type: 'assessment' as QuestionType,
   domain: 'Legal',
   text: '',
   answers: [
@@ -78,7 +78,7 @@ function QuestionForm({
             style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', outline: 'none' }}
           >
             <option value="assessment">Assessment</option>
-            <option value="quiz">Inline Quiz</option>
+            <option value="inline">Inline Quiz</option>
           </select>
         </div>
 
@@ -99,8 +99,8 @@ function QuestionForm({
           </div>
         )}
 
-        {/* Video ID (quiz only) */}
-        {form.type === 'quiz' && (
+        {/* Video ID (inline quiz only) */}
+        {form.type === 'inline' && (
           <>
             <div>
               <label className="block text-xs font-semibold mb-1.5" style={{ color: 'var(--text-secondary)' }}>
@@ -324,7 +324,7 @@ export default function AdminLmsQuestionsPage() {
           className="flex gap-1 p-1 rounded-xl w-fit"
           style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}
         >
-          {(['assessment', 'quiz'] as QuestionType[]).map(tab => (
+          {(['assessment', 'inline'] as QuestionType[]).map(tab => (
             <button
               key={tab}
               onClick={() => { setActiveTab(tab); setShowAddForm(false); setEditingId(null) }}

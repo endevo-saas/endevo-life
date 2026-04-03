@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useMemo } from 'react'
+import React, { useEffect, useState, useMemo } from 'react'
 import { api } from '@/lib/api'
 import { Users, ClipboardList, TrendingUp, Award, Search, X, ChevronDown } from 'lucide-react'
 
@@ -51,7 +51,8 @@ function scoreBadge(score: number | undefined) {
 
 function moduleIcon(mod: ModuleStatus | undefined): string {
   if (!mod) return '🔒'
-  if (mod.lockStatus === 'completed') return '✅'
+  // Backend returns 'complete' (not 'completed')
+  if (mod.lockStatus === 'complete' || mod.lockStatus === 'completed') return '✅'
   if (mod.lockStatus === 'unlocked') return '🔓'
   return '🔒'
 }
@@ -239,7 +240,7 @@ export default function HrLmsProgressPage() {
     if (!q) return users
     return users.filter(u => {
       const name = [u.firstName, u.lastName].filter(Boolean).join(' ').toLowerCase()
-      return name.includes(q) || u.email.toLowerCase().includes(q)
+      return name.includes(q) || (u.email ?? u.userId ?? '').toLowerCase().includes(q)
     })
   }, [users, search])
 
@@ -250,7 +251,7 @@ export default function HrLmsProgressPage() {
     : 0
   const modulesCompleted = users.reduce((sum, u) => {
     if (!u.modules) return sum
-    return sum + Object.values(u.modules).filter(m => m.lockStatus === 'completed').length
+    return sum + Object.values(u.modules).filter(m => m.lockStatus === 'complete' || m.lockStatus === 'completed').length
   }, 0)
 
   return (
@@ -349,7 +350,7 @@ export default function HrLmsProgressPage() {
                         {/* Employee */}
                         <td className="px-4 py-3">
                           <p className="font-semibold text-white text-sm">{name}</p>
-                          <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{user.email}</p>
+                          <p className="text-[11px] mt-0.5" style={{ color: 'var(--text-muted)' }}>{user.email ?? user.userId}</p>
                         </td>
 
                         {/* Score badge */}

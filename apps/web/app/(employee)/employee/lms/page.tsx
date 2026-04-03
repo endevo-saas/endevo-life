@@ -133,7 +133,7 @@ function ModuleCard({ module, index }: { module: ModuleSummary; index: number })
       <div className="mt-auto pt-1">
         {isLocked ? (
           <p className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>
-            Complete Module {parseInt(module.moduleNum) - 1} first
+            Complete the Readiness Assessment to unlock
           </p>
         ) : isComplete ? (
           <p className="text-xs font-semibold" style={{ color: '#2BBFC5' }}>

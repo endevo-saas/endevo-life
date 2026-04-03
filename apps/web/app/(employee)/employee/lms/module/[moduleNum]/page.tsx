@@ -6,16 +6,27 @@ import { useRouter, useParams } from 'next/navigation'
 import Link from 'next/link'
 import { api } from '@/lib/api'
 
+interface VideoProgress {
+  percent: number
+  completed: boolean
+  lastWatched?: string
+}
+
 interface Video {
   videoId: string
   title: string
-  type: 'main' | 'action'
+  // Backend returns 'videoType', frontend also accepts 'type' for compatibility
+  type?: 'main' | 'action'
+  videoType?: 'main' | 'action'
+  duration?: number
   durationSeconds?: number
   progressPct?: number
   completed?: boolean
+  progress?: VideoProgress
   thumbnailKey?: string
   description?: string
   quizCount?: number
+  inlineQuizzes?: unknown[]
 }
 
 interface ModuleDetail {
@@ -26,6 +37,19 @@ interface ModuleDetail {
   videos: Video[]
   pdfKey?: string
   objectives?: string[]
+}
+
+/** Normalise a video object from the API (which uses videoType/progress/duration) to the
+ *  shape the VideoCard component expects (type/progressPct/completed/durationSeconds). */
+function normaliseVideo(v: Video): Video & { type: 'main' | 'action'; progressPct: number; completed: boolean; durationSeconds?: number } {
+  return {
+    ...v,
+    type: (v.videoType ?? v.type ?? 'main') as 'main' | 'action',
+    progressPct: v.progress?.percent ?? v.progressPct ?? 0,
+    completed: v.progress?.completed ?? v.completed ?? false,
+    durationSeconds: v.durationSeconds ?? v.duration,
+    quizCount: v.inlineQuizzes?.length ?? v.quizCount ?? 0,
+  }
 }
 
 function formatDuration(secs?: number): string {
@@ -125,9 +149,9 @@ export default function ModuleDetailPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await api.lmsGetModule(moduleNum) as { module: ModuleDetail }
-      setModule(res.module)
-      setCompleted(res.module.lockStatus === 'complete')
+      const res = await api.lmsGetModule(moduleNum) as ModuleDetail
+      setModule(res)
+      setCompleted(res.lockStatus === 'complete')
       setTimeout(() => setEntered(true), 80)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load module')
@@ -164,9 +188,9 @@ export default function ModuleDetailPage() {
     }
   }
 
-  const mainVideos = module?.videos.filter(v => v.type === 'main') ?? []
-  const actionVideos = module?.videos.filter(v => v.type === 'action') ?? []
-  const allVideos = module?.videos ?? []
+  const allVideos = (module?.videos ?? []).map(normaliseVideo)
+  const mainVideos = allVideos.filter(v => v.type === 'main')
+  const actionVideos = allVideos.filter(v => v.type === 'action')
   const watchedCount = allVideos.filter(v => v.completed).length
   const allWatched = allVideos.length > 0 && watchedCount === allVideos.length
 

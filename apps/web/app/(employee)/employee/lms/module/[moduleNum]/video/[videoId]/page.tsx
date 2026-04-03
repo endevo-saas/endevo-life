@@ -34,12 +34,12 @@ export default function VideoPlayerPage() {
     try {
       const [urlRes, quizRes, progressRes] = await Promise.all([
         api.lmsGetVideoUrl(videoId) as Promise<{ url: string; title?: string; description?: string; type?: string }>,
-        api.lmsGetQuizQuestions(videoId) as Promise<{ quizzes: QuizPopup[] }>,
+        api.lmsGetQuizQuestions(videoId) as Promise<{ questions: QuizPopup[] }>,
         api.lmsGetVideoProgress(videoId).catch(() => null),
       ])
       setVideoUrl(urlRes.url)
       setVideoMeta({ title: urlRes.title || 'Video', description: urlRes.description, type: urlRes.type })
-      setQuizPopups(quizRes.quizzes || [])
+      setQuizPopups(quizRes.questions || [])
       if (progressRes && progressRes.lastPosition && progressRes.lastPosition > 0 && !progressRes.completed) {
         setLastPosition(progressRes.lastPosition)
       }

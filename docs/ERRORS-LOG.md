@@ -156,8 +156,96 @@ These issues occurred before the GitHub-first approach was adopted. Recorded for
 
 ---
 
+## [2026-04-03] Deep QA Audit — LMS Module
+
+### BUG-001: Video page fetches quiz questions with wrong response key
+- **File:** `apps/web/app/(employee)/employee/lms/module/[moduleNum]/video/[videoId]/page.tsx` line 37, 42
+- **Issue:** `api.lmsGetQuizQuestions()` was typed as returning `{ quizzes: QuizPopup[] }` and accessed as `quizRes.quizzes`. The actual backend (`routes/quiz.py`) returns `{ videoId, questions: [...] }`. Result: inline quiz popups NEVER appeared during video playback.
+- **Fix:** Changed type to `{ questions: QuizPopup[] }` and access to `quizRes.questions`.
+- **Severity:** CRITICAL — quiz popups silently broken for all users
+
+### BUG-002: Module detail page wraps API response in wrong key
+- **File:** `apps/web/app/(employee)/employee/lms/module/[moduleNum]/page.tsx` line 128-130
+- **Issue:** Code did `res.module` but `_get_module_detail` returns a flat object at the top level (not nested under a `module` key). Result: `module` state was always `null`, page showed "Module not found" for every module.
+- **Fix:** Changed `res.module` → `res` and typed as `ModuleDetail` directly.
+- **Severity:** CRITICAL — entire module detail page was broken
+
+### BUG-003: Module detail page video type/progress mismatch with backend schema
+- **File:** `apps/web/app/(employee)/employee/lms/module/[moduleNum]/page.tsx`
+- **Issue:** Frontend `Video` interface used `type` (backend returns `videoType`), `progressPct` (backend returns `progress.percent`), `completed` (backend returns `progress.completed`), `durationSeconds` (backend returns `duration`). Result: video cards always showed 0% progress, wrong video type badges, wrong completion state, wrong duration.
+- **Fix:** Updated `Video` interface to include both field names. Added `normaliseVideo()` helper that maps backend shape to frontend shape before rendering.
+- **Severity:** HIGH — progress display broken for all module videos
+
+### BUG-004: Admin questions page uses wrong question type value for inline quizzes
+- **File:** `apps/web/app/(global-admin)/admin/lms/questions/page.tsx`
+- **Issue:** `QuestionType` was `'assessment' | 'quiz'` and the dropdown submitted `type: 'quiz'`. Backend (`routes/admin.py`) only accepts `'assessment'` or `'inline'`. Creating an inline quiz question would always fail with 400.
+- **Fix:** Changed `QuestionType` to `'assessment' | 'inline'`. Updated dropdown option value and all conditional checks from `'quiz'` to `'inline'`. Updated tab filter array.
+- **Severity:** CRITICAL — admin could not create inline quiz questions
+
+### BUG-005: ScorecardDisplay domain icons never match (wrong lookup key)
+- **File:** `apps/web/components/lms/ScorecardDisplay.tsx`
+- **Issue:** `DOMAIN_ICONS` used short keys (`'Legal'`, `'Financial'`) but the scorecard `domainScores` object is keyed by full domain names (`'Legal Readiness'`, `'Financial Readiness'`). Also `moduleRecommendations` uses `'Foundation'` and `'Communicate Your Wishes'` as domain names. Result: all domain icons showed `📌` fallback instead of meaningful icons.
+- **Fix:** Added full domain name entries to `DOMAIN_ICONS` map alongside the short names. Also added `'Foundation'` and `'Communicate Your Wishes'` entries.
+- **Severity:** MEDIUM — visual only but affects assessment results page appearance
+
+### BUG-006: Assessment intro screen shows wrong "Pass Score: 90%" stat
+- **File:** `apps/web/app/(employee)/employee/lms/assessment/page.tsx` line 138-141
+- **Issue:** The stat card showed "Pass Score: 90%" which directly contradicts the business rule that there is no pass/fail gate — completing the assessment (any score) unlocks all modules.
+- **Fix:** Changed stat to "Unlocks All: 6 Modules" with a lock icon.
+- **Severity:** HIGH — misinforms users about assessment mechanics
+
+### BUG-007: Locked module shows wrong "Complete Module X first" message
+- **File:** `apps/web/app/(employee)/employee/lms/page.tsx` line 136
+- **Issue:** Locked modules displayed "Complete Module X first" implying sequential unlock. Business rule is all modules unlock simultaneously after assessment. Message would confuse users trying to unlock Module 3 by completing Module 2 (impossible — only assessment unlocks modules).
+- **Fix:** Changed to "Complete the Readiness Assessment to unlock".
+- **Severity:** HIGH — wrong UX guidance contradicts actual unlock mechanism
+
+### BUG-008: Admin LMS progress page — wrong response key for user detail
+- **File:** `apps/web/app/(global-admin)/admin/lms/progress/page.tsx` line 246
+- **Issue:** `handleOpenUser` did `res.user` to get user detail. The backend `_get_user_progress` returns the data flat: `{ userId, moduleProgress, videoProgress, latestAssessment, certificate }`. Result: clicking any user row showed empty detail modal.
+- **Fix:** Typed response as `UserProgressDetail` directly (no `.user` wrapper). Updated `UserProgressDetail` interface to match actual backend fields (`moduleProgress`, `videoProgress`, `latestAssessment`).
+- **Severity:** CRITICAL — admin user detail modal was completely broken
+
+### BUG-009: Admin LMS progress page — summary list has no email/firstName/name fields
+- **File:** `apps/web/app/(global-admin)/admin/lms/progress/page.tsx`
+- **Issue:** The summary list endpoint returns `{ userId, modulesUnlocked, modulesCompleted, latestModuleCompleted }`. Frontend assumed `email`, `firstName`, `lastName`, `assessmentPassed`, `modules` existed. Search threw error, user names showed blank.
+- **Fix:** Rewrote `UserProgress` interface to match actual summary shape. Updated table rows to display `userId` when name/email not available. Fixed `passedCount` and `completedAllCount` calculations. Fixed search to work on `userId`.
+- **Severity:** HIGH — admin progress table non-functional
+
+### BUG-010: Admin LMS progress detail modal uses wrong field name for modules
+- **File:** `apps/web/app/(global-admin)/admin/lms/progress/page.tsx` line 59 (original)
+- **Issue:** `user.modules ?? user.weeks` but backend returns `moduleProgress`. Module-by-module grid in detail modal always showed empty.
+- **Fix:** Changed to `user.moduleProgress ?? []`.
+- **Severity:** HIGH — module detail grid in admin modal was always empty
+
+### BUG-011: Admin LMS progress detail modal — video progress uses wrong field names
+- **File:** `apps/web/app/(global-admin)/admin/lms/progress/page.tsx`
+- **Issue:** Modal rendered `user.videos` (undefined) and accessed `v.progressPct` (backend returns `v.percent`). Video progress section never appeared.
+- **Fix:** Changed to `user.videoProgress` and `v.percent ?? 0`. Added fallback `v.title ?? v.videoId`.
+- **Severity:** MEDIUM — video progress panel in admin modal was hidden
+
+### BUG-012: HR LMS progress page — lockStatus value 'completed' vs 'complete'
+- **File:** `apps/web/app/(hr-admin)/hr/lms/progress/page.tsx`
+- **Issue:** `moduleIcon()` checked `mod.lockStatus === 'completed'` but backend DynamoDB schema uses `'complete'` (no trailing 'd'). All completed modules showed 🔒 instead of ✅. The `modulesCompleted` stat also used the wrong string.
+- **Fix:** Changed both checks to accept both `'complete'` and `'completed'` for safety.
+- **Severity:** HIGH — completed modules wrongly showed as locked in HR dashboard
+
+### BUG-013: HR LMS progress page — email access throws when undefined
+- **File:** `apps/web/app/(hr-admin)/hr/lms/progress/page.tsx` line 242
+- **Issue:** `u.email.toLowerCase()` in filter and `{user.email}` in table cell throw TypeError when email field is missing (summary endpoint does not return email).
+- **Fix:** Added null coalescence: `(u.email ?? u.userId ?? '').toLowerCase()` and `{user.email ?? user.userId}`.
+- **Severity:** MEDIUM — page could crash when filtering if email missing
+
+### BUG-014: HR LMS progress page — missing React import for React.ElementType
+- **File:** `apps/web/app/(hr-admin)/hr/lms/progress/page.tsx`
+- **Issue:** `SummaryCard` component prop `icon: React.ElementType` requires `import React` per Next.js 15 JSX transform rules. Missing import causes TypeScript/build error.
+- **Fix:** Added `React,` to the existing useState/useMemo import.
+- **Severity:** HIGH — would cause Amplify build failure
+
+---
+
 *This log is maintained by the engineering team. Every issue must be recorded before the fix is merged.*
-*Last updated: 2026-03-21 | Total issues: 13 (8 active phase + 5 legacy)*
+*Last updated: 2026-04-03 | Total issues: 37 (23 resolved + 14 new LMS QA fixes)*
 
 ---
 

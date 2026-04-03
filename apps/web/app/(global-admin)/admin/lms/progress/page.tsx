@@ -5,29 +5,51 @@ import { useEffect, useState, useCallback } from 'react'
 import { api } from '@/lib/api'
 
 interface ModuleStatus {
-  moduleNum: string
+  moduleNum?: string
+  weekNum?: string
   lockStatus: 'locked' | 'unlocked' | 'complete'
-  videosComplete: number
-  videosTotal: number
+  videosComplete?: number
+  videosTotal?: number
 }
 
+// Shape returned by GET /api/lms/admin/users/progress (summary list)
+interface UserProgressSummary {
+  userId: string
+  modulesUnlocked: number
+  modulesCompleted: number
+  latestModuleCompleted: number | null
+}
+
+// Shape returned by GET /api/lms/admin/users/{userId}/progress (full detail)
+interface UserProgressDetail {
+  userId: string
+  moduleProgress: ModuleStatus[]    // per-user module records from lms-user-modules
+  videoProgress: { videoId: string; title?: string; percent?: number; completed?: boolean }[]
+  latestAssessment: {
+    overallScore?: number
+    attemptNumber?: number
+    submittedAt?: string
+    scorecard?: { overallScore?: number }
+  } | null
+  certificate: { issuedAt?: string; certificateId?: string } | null
+}
+
+// Thin combined shape used in the table rows: summary + lazy-loaded detail
 interface UserProgress {
   userId: string
-  email: string
-  firstName: string
-  lastName: string
-  assessmentPassed: boolean
+  email?: string
+  firstName?: string
+  lastName?: string
+  assessmentPassed?: boolean
   assessmentScore?: number
   assessmentMaxScore?: number
   overallScore?: number
   lastActivity?: string
-  modules: ModuleStatus[]
-  // Legacy: some API responses may still use 'weeks'
-  weeks?: ModuleStatus[]
-}
-
-interface UserProgressDetail extends UserProgress {
-  videos?: { videoId: string; title: string; progressPct: number; completed: boolean }[]
+  modules?: ModuleStatus[]
+  // Merged from summary
+  modulesUnlocked?: number
+  modulesCompleted?: number
+  latestModuleCompleted?: number | null
 }
 
 const MODULE_NUMS = ['1', '2', '3', '4', '5', '6']
@@ -56,12 +78,11 @@ function DetailModal({
     setUnlocking(null)
   }
 
-  const userModules: ModuleStatus[] = user.modules ?? user.weeks ?? []
+  // Backend returns moduleProgress (list of user-module records from lms-user-modules)
+  const userModules: ModuleStatus[] = user.moduleProgress ?? []
 
-  const scorePct =
-    user.assessmentMaxScore && user.assessmentMaxScore > 0
-      ? Math.round(((user.assessmentScore ?? 0) / user.assessmentMaxScore) * 100)
-      : null
+  const overallScore = user.latestAssessment?.overallScore ?? user.latestAssessment?.scorecard?.overallScore ?? null
+  const scorePct = overallScore !== null ? overallScore : null
 
   return (
     <div
@@ -95,10 +116,10 @@ function DetailModal({
           <div
             className="rounded-xl p-4"
             style={{
-              background: user.assessmentPassed
+              background: user.latestAssessment
                 ? 'rgba(43,191,197,0.08)'
                 : 'rgba(232,97,42,0.08)',
-              border: `1px solid ${user.assessmentPassed ? 'rgba(43,191,197,0.25)' : 'rgba(232,97,42,0.25)'}`,
+              border: `1px solid ${user.latestAssessment ? 'rgba(43,191,197,0.25)' : 'rgba(232,97,42,0.25)'}`,
             }}
           >
             <div className="flex items-center justify-between">
@@ -106,11 +127,11 @@ function DetailModal({
               <span
                 className="text-xs font-bold px-2.5 py-1 rounded-full"
                 style={{
-                  background: user.assessmentPassed ? 'rgba(43,191,197,0.2)' : 'rgba(232,97,42,0.2)',
-                  color: user.assessmentPassed ? '#2BBFC5' : '#E8612A',
+                  background: user.latestAssessment ? 'rgba(43,191,197,0.2)' : 'rgba(232,97,42,0.2)',
+                  color: user.latestAssessment ? '#2BBFC5' : '#E8612A',
                 }}
               >
-                {user.assessmentPassed ? '✅ Passed' : '❌ Not passed'}
+                {user.latestAssessment ? `✅ Attempt #${user.latestAssessment.attemptNumber ?? 1}` : '❌ Not taken'}
               </span>
             </div>
             {scorePct !== null && (
@@ -187,20 +208,20 @@ function DetailModal({
           </div>
 
           {/* Video detail if available */}
-          {user.videos && user.videos.length > 0 && (
+          {user.videoProgress && user.videoProgress.length > 0 && (
             <div>
               <p className="text-sm font-black text-white mb-3">Video Progress</p>
               <div className="space-y-2">
-                {user.videos.map(v => (
+                {user.videoProgress.map(v => (
                   <div
                     key={v.videoId}
                     className="flex items-center gap-3 p-2 rounded-lg"
                     style={{ background: 'var(--bg-elevated)' }}
                   >
                     <span className="text-sm">{v.completed ? '✅' : '▶️'}</span>
-                    <p className="text-xs text-white flex-1 truncate">{v.title}</p>
+                    <p className="text-xs text-white flex-1 truncate">{v.title ?? v.videoId}</p>
                     <p className="text-xs font-semibold flex-shrink-0" style={{ color: v.completed ? '#2BBFC5' : 'var(--text-muted)' }}>
-                      {v.progressPct}%
+                      {v.percent ?? 0}%
                     </p>
                   </div>
                 ))}
@@ -226,8 +247,16 @@ export default function AdminLmsProgressPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await api.lmsAdminGetUsersProgress() as { users: UserProgress[] }
-      setUsers(res.users || [])
+      // Backend returns { users: [{ userId, modulesUnlocked, modulesCompleted, latestModuleCompleted }] }
+      const res = await api.lmsAdminGetUsersProgress() as { users: UserProgressSummary[] }
+      // Map summary records into UserProgress shape for table display
+      const mapped: UserProgress[] = (res.users || []).map(s => ({
+        userId: s.userId,
+        modulesUnlocked: s.modulesUnlocked,
+        modulesCompleted: s.modulesCompleted,
+        latestModuleCompleted: s.latestModuleCompleted,
+      }))
+      setUsers(mapped)
       setTimeout(() => setEntered(true), 80)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load progress data')
@@ -243,8 +272,9 @@ export default function AdminLmsProgressPage() {
   async function handleOpenUser(userId: string) {
     setLoadingDetail(true)
     try {
-      const res = await api.lmsAdminGetUserProgress(userId) as { user: UserProgressDetail }
-      setSelectedUser(res.user)
+      // Backend returns flat object: { userId, moduleProgress, videoProgress, latestAssessment, certificate }
+      const res = await api.lmsAdminGetUserProgress(userId) as UserProgressDetail
+      setSelectedUser(res)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load user progress')
     } finally {
@@ -256,8 +286,8 @@ export default function AdminLmsProgressPage() {
     try {
       await api.lmsAdminUnlockModule(userId, moduleNum)
       // Refresh both detail and list
-      const res = await api.lmsAdminGetUserProgress(userId) as { user: UserProgressDetail }
-      setSelectedUser(res.user)
+      const res = await api.lmsAdminGetUserProgress(userId) as UserProgressDetail
+      setSelectedUser(res)
       load()
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to unlock module')
@@ -265,19 +295,13 @@ export default function AdminLmsProgressPage() {
   }
 
   const filtered = users.filter(u => {
+    if (!search) return true
     const q = search.toLowerCase()
-    return (
-      u.email.toLowerCase().includes(q) ||
-      u.firstName.toLowerCase().includes(q) ||
-      u.lastName.toLowerCase().includes(q)
-    )
+    return u.userId.toLowerCase().includes(q)
   })
 
-  const passedCount = users.filter(u => u.assessmentPassed).length
-  const completedAllCount = users.filter(u => {
-    const mods = u.modules ?? u.weeks ?? []
-    return mods.length > 0 && mods.every(m => m.lockStatus === 'complete')
-  }).length
+  const passedCount = 0  // summary endpoint does not include assessment data
+  const completedAllCount = users.filter(u => (u.modulesCompleted ?? 0) >= 6).length
 
   return (
     <div className="min-h-screen p-6" style={{ background: 'var(--bg-base)' }}>
@@ -393,11 +417,6 @@ export default function AdminLmsProgressPage() {
             {/* Table rows */}
             <div className="divide-y" style={{ borderColor: 'var(--border-subtle)' }}>
               {filtered.map(u => {
-                const scorePct =
-                  u.assessmentMaxScore && u.assessmentMaxScore > 0
-                    ? Math.round(((u.assessmentScore ?? 0) / u.assessmentMaxScore) * 100)
-                    : null
-
                 const lastDate = u.lastActivity
                   ? new Date(u.lastActivity).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
                   : '—'
@@ -411,37 +430,35 @@ export default function AdminLmsProgressPage() {
                   >
                     {/* User */}
                     <div>
-                      <p className="text-sm font-bold text-white">
-                        {u.firstName} {u.lastName}
+                      <p className="text-sm font-bold text-white truncate">
+                        {u.firstName && u.lastName ? `${u.firstName} ${u.lastName}` : u.userId}
                       </p>
-                      <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{u.email}</p>
+                      <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{u.email ?? u.userId}</p>
                     </div>
 
-                    {/* Assessment */}
+                    {/* Assessment — summary only has modules completed count */}
                     <div className="space-y-0.5">
-                      {u.assessmentPassed ? (
+                      {(u.modulesCompleted ?? 0) > 0 ? (
                         <span className="text-xs font-bold block" style={{ color: '#2BBFC5' }}>
-                          ✅ {scorePct !== null ? `${scorePct}%` : 'Passed'}
+                          ✅ {u.modulesCompleted}/6 done
+                        </span>
+                      ) : (u.modulesUnlocked ?? 0) > 0 ? (
+                        <span className="text-xs font-bold block" style={{ color: '#E8612A' }}>
+                          🔓 {u.modulesUnlocked} unlocked
                         </span>
                       ) : (
-                        <span className="text-xs font-bold block" style={{ color: '#E8612A' }}>
-                          ❌ {scorePct !== null ? `${scorePct}%` : 'Not taken'}
-                        </span>
-                      )}
-                      {u.overallScore !== undefined && (
-                        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>
-                          Score: {u.overallScore}%
-                        </span>
+                        <span className="text-xs block" style={{ color: 'var(--text-muted)' }}>Not started</span>
                       )}
                     </div>
 
-                    {/* Module statuses */}
+                    {/* Module statuses — not available in summary; show placeholder */}
                     {MODULE_NUMS.map(mn => {
-                      const userMods = u.modules ?? u.weeks ?? []
-                      const mod = userMods.find(m => (m.moduleNum ?? (m as ModuleStatus & { weekNum?: string }).weekNum) === mn)
+                      const completed = (u.latestModuleCompleted ?? 0) >= parseInt(mn)
                       return (
                         <div key={mn} className="flex justify-center">
-                          <ModuleBadge status={mod} />
+                          <span title={completed ? 'Complete' : 'Unknown'}>
+                            {completed ? '✅' : '—'}
+                          </span>
                         </div>
                       )
                     })}
