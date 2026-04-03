@@ -69,14 +69,8 @@ export class ApiStack extends cdk.Stack {
       description: 'Global Admin: tenant management, system stats',
     })
 
-    // --- LMS Lambda ---
-    const lmsFn = new lambda.Function(this, 'LmsFn', {
-      ...lambdaDefaults,
-      functionName: 'endevo-uat-fn-lms',
-      handler: 'main.handler',
-      code: lambda.Code.fromAsset(path.join(__dirname, '../../backend/functions/lms')),
-      description: 'LMS: assessment, week content, video progress, quiz, admin, certificates',
-    })
+    // Note: endevo-uat-fn-lms Lambda is managed by LmsInfraStack (imported resource).
+    // It was manually created to unblock deployment. Do not recreate it here.
 
     // --- API Gateway HTTP API ---
     const api = new apigw.HttpApi(this, 'HttpApi', {
@@ -95,7 +89,8 @@ export class ApiStack extends cdk.Stack {
     api.addRoutes({ path: '/api/hr/{proxy+}',   methods: [apigw.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration('HrInt',   hrFn) })
     api.addRoutes({ path: '/api/employee/{proxy+}', methods: [apigw.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration('EmpInt', employeeFn) })
     api.addRoutes({ path: '/api/admin/{proxy+}', methods: [apigw.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration('AdminInt', adminFn) })
-    api.addRoutes({ path: '/api/lms/{proxy+}', methods: [apigw.HttpMethod.ANY], integration: new integrations.HttpLambdaIntegration('LmsInt', lmsFn) })
+    // Note: /api/lms/{proxy+} route is managed manually (points to endevo-uat-fn-lms).
+    // It was created outside CDK to unblock deployment. LmsInfraStack imports the Lambda reference.
 
     this.apiUrl = api.url!
 

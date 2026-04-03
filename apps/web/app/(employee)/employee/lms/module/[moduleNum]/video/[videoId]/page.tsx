@@ -25,19 +25,24 @@ export default function VideoPlayerPage() {
   const [error, setError] = useState('')
   const [completedMsg, setCompletedMsg] = useState(false)
   const [entered, setEntered] = useState(false)
+  const [lastPosition, setLastPosition] = useState(0)
 
   const load = useCallback(async () => {
     if (!videoId || !moduleNum) return
     setLoading(true)
     setError('')
     try {
-      const [urlRes, quizRes] = await Promise.all([
+      const [urlRes, quizRes, progressRes] = await Promise.all([
         api.lmsGetVideoUrl(videoId) as Promise<{ url: string; title?: string; description?: string; type?: string }>,
         api.lmsGetQuizQuestions(videoId) as Promise<{ quizzes: QuizPopup[] }>,
+        api.lmsGetVideoProgress(videoId).catch(() => null),
       ])
       setVideoUrl(urlRes.url)
       setVideoMeta({ title: urlRes.title || 'Video', description: urlRes.description, type: urlRes.type })
       setQuizPopups(quizRes.quizzes || [])
+      if (progressRes && progressRes.lastPosition && progressRes.lastPosition > 0 && !progressRes.completed) {
+        setLastPosition(progressRes.lastPosition)
+      }
       setTimeout(() => setEntered(true), 80)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load video')
@@ -148,6 +153,7 @@ export default function VideoPlayerPage() {
             moduleNum={moduleNum}
             quizPopups={quizPopups}
             onComplete={handleVideoComplete}
+            lastPosition={lastPosition}
           />
         ) : (
           !loading && !error && (

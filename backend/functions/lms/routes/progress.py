@@ -3,7 +3,8 @@ Progress routes — video watch progress and module completion tracking.
 
 Business rules:
   - Video progress stored in endevo-uat-video-progress (PK: userId, SK: videoId).
-    Fields: tenantId, moduleNum, percent, completed, lastWatched.
+    Fields: tenantId, moduleNum, percent, percentComplete, completed, lastWatched,
+            lastPosition (seconds), updatedAt.
   - A video is 'complete' when watched >= 95%.
   - A module auto-completes when ALL videos >= 95% watched AND all inline quizzes
     answered (checked in _check_module_auto_complete).
@@ -14,7 +15,8 @@ Business rules:
     at assessment time. There is no sequential unlock chain.
 
 Routes handled:
-  POST /api/lms/progress/video              — upsert video watch progress
+  POST /api/lms/progress/video              — upsert video watch progress (with lastPosition)
+  GET  /api/lms/progress/video/{videoId}    — get current progress for a specific video
   GET  /api/lms/progress/module/{moduleNum} — get all progress for a module
   POST /api/lms/progress/module/complete    — manually mark module as complete
 """
@@ -22,6 +24,7 @@ import json
 import logging
 import re
 import uuid
+from decimal import Decimal
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -230,19 +233,27 @@ def _check_module_auto_complete(
 def _update_video_progress(event: dict, tenant_id: str, user_id: str) -> dict:
     """POST /api/lms/progress/video
 
-    Expected body: {videoId, moduleNum, percent, completed}
+    Expected body: {videoId, moduleNum, percent, completed, lastPosition}
+    lastPosition: seconds (integer) — position to resume from on next watch.
     """
     body = get_body(event)
     video_id: str = str(body.get("videoId", "")).strip()
     module_num: str = str(body.get("moduleNum", "")).strip()
     percent = body.get("percent")
     completed = bool(body.get("completed", False))
+    last_position_raw = body.get("lastPosition", 0)
 
     if not video_id:
         return err(400, "videoId is required")
     if percent is None or not isinstance(percent, (int, float)):
         return err(400, "percent must be a number")
     percent = max(0, min(100, int(percent)))
+
+    # Coerce lastPosition to non-negative Decimal for DynamoDB
+    try:
+        last_position = Decimal(str(max(0, int(last_position_raw))))
+    except (ValueError, TypeError):
+        last_position = Decimal("0")
 
     # Auto-detect completed from threshold
     if percent >= VIDEO_COMPLETE_THRESHOLD:
@@ -257,8 +268,11 @@ def _update_video_progress(event: dict, tenant_id: str, user_id: str) -> dict:
                 "tenantId": tenant_id,
                 "moduleNum": module_num,
                 "percent": percent,
+                "percentComplete": percent,
                 "completed": completed,
+                "lastPosition": last_position,
                 "lastWatched": now,
+                "updatedAt": now,
             }
         )
     except ClientError as exc:
@@ -292,17 +306,20 @@ def _update_video_progress(event: dict, tenant_id: str, user_id: str) -> dict:
             )
 
     logger.info(
-        "Video progress saved — user=%s video=%s percent=%d completed=%s",
+        "Video progress saved — user=%s video=%s percent=%d completed=%s lastPosition=%s",
         user_id,
         video_id,
         percent,
         completed,
+        last_position,
     )
     return ok(
         {
             "videoId": video_id,
             "percent": percent,
+            "percentComplete": percent,
             "completed": completed,
+            "lastPosition": int(last_position),
             "savedAt": now,
         }
     )
@@ -327,13 +344,21 @@ def _get_module_progress(tenant_id: str, user_id: str, module_num: str) -> dict:
                     "Failed to get video progress for %s: %s", video_id, exc
                 )
                 prog = {}
+            raw_pos = prog.get("lastPosition", 0)
+            try:
+                last_pos = int(raw_pos)
+            except (ValueError, TypeError):
+                last_pos = 0
             video_progress.append(
                 {
                     "videoId": video_id,
                     "title": video.get("title", ""),
                     "percent": int(prog.get("percent", 0)),
+                    "percentComplete": int(prog.get("percentComplete", prog.get("percent", 0))),
                     "completed": bool(prog.get("completed", False)),
                     "lastWatched": prog.get("lastWatched"),
+                    "lastPosition": last_pos,
+                    "updatedAt": prog.get("updatedAt", prog.get("lastWatched")),
                 }
             )
 
@@ -350,6 +375,42 @@ def _get_module_progress(tenant_id: str, user_id: str, module_num: str) -> dict:
         )
     except ClientError:
         return err(500, "Failed to retrieve module progress")
+
+
+def _get_video_progress(user_id: str, video_id: str) -> dict:
+    """GET /api/lms/progress/video/{videoId}
+
+    Returns the current video progress record for the authenticated user.
+    Used by the video player page to resume from lastPosition.
+    """
+    if not video_id:
+        return err(400, "videoId is required")
+    try:
+        resp = VIDEO_PROG_T.get_item(Key={"userId": user_id, "videoId": video_id})
+        prog = resp.get("Item")
+        if not prog:
+            return ok({"videoId": video_id, "percent": 0, "percentComplete": 0, "completed": False, "lastPosition": 0})
+
+        raw_pos = prog.get("lastPosition", 0)
+        try:
+            last_pos = int(raw_pos)
+        except (ValueError, TypeError):
+            last_pos = 0
+
+        return ok(
+            {
+                "videoId": video_id,
+                "percent": int(prog.get("percent", 0)),
+                "percentComplete": int(prog.get("percentComplete", prog.get("percent", 0))),
+                "completed": bool(prog.get("completed", False)),
+                "lastPosition": last_pos,
+                "lastWatched": prog.get("lastWatched"),
+                "updatedAt": prog.get("updatedAt", prog.get("lastWatched")),
+            }
+        )
+    except ClientError as exc:
+        logger.error("Failed to get video progress for %s: %s", video_id, exc)
+        return err(500, "Failed to retrieve video progress")
 
 
 def _complete_module(event: dict, tenant_id: str, user_id: str) -> dict:
@@ -402,6 +463,11 @@ def handle(
     # POST /api/lms/progress/video
     if method == "POST" and re.search(r"/progress/video$", path):
         return _update_video_progress(event, tenant_id, user_id)
+
+    # GET /api/lms/progress/video/{videoId}  — check before module routes
+    video_prog_match = re.search(r"/progress/video/([^/]+)$", path)
+    if method == "GET" and video_prog_match:
+        return _get_video_progress(user_id, video_prog_match.group(1))
 
     # POST /api/lms/progress/module/complete  — check before module/{moduleNum} to avoid clash
     if method == "POST" and re.search(r"/progress/module/complete$", path):

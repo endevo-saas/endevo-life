@@ -18,6 +18,7 @@ export interface VideoPlayerProps {
   moduleNum: string
   quizPopups: QuizPopup[]
   onComplete: () => void
+  lastPosition?: number
 }
 
 interface QuizState {
@@ -30,7 +31,7 @@ interface QuizState {
 const PROGRESS_INTERVAL_MS = 5000
 const COMPLETION_THRESHOLD = 0.95
 
-export default function VideoPlayer({ videoUrl, videoId, moduleNum: _moduleNum, quizPopups, onComplete }: VideoPlayerProps) {
+export default function VideoPlayer({ videoUrl, videoId, moduleNum: _moduleNum, quizPopups, onComplete, lastPosition }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement>(null)
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const triggeredPopupsRef = useRef<Set<string>>(new Set())
@@ -43,11 +44,12 @@ export default function VideoPlayer({ videoUrl, videoId, moduleNum: _moduleNum, 
   const [duration, setDuration] = useState(0)
   const [videoCompleted, setVideoCompleted] = useState(false)
 
-  // Post progress to API
+  // Post progress to API (includes lastPosition for resume support)
   const postProgress = useCallback(
     async (percent: number, completed: boolean) => {
       try {
-        await api.lmsUpdateVideoProgress({ videoId, percent, completed })
+        const currentPos = videoRef.current ? Math.floor(videoRef.current.currentTime) : 0
+        await api.lmsUpdateVideoProgress({ videoId, percent, completed, lastPosition: currentPos })
       } catch {
         // Non-critical: silently swallow progress errors
       }
@@ -87,7 +89,12 @@ export default function VideoPlayer({ videoUrl, videoId, moduleNum: _moduleNum, 
 
   function handleLoadedMetadata() {
     const vid = videoRef.current
-    if (vid) setDuration(vid.duration)
+    if (!vid) return
+    setDuration(vid.duration)
+    // Resume from saved position if provided and valid
+    if (lastPosition && lastPosition > 0 && lastPosition < vid.duration) {
+      vid.currentTime = lastPosition
+    }
   }
 
   // Periodic progress posting

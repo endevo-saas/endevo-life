@@ -3,6 +3,7 @@ Seed script for LMS assessment questions and module configs.
 
 Usage:
     python scripts/seed-lms.py --tenant-id <id> [--region us-east-1] [--dry-run]
+    python scripts/seed-lms.py --all-tenants [--region us-east-1] [--dry-run]
 """
 
 import argparse
@@ -10,11 +11,12 @@ import sys
 from datetime import datetime, timezone
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Key, Attr
 
 
 QUESTIONS_TABLE = "endevo-uat-questions"
 MODULES_TABLE = "endevo-uat-lms-modules"
+TENANTS_TABLE = "endevo-uat-tenants"
 
 
 def get_now_iso() -> str:
@@ -471,9 +473,10 @@ def build_modules(tenant_id: str, now_iso: str) -> list[dict]:
 def get_existing_question_ids(table, tenant_id: str) -> set[str]:
     """Return set of questionIds already seeded for this tenant."""
     existing = set()
+    # questionId is the sort key — can't use it in FilterExpression.
+    # Query by PK only and collect all sort-key values.
     kwargs = {
         "KeyConditionExpression": Key("tenantId").eq(tenant_id),
-        "FilterExpression": "attribute_exists(questionId)",
         "ProjectionExpression": "questionId",
     }
     while True:
@@ -551,51 +554,96 @@ def seed_modules(table, modules: list[dict], dry_run: bool) -> tuple[int, int]:
     return len(to_write), skipped
 
 
+def get_active_tenant_ids(dynamodb_resource, region: str) -> list[str]:
+    """Return all active tenantIds from endevo-uat-tenants."""
+    table = dynamodb_resource.Table(TENANTS_TABLE)
+    tenant_ids: list[str] = []
+    kwargs = {"FilterExpression": Attr("status").eq("active")}
+    while True:
+        resp = table.scan(**kwargs)
+        for item in resp.get("Items", []):
+            tid = item.get("tenantId")
+            if tid:
+                tenant_ids.append(str(tid))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+        kwargs["ExclusiveStartKey"] = last_key
+    return tenant_ids
+
+
+def seed_tenant(tenant_id: str, questions_table, modules_table, dry_run: bool) -> dict:
+    """Seed a single tenant; returns summary dict."""
+    now_iso = get_now_iso()
+    questions = build_questions(tenant_id, now_iso)
+    modules = build_modules(tenant_id, now_iso)
+
+    print(f"\n  Prepared {len(questions)} questions and {len(modules)} modules")
+
+    q_written, q_skipped = seed_questions(questions_table, questions, dry_run)
+    m_written, m_skipped = seed_modules(modules_table, modules, dry_run)
+    return {
+        "q_written": q_written,
+        "q_skipped": q_skipped,
+        "m_written": m_written,
+        "m_skipped": m_skipped,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed LMS data into DynamoDB")
-    parser.add_argument("--tenant-id", required=True, help="Tenant ID to seed data for")
+    group = parser.add_mutually_exclusive_group(required=True)
+    group.add_argument("--tenant-id", help="Tenant ID to seed data for")
+    group.add_argument("--all-tenants", action="store_true", help="Seed all active tenants from endevo-uat-tenants")
     parser.add_argument("--region", default="us-east-1", help="AWS region (default: us-east-1)")
     parser.add_argument("--dry-run", action="store_true", help="Show what would be seeded without writing")
     args = parser.parse_args()
 
-    tenant_id: str = args.tenant_id
     region: str = args.region
     dry_run: bool = args.dry_run
 
     if dry_run:
         print(f"\n*** DRY RUN MODE — no data will be written ***")
 
-    print(f"\nTenant ID : {tenant_id}")
-    print(f"Region    : {region}")
-    print(f"Tables    : {QUESTIONS_TABLE}, {MODULES_TABLE}")
-
     dynamodb = boto3.resource("dynamodb", region_name=region)
     questions_table = dynamodb.Table(QUESTIONS_TABLE)
     modules_table = dynamodb.Table(MODULES_TABLE)
 
-    now_iso = get_now_iso()
-    questions = build_questions(tenant_id, now_iso)
-    modules = build_modules(tenant_id, now_iso)
+    if args.all_tenants:
+        print(f"\nFetching all active tenants from {TENANTS_TABLE}...")
+        tenant_ids = get_active_tenant_ids(dynamodb, region)
+        if not tenant_ids:
+            print("No active tenants found. Exiting.")
+            sys.exit(0)
+        print(f"Found {len(tenant_ids)} active tenant(s): {', '.join(tenant_ids)}")
+    else:
+        tenant_ids = [args.tenant_id]
 
-    print(f"\nPrepared {len(questions)} questions and {len(modules)} modules")
+    totals = {"q_written": 0, "q_skipped": 0, "m_written": 0, "m_skipped": 0}
 
-    q_written, q_skipped = seed_questions(questions_table, questions, dry_run)
-    m_written, m_skipped = seed_modules(modules_table, modules, dry_run)
+    for tenant_id in tenant_ids:
+        print(f"\n{'=' * 50}")
+        print(f"Seeding tenant: {tenant_id}")
+        print(f"{'=' * 50}")
+        summary = seed_tenant(tenant_id, questions_table, modules_table, dry_run)
+        for key in totals:
+            totals[key] += summary[key]
 
     print("\n" + "=" * 50)
-    print("SEED SUMMARY")
+    print("OVERALL SEED SUMMARY")
     print("=" * 50)
+    print(f"  Tenants processed : {len(tenant_ids)}")
     if dry_run:
-        print(f"  [DRY RUN] Questions : {len(questions) - q_skipped} would be written, {q_skipped} skipped")
-        print(f"  [DRY RUN] Modules   : {len(modules) - m_skipped} would be written, {m_skipped} skipped")
+        print(f"  [DRY RUN] Questions would write : {totals['q_written']}, skip : {totals['q_skipped']}")
+        print(f"  [DRY RUN] Modules would write   : {totals['m_written']}, skip : {totals['m_skipped']}")
     else:
-        print(f"  Questions written : {q_written}")
-        print(f"  Questions skipped : {q_skipped} (already existed)")
-        print(f"  Modules written   : {m_written}")
-        print(f"  Modules skipped   : {m_skipped} (already existed)")
+        print(f"  Questions written : {totals['q_written']}")
+        print(f"  Questions skipped : {totals['q_skipped']} (already existed)")
+        print(f"  Modules written   : {totals['m_written']}")
+        print(f"  Modules skipped   : {totals['m_skipped']} (already existed)")
     print("=" * 50)
 
-    if not dry_run and (q_written > 0 or m_written > 0):
+    if not dry_run and (totals["q_written"] > 0 or totals["m_written"] > 0):
         print("\nSeed complete.")
     elif dry_run:
         print("\nDry run complete. No data was written.")

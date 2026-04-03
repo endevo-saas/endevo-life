@@ -127,43 +127,11 @@ export class DynamoStack extends cdk.Stack {
     })
     tables.push(config)
 
-    // --- 10. LMS Modules ---
-    const lmsModules = new dynamodb.Table(this, 'LmsModules', {
-      tableName: 'endevo-uat-lms-modules',
-      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'moduleNum', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecovery: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    })
-    lmsModules.addGlobalSecondaryIndex({
-      indexName: 'status-index',
-      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    })
-    tables.push(lmsModules)
-
-    // --- 11. LMS User Modules ---
-    const lmsUserModules = new dynamodb.Table(this, 'LmsUserModules', {
-      tableName: 'endevo-uat-lms-user-modules',
-      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'moduleNum', type: dynamodb.AttributeType.STRING },
-      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
-      pointInTimeRecovery: true,
-      removalPolicy: cdk.RemovalPolicy.RETAIN,
-    })
-    lmsUserModules.addGlobalSecondaryIndex({
-      indexName: 'tenantId-index',
-      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
-      sortKey: { name: 'moduleNum', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    })
-    tables.push(lmsUserModules)
-
     this.tableArns = tables.map(t => t.tableArn)
 
     // --- Outputs (IDs must be hardcoded — CDK tokens not allowed in IDs) ---
-    const tableNames = ['tenants','users','training','questions','responses','certificates','audit','videoProgress','config','lmsModules','lmsUserModules']
+    // Note: lmsModules and lmsUserModules are managed by LmsInfraStack (imported resources).
+    const tableNames = ['tenants','users','training','questions','responses','certificates','audit','videoProgress','config']
     tables.forEach((t, i) => {
       new cdk.CfnOutput(this, `TableArn${tableNames[i]}`, {
         value: t.tableArn,

@@ -8,6 +8,7 @@ import { IamStack } from '../lib/04-iam-stack'
 import { ApiStack } from '../lib/05-api-stack'
 import { AmplifyStack } from '../lib/06-amplify-stack'
 import { CloudFrontLmsStack } from '../lib/07-cloudfront-lms-stack'
+import { LmsInfraStack } from '../lib/08-lms-infra-stack'
 
 const app = new cdk.App()
 
@@ -61,3 +62,6 @@ new CloudFrontLmsStack(app, 'EndevoUatCloudFrontLms', {
   env, tags,
   lambdaRoleArn: iam.lambdaRole.roleArn,
 })
+
+// Stack 8 — LMS Infra (imports manually-created LMS resources for CDK awareness)
+new LmsInfraStack(app, 'EndevoUatLmsInfra', { env, tags })

@@ -136,8 +136,10 @@ export const api = {
   lmsGetAssetUrl: (key: string) => apiFetch(`/api/lms/course/asset/${encodeURIComponent(key)}/url`),
 
   // LMS — Progress
-  lmsUpdateVideoProgress: (body: { videoId: string; percent: number; completed: boolean }) =>
+  lmsUpdateVideoProgress: (body: { videoId: string; percent: number; completed: boolean; lastPosition?: number }) =>
     apiFetch('/api/lms/progress/video', { method: 'POST', body: JSON.stringify(body) }),
+  lmsGetVideoProgress: (videoId: string) =>
+    apiFetch<{ videoId: string; percent: number; percentComplete: number; completed: boolean; lastPosition: number; lastWatched?: string; updatedAt?: string }>(`/api/lms/progress/video/${videoId}`),
   lmsCompleteModule: (moduleNum: string) =>
     apiFetch('/api/lms/progress/module/complete', { method: 'POST', body: JSON.stringify({ moduleNum }) }),
 

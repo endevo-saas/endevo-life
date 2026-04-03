@@ -8,15 +8,17 @@ Schema notes:
   - endevo-uat-questions: PK=tenantId SK=questionId.
     answers=[{label,text,score}], correctLabel, type (assessment|inline).
   - endevo-uat-lms-modules: PK=tenantId SK=moduleNum.
-    Fields: title, description, videoIds[], pdfKey, objectives[], isActive, status.
+    Fields: title, description, videoIds[], pdfKey, objectives[], isActive, status,
+            videoCount, thumbnailKey.
 
 Routes handled:
   GET    /api/lms/admin/questions                    — list questions (type filter)
   POST   /api/lms/admin/questions                    — create question
   PUT    /api/lms/admin/questions/{id}               — update question
   DELETE /api/lms/admin/questions/{id}               — delete question
-  GET    /api/lms/admin/modules                      — list all module configs
+  GET    /api/lms/admin/modules                      — list all module configs (sorted by moduleNum int)
   POST   /api/lms/admin/modules                      — create or update module config
+  POST   /api/lms/admin/modules/{moduleNum}/reorder  — change a module's position/number
   GET    /api/lms/admin/users/progress               — list all users with module progress summary
   GET    /api/lms/admin/users/{userId}/progress      — full progress for a specific user
   POST   /api/lms/admin/users/{userId}/unlock        — manually unlock a module for a user
@@ -278,6 +280,8 @@ def _list_modules(tenant_id: str) -> dict:
             MODULES_T,
             KeyConditionExpression=Key("tenantId").eq(tenant_id),
         )
+        # Sort by moduleNum as integer so Module 10 sorts after Module 9
+        modules.sort(key=lambda m: int(m.get("moduleNum", 0)))
         return ok({"modules": modules, "total": len(modules)})
     except ClientError:
         return err(500, "Failed to list modules")
@@ -326,6 +330,62 @@ def _upsert_module(event: dict, tenant_id: str) -> dict:
         return ok(item)
     except ClientError:
         return err(500, "Failed to save module configuration")
+
+
+def _reorder_module(event: dict, tenant_id: str, current_module_num: str) -> dict:
+    """POST /api/lms/admin/modules/{moduleNum}/reorder
+
+    Change a module's position by updating its moduleNum.
+    This creates a new record with the new moduleNum and deletes the old one.
+    The old moduleNum must exist; the new moduleNum must not already exist
+    unless it is the same record.
+
+    Body: {newModuleNum: "7"}
+    """
+    body = get_body(event)
+    new_module_num: str = str(body.get("newModuleNum", "")).strip()
+
+    if not new_module_num or not new_module_num.isdigit():
+        return err(400, "newModuleNum must be a positive integer string")
+    if new_module_num == current_module_num:
+        return err(400, "newModuleNum must differ from current moduleNum")
+
+    now = _now_iso()
+    try:
+        # Fetch the existing module config
+        resp = MODULES_T.get_item(Key={"tenantId": tenant_id, "moduleNum": current_module_num})
+        existing = resp.get("Item")
+        if not existing:
+            return err(404, f"Module {current_module_num} not found")
+
+        # Write under the new moduleNum
+        new_item = {**existing, "moduleNum": new_module_num, "updatedAt": now}
+        MODULES_T.put_item(Item=new_item)
+
+        # Remove the old record
+        MODULES_T.delete_item(Key={"tenantId": tenant_id, "moduleNum": current_module_num})
+
+        logger.info(
+            "Module reordered: %s -> %s tenant=%s",
+            current_module_num,
+            new_module_num,
+            tenant_id,
+        )
+        return ok(
+            {
+                "message": f"Module renumbered from {current_module_num} to {new_module_num}",
+                "oldModuleNum": current_module_num,
+                "newModuleNum": new_module_num,
+            }
+        )
+    except ClientError as exc:
+        logger.error(
+            "Failed to reorder module %s to %s: %s",
+            current_module_num,
+            new_module_num,
+            exc,
+        )
+        return err(500, "Failed to reorder module")
 
 
 # ── User progress views ───────────────────────────────────────────────────────
@@ -499,6 +559,11 @@ def handle(
             return _delete_question(tenant_id, q_id)
 
     # ── Module routes ──────────────────────────────────────────────────────────
+    # POST /api/lms/admin/modules/{moduleNum}/reorder  — check before generic modules$ match
+    module_reorder_match = re.search(r"/admin/modules/(\w+)/reorder$", path)
+    if method == "POST" and module_reorder_match:
+        return _reorder_module(event, tenant_id, module_reorder_match.group(1))
+
     if re.search(r"/admin/modules$", path):
         if method == "GET":
             return _list_modules(tenant_id)

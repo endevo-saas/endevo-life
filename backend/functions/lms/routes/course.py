@@ -127,12 +127,25 @@ def _list_modules(tenant_id: str, user_id: str) -> dict:
         modules_resp = MODULES_T.query(
             KeyConditionExpression=Key("tenantId").eq(tenant_id)
         )
-        module_configs: dict[str, dict] = {
-            str(m["moduleNum"]): m for m in modules_resp.get("Items", [])
-        }
+        all_configs: list[dict] = modules_resp.get("Items", [])
+
+        # Support paginated results
+        while "LastEvaluatedKey" in modules_resp:
+            modules_resp = MODULES_T.query(
+                KeyConditionExpression=Key("tenantId").eq(tenant_id),
+                ExclusiveStartKey=modules_resp["LastEvaluatedKey"],
+            )
+            all_configs.extend(modules_resp.get("Items", []))
+
+        # Sort by moduleNum as integer so Module 10 comes after Module 9
+        all_configs.sort(key=lambda m: int(m.get("moduleNum", 0)))
+        module_configs: dict[str, dict] = {str(m["moduleNum"]): m for m in all_configs}
+
+        # Use seeded modules; fall back to TOTAL_MODULES for tenants with no seeded data
+        module_nums = list(module_configs.keys()) or [str(n) for n in range(1, TOTAL_MODULES + 1)]
 
         result: list[dict] = []
-        for module_num in [str(n) for n in range(1, TOTAL_MODULES + 1)]:
+        for module_num in module_nums:
             user_module = _get_user_module_status(user_id, module_num)
             config = module_configs.get(module_num, {})
             # Schema field is lockStatus, default to "locked" when no record exists
@@ -140,11 +153,18 @@ def _list_modules(tenant_id: str, user_id: str) -> dict:
             if user_module:
                 lock_status = user_module.get("lockStatus", "locked")
 
+            video_ids: list = config.get("videoIds") or []
+            video_count = len(video_ids) if isinstance(video_ids, list) else 0
+
             result.append(
                 {
                     "moduleNum": module_num,
                     "title": config.get("title", f"Module {module_num}"),
                     "description": config.get("description", ""),
+                    "isActive": bool(config.get("isActive", True)),
+                    "status": config.get("status", "draft"),
+                    "videoCount": video_count,
+                    "thumbnailKey": config.get("thumbnailKey", ""),
                     "lockStatus": lock_status,
                     "completedAt": (user_module or {}).get("completedAt"),
                     "unlockedAt": (user_module or {}).get("unlockedAt"),

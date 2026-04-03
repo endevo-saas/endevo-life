@@ -178,13 +178,14 @@ def _list_questions(tenant_id: str, user_id: str) -> dict:
     try:
         questions = _fetch_all_questions(tenant_id)
 
-        # Shuffle order for each user session (keep questionId intact)
+        # Shuffle order for each user session (keep questionId and number intact for scoring).
+        # shuffleIndex reflects the display position in this attempt (1-based).
         random.shuffle(questions)
 
         # Strip correctLabel / score data before returning to client.
         # Schema answers = [{label, text, score}] — send label and text only.
         safe_questions = []
-        for q in questions:
+        for shuffle_idx, q in enumerate(questions, start=1):
             safe_answers = [
                 {"label": a.get("label", ""), "text": a.get("text", "")}
                 for a in (q.get("answers") or [])
@@ -197,6 +198,7 @@ def _list_questions(tenant_id: str, user_id: str) -> dict:
                     "domain": q.get("domain", ""),
                     "number": q.get("number"),
                     "order": q.get("order"),
+                    "shuffleIndex": shuffle_idx,
                 }
             )
         return ok({"questions": safe_questions, "total": len(safe_questions)})
