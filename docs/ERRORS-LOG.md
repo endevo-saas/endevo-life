@@ -624,3 +624,68 @@ These issues occurred before the GitHub-first approach was adopted. Recorded for
 - **Lesson:** After adding any new Lucide icon, always verify it appears in the import statement. TypeScript only catches this at build time, not during local dev if tsconfig is loose.
 
 ---
+
+## Phase 4 — LMS Gap Fixes (2026-04-03)
+
+### Gap Fix #G1 — Video Upload Presigned URL Endpoint
+- **Date:** 2026-04-03
+- **Severity:** HIGH — videos could not be uploaded without this
+- **File:** `backend/functions/lms/routes/admin.py`
+- **Fix:** Added `POST /api/lms/admin/modules/{moduleNum}/upload-url` route. Generates S3 presigned PUT URL (15 min) for `endevo-uat-videos` (video) or `endevo-uat-assets` (pdf). Returns `{uploadUrl, key, bucket, expiresIn}`.
+
+---
+
+### Gap Fix #G2 — Video Metadata CRUD Endpoints
+- **Date:** 2026-04-03
+- **Severity:** HIGH — no API to store/retrieve/delete video records per module
+- **File:** `backend/functions/lms/routes/admin.py`
+- **Fix:** Added `GET/POST /api/lms/admin/modules/{moduleNum}/videos` and `DELETE /api/lms/admin/modules/{moduleNum}/videos/{videoId}`. Writes to `endevo-uat-training`, updates module `videoIds` list and `videoCount` atomically.
+
+---
+
+### Gap Fix #G3 — Module Content Management Page (Frontend)
+- **Date:** 2026-04-03
+- **Severity:** HIGH — admins had no UI to upload videos or PDFs to modules
+- **File:** `apps/web/app/(global-admin)/admin/lms/modules/[moduleNum]/page.tsx` (NEW)
+- **Fix:** Created module detail page with: video list + add form (presigned PUT upload with progress bar), PDF upload section, inline quiz link to questions page. Added `Manage Content` link on each module card in `modules/page.tsx`. Added 5 new API methods to `apps/web/lib/api.ts`.
+
+---
+
+### Gap Fix #G4 — Certificate Email via SES on Module 6 Completion
+- **Date:** 2026-04-03
+- **Severity:** MEDIUM — certificate was created in DynamoDB but no email sent
+- **File:** `backend/functions/lms/routes/progress.py`
+- **Fix:** `_issue_certificate` now returns `certificateId`. Added `_issue_certificate_email()` — sends HTML email via SES from `noreply@endevo.life` with verify + download links. Non-fatal (wrapped in try/except). Email passed through `_mark_module_complete` → called from `_complete_module` and `_check_module_auto_complete`. Certificate `type` field updated from `"completion"` to `"lms_completion"` for disambiguation.
+
+---
+
+### Gap Fix #G5 — Delete Dead /week/ Routes
+- **Date:** 2026-04-03
+- **Severity:** LOW — stale routes replaced by /module/ routes in previous session
+- **Files:** `apps/web/app/(employee)/employee/lms/week/[weekNum]/page.tsx`, `.../video/[videoId]/page.tsx`
+- **Fix:** Files were already deleted in commit a7d3287 by previous session. Confirmed absent.
+
+---
+
+### Gap Fix #G6 — TOTAL_MODULES Hardcode Made Dynamic
+- **Date:** 2026-04-03
+- **Severity:** MEDIUM — hardcoded 6 would break when modules are added/removed
+- **File:** `backend/functions/lms/routes/admin.py`
+- **Fix:** `TOTAL_MODULES: int = 6` constant removed. `_upsert_module` no longer validates against it (allows any positive integer). `_list_users_progress` rewrote to query actual module count dynamically from DB. Completed in previous session commit a7d3287; verified in this session.
+
+---
+
+### Gap Fix #G7 — CloudFront Domain Set in Amplify
+- **Date:** 2026-04-03
+- **Severity:** LOW — CF_DOMAIN was unset, presigned URL helpers had empty fallback
+- **Fix:** Found distribution `dvbozfce3l21d.cloudfront.net` (ID: E121OSHNXKRE61). Set `CF_DOMAIN=dvbozfce3l21d.cloudfront.net` on Amplify branch `main` via `aws amplify update-branch`.
+
+---
+
+### Gap Fix #G8 — Employee Certificates Page Shows LMS Completion Certs
+- **Date:** 2026-04-03
+- **Severity:** MEDIUM — employees could not see their LMS completion certificate
+- **File:** `apps/web/app/(employee)/employee/certificates/page.tsx`
+- **Fix:** Page now fetches user progress and surfaces `type=lms_completion` certificates in a dedicated "LMS Completion Certificates" section with teal styling and verify link. Legacy training certs remain in a separate "Training Certificates" section.
+
+---
