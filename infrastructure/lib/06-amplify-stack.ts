@@ -25,7 +25,7 @@ export class AmplifyStack extends cdk.Stack {
     // Amplify app connected to GitHub
     const app = new amplify.CfnApp(this, 'App', {
       name: 'endevo-uat-frontend',
-      repository: 'https://github.com/shahzadms7/endevo-life',
+      repository: 'https://github.com/endevo-life/endevo-aws-shahzad',
       oauthToken: process.env.GH_TOKEN_AMPLIFY || '',
       iamServiceRole: amplifyRole.roleArn,
       platform: 'WEB_COMPUTE',
@@ -37,10 +37,10 @@ export class AmplifyStack extends cdk.Stack {
         '      phases:',
         '        preBuild:',
         '          commands:',
-        '            - cd $CODEBUILD_SRC_DIR/endevo-life && npm install -g pnpm@9 && pnpm install --frozen-lockfile',
+        '            - cd $CODEBUILD_SRC_DIR/endevo-aws-shahzad && npm install -g pnpm@9 && pnpm install --frozen-lockfile',
         '        build:',
         '          commands:',
-        '            - cd $CODEBUILD_SRC_DIR/endevo-life && pnpm run build --filter=@endevo/web',
+        '            - cd $CODEBUILD_SRC_DIR/endevo-aws-shahzad && pnpm run build --filter=@endevo/web',
         '      artifacts:',
         '        baseDirectory: .next',
         '        files:',

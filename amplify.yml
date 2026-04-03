@@ -5,10 +5,10 @@ applications:
       phases:
         preBuild:
           commands:
-            - cd $CODEBUILD_SRC_DIR/endevo-life && npm install --legacy-peer-deps
+            - cd $CODEBUILD_SRC_DIR/endevo-aws-shahzad && npm install --legacy-peer-deps
         build:
           commands:
-            - cd $CODEBUILD_SRC_DIR/endevo-life && npx turbo run build --filter=@endevo/web
+            - cd $CODEBUILD_SRC_DIR/endevo-aws-shahzad && npx turbo run build --filter=@endevo/web
       artifacts:
         baseDirectory: .next
         files:
