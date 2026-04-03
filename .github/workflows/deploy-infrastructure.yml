@@ -46,16 +46,19 @@ jobs:
           npx cdk acknowledge 34892 2>/dev/null || true
           npx cdk acknowledge 32775 2>/dev/null || true
 
-      - name: CDK Deploy IAM first (removes old cross-stack imports before other stacks update)
+      - name: CDK Deploy all stacks except DynamoDB (DynamoDB tables exist and are managed separately)
         working-directory: infrastructure
-        run: npx cdk deploy EndevoUatIam --require-approval never
-        env:
-          AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
-          GH_TOKEN_AMPLIFY: ${{ secrets.GH_TOKEN_AMPLIFY }}
-
-      - name: CDK Deploy all stacks (now safe — cross-stack imports already cleared)
-        working-directory: infrastructure
-        run: npx cdk deploy --all --require-approval never --outputs-file ../cdk-outputs.json
+        run: |
+          npx cdk deploy \
+            EndevoUatCognito \
+            EndevoUatS3 \
+            EndevoUatIam \
+            EndevoUatApi \
+            EndevoUatAmplify \
+            EndevoUatCloudFrontLms \
+            EndevoUatLmsInfra \
+            --require-approval never \
+            --outputs-file ../cdk-outputs.json
         env:
           AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
           GH_TOKEN_AMPLIFY: ${{ secrets.GH_TOKEN_AMPLIFY }}
