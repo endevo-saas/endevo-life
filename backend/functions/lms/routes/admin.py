@@ -42,13 +42,15 @@ from utils.db import (
     VIDEO_PROG_T,
     RESPONSES_T,
     CERTS_T,
+    TRAINING_T,
 )
+from utils.s3 import get_upload_presigned_url, VIDEOS_BUCKET, ASSETS_BUCKET
 from utils.response import ok, err
 
 logger = logging.getLogger(__name__)
 
 VALID_QUESTION_TYPES: frozenset[str] = frozenset({"assessment", "inline"})
-TOTAL_MODULES: int = 6
+# Not hardcoded — module count is dynamic, read from endevo-uat-lms-modules
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -299,8 +301,8 @@ def _upsert_module(event: dict, tenant_id: str) -> dict:
     if not module_num or not module_num.isdigit():
         return err(400, "moduleNum must be a positive integer string")
 
-    if int(module_num) < 1 or int(module_num) > TOTAL_MODULES:
-        return err(400, f"moduleNum must be between 1 and {TOTAL_MODULES}")
+    if int(module_num) < 1:
+        return err(400, "moduleNum must be a positive integer")
 
     title: str = str(body.get("title", f"Module {module_num}")).strip()
     now = _now_iso()
@@ -391,16 +393,34 @@ def _reorder_module(event: dict, tenant_id: str, current_module_num: str) -> dic
 # ── User progress views ───────────────────────────────────────────────────────
 
 def _list_users_progress(tenant_id: str) -> dict:
-    """GET /api/lms/admin/users/progress"""
+    """GET /api/lms/admin/users/progress — enriched with name, email, score, per-module status."""
     try:
-        # Scan all user-module records for this tenant.
-        # Schema: lockStatus field (not "status").
+        # All user-module records for this tenant
         user_module_records = _paginate_scan(
             USER_MODULES_T,
             FilterExpression=Attr("tenantId").eq(tenant_id),
         )
 
-        # Group by userId
+        # Enrich with user profile (name + email)
+        user_records = _paginate_scan(
+            USERS_T,
+            FilterExpression=Attr("tenantId").eq(tenant_id),
+        )
+        user_map: dict[str, dict] = {u.get("userId", ""): u for u in user_records}
+
+        # Latest assessment per user
+        all_responses = _paginate_scan(
+            RESPONSES_T,
+            FilterExpression=Attr("tenantId").eq(tenant_id),
+        )
+        latest_response: dict[str, dict] = {}
+        for resp in all_responses:
+            uid = resp.get("userId", "")
+            existing = latest_response.get(uid)
+            if not existing or resp.get("submittedAt", "") > existing.get("submittedAt", ""):
+                latest_response[uid] = resp
+
+        # Group module records by userId
         by_user: dict[str, list] = {}
         for record in user_module_records:
             uid = record.get("userId", "")
@@ -408,28 +428,46 @@ def _list_users_progress(tenant_id: str) -> dict:
 
         summary = []
         for uid, modules in by_user.items():
-            completed_modules = [
-                m for m in modules if m.get("lockStatus") == "complete"
-            ]
-            unlocked_modules = [
-                m for m in modules if m.get("lockStatus") in ("unlocked", "complete")
-            ]
-            summary.append(
-                {
-                    "userId": uid,
-                    "modulesUnlocked": len(unlocked_modules),
-                    "modulesCompleted": len(completed_modules),
-                    "latestModuleCompleted": (
-                        max(
-                            (int(m["moduleNum"]) for m in completed_modules),
-                            default=None,
-                        )
-                    ),
-                }
-            )
+            user_info = user_map.get(uid, {})
+            response = latest_response.get(uid, {})
+            scorecard = response.get("scorecard", {})
 
+            completed = [m for m in modules if m.get("lockStatus") == "complete"]
+            unlocked = [m for m in modules if m.get("lockStatus") in ("unlocked", "complete")]
+
+            # Per-module status map {"1": "unlocked", "2": "complete", ...}
+            module_status: dict[str, str] = {
+                m.get("moduleNum", ""): m.get("lockStatus", "locked")
+                for m in modules
+            }
+
+            last_dates = [
+                m.get("completedAt") or m.get("updatedAt", "")
+                for m in modules if m.get("completedAt") or m.get("updatedAt")
+            ]
+
+            summary.append({
+                "userId": uid,
+                "email": user_info.get("email", ""),
+                "firstName": user_info.get("firstName", ""),
+                "lastName": user_info.get("lastName", ""),
+                "assessmentScore": scorecard.get("overallScore"),
+                "assessmentAttempts": response.get("attemptNumber", 0) if response else 0,
+                "assessmentTaken": bool(response),
+                "moduleStatus": module_status,
+                "modulesUnlocked": len(unlocked),
+                "modulesCompleted": len(completed),
+                "latestModuleCompleted": (
+                    max((int(m["moduleNum"]) for m in completed), default=None)
+                ),
+                "lastActivity": max(last_dates) if last_dates else None,
+                "overallTier": scorecard.get("overallTier", {}),
+            })
+
+        summary.sort(key=lambda u: (-u["modulesCompleted"], u.get("lastName", ""), u.get("firstName", "")))
         return ok({"users": summary, "total": len(summary)})
-    except ClientError:
+    except ClientError as exc:
+        logger.error("Failed to retrieve user progress: %s", exc)
         return err(500, "Failed to retrieve user progress summary")
 
 
@@ -522,6 +560,184 @@ def _manual_unlock(event: dict, target_user_id: str, tenant_id: str) -> dict:
         return err(500, "Failed to unlock module")
 
 
+# ── Video / PDF upload pipeline ───────────────────────────────────────────────
+
+def _get_upload_url(event: dict, module_num: str) -> dict:
+    """POST /api/lms/admin/modules/{moduleNum}/upload-url
+
+    Body: {fileName, fileType, contentType}
+    fileType = "video" | "pdf"
+    Returns: {uploadUrl, key, bucket, expiresIn}
+    """
+    body = get_body(event)
+    file_name: str = str(body.get("fileName", "")).strip()
+    file_type: str = str(body.get("fileType", "")).strip()
+    content_type: str = str(body.get("contentType", "")).strip()
+
+    if not file_name:
+        return err(400, "fileName is required")
+    if file_type not in ("video", "pdf"):
+        return err(400, "fileType must be 'video' or 'pdf'")
+    if not content_type:
+        return err(400, "contentType is required")
+
+    if file_type == "video":
+        bucket = VIDEOS_BUCKET
+        key = f"modules/module{module_num}/{file_name}"
+    else:
+        bucket = ASSETS_BUCKET
+        key = f"modules/module{module_num}/{file_name}"
+
+    try:
+        upload_url = get_upload_presigned_url(bucket, key, content_type)
+        return ok({"uploadUrl": upload_url, "key": key, "bucket": bucket, "expiresIn": 900})
+    except Exception as exc:  # noqa: BLE001
+        logger.error("Failed to generate upload URL: %s", exc)
+        return err(500, "Failed to generate upload URL")
+
+
+def _list_module_videos(tenant_id: str, module_num: str) -> dict:
+    """GET /api/lms/admin/modules/{moduleNum}/videos"""
+    try:
+        from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+        resp = TRAINING_T.query(
+            KeyConditionExpression=_Key("tenantId").eq(tenant_id),
+            FilterExpression=_Attr("moduleNum").eq(module_num),
+        )
+        videos = resp.get("Items", [])
+        while "LastEvaluatedKey" in resp:
+            resp = TRAINING_T.query(
+                KeyConditionExpression=_Key("tenantId").eq(tenant_id),
+                FilterExpression=_Attr("moduleNum").eq(module_num),
+                ExclusiveStartKey=resp["LastEvaluatedKey"],
+            )
+            videos.extend(resp.get("Items", []))
+        videos.sort(key=lambda v: int(v.get("order", 0)))
+        return ok({"videos": videos, "total": len(videos)})
+    except ClientError:
+        return err(500, "Failed to list module videos")
+
+
+def _add_module_video(event: dict, tenant_id: str, module_num: str) -> dict:
+    """POST /api/lms/admin/modules/{moduleNum}/videos
+
+    Body: {videoId, title, description, s3Key, duration, videoType, order, thumbnailKey?}
+    videoType = "main" | "action_step"
+    """
+    body = get_body(event)
+    video_id: str = str(body.get("videoId", str(uuid.uuid4()))).strip()
+    title: str = str(body.get("title", "")).strip()
+    s3_key: str = str(body.get("s3Key", "")).strip()
+    video_type: str = str(body.get("videoType", "main")).strip()
+
+    if not title:
+        return err(400, "title is required")
+    if not s3_key:
+        return err(400, "s3Key is required")
+    if video_type not in ("main", "action_step"):
+        return err(400, "videoType must be 'main' or 'action_step'")
+
+    now = _now_iso()
+    item: dict = {
+        "tenantId": tenant_id,
+        "videoId": video_id,
+        "moduleNum": module_num,
+        "title": title,
+        "description": str(body.get("description", "")).strip(),
+        "s3Key": s3_key,
+        "duration": str(body.get("duration", "")).strip(),
+        "videoType": video_type,
+        "order": int(body.get("order", 0)),
+        "createdAt": now,
+    }
+    thumbnail_key = str(body.get("thumbnailKey", "")).strip()
+    if thumbnail_key:
+        item["thumbnailKey"] = thumbnail_key
+
+    try:
+        TRAINING_T.put_item(Item=item)
+        # Append videoId to the module's videoIds list
+        MODULES_T.update_item(
+            Key={"tenantId": tenant_id, "moduleNum": module_num},
+            UpdateExpression=(
+                "SET videoIds = list_append(if_not_exists(videoIds, :empty), :vid), "
+                "videoCount = if_not_exists(videoCount, :zero) + :one, "
+                "updatedAt = :now"
+            ),
+            ExpressionAttributeValues={
+                ":vid": [video_id],
+                ":empty": [],
+                ":zero": 0,
+                ":one": 1,
+                ":now": now,
+            },
+        )
+        logger.info("Video %s added to module %s tenant=%s", video_id, module_num, tenant_id)
+        return ok(item, status=201)
+    except ClientError as exc:
+        logger.error("Failed to add video: %s", exc)
+        return err(500, "Failed to add video")
+
+
+def _delete_module_video(tenant_id: str, module_num: str, video_id: str) -> dict:
+    """DELETE /api/lms/admin/modules/{moduleNum}/videos/{videoId}"""
+    try:
+        TRAINING_T.delete_item(
+            Key={"tenantId": tenant_id, "videoId": video_id},
+            ConditionExpression="attribute_exists(videoId)",
+        )
+        # Remove from module's videoIds list by fetching and rewriting
+        resp = MODULES_T.get_item(Key={"tenantId": tenant_id, "moduleNum": module_num})
+        mod = resp.get("Item")
+        if mod:
+            updated_ids = [v for v in (mod.get("videoIds") or []) if v != video_id]
+            MODULES_T.update_item(
+                Key={"tenantId": tenant_id, "moduleNum": module_num},
+                UpdateExpression="SET videoIds = :ids, videoCount = :cnt, updatedAt = :now",
+                ExpressionAttributeValues={
+                    ":ids": updated_ids,
+                    ":cnt": len(updated_ids),
+                    ":now": _now_iso(),
+                },
+            )
+        logger.info("Video %s deleted from module %s", video_id, module_num)
+        return ok({"deleted": True, "videoId": video_id})
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return err(404, "Video not found")
+        logger.error("Failed to delete video %s: %s", video_id, exc)
+        return err(500, "Failed to delete video")
+
+
+def _update_module_pdf(event: dict, tenant_id: str, module_num: str) -> dict:
+    """POST /api/lms/admin/modules/{moduleNum}/pdf
+
+    Body: {pdfKey, pdfName}
+    """
+    body = get_body(event)
+    pdf_key: str = str(body.get("pdfKey", "")).strip()
+    pdf_name: str = str(body.get("pdfName", "")).strip()
+
+    if not pdf_key:
+        return err(400, "pdfKey is required")
+
+    now = _now_iso()
+    try:
+        MODULES_T.update_item(
+            Key={"tenantId": tenant_id, "moduleNum": module_num},
+            UpdateExpression="SET pdfKey = :pdfKey, pdfName = :pdfName, updatedAt = :now",
+            ExpressionAttributeValues={
+                ":pdfKey": pdf_key,
+                ":pdfName": pdf_name or pdf_key,
+                ":now": now,
+            },
+        )
+        return ok({"moduleNum": module_num, "pdfKey": pdf_key, "pdfName": pdf_name or pdf_key, "updatedAt": now})
+    except ClientError as exc:
+        logger.error("Failed to update module PDF: %s", exc)
+        return err(500, "Failed to update module PDF")
+
+
 # ── Dispatcher ────────────────────────────────────────────────────────────────
 
 def handle(
@@ -584,5 +800,31 @@ def handle(
     user_unlock_match = re.search(r"/admin/users/([^/]+)/unlock$", path)
     if method == "POST" and user_unlock_match:
         return _manual_unlock(event, user_unlock_match.group(1), tenant_id)
+
+    # ── Video/PDF upload pipeline ──────────────────────────────────────────────
+    # POST /api/lms/admin/modules/{moduleNum}/upload-url
+    upload_url_match = re.search(r"/admin/modules/(\w+)/upload-url$", path)
+    if method == "POST" and upload_url_match:
+        return _get_upload_url(event, upload_url_match.group(1))
+
+    # GET /api/lms/admin/modules/{moduleNum}/videos
+    # POST /api/lms/admin/modules/{moduleNum}/videos
+    module_videos_match = re.search(r"/admin/modules/(\w+)/videos$", path)
+    if module_videos_match:
+        mod_num = module_videos_match.group(1)
+        if method == "GET":
+            return _list_module_videos(tenant_id, mod_num)
+        if method == "POST":
+            return _add_module_video(event, tenant_id, mod_num)
+
+    # DELETE /api/lms/admin/modules/{moduleNum}/videos/{videoId}
+    module_video_del_match = re.search(r"/admin/modules/(\w+)/videos/([^/]+)$", path)
+    if method == "DELETE" and module_video_del_match:
+        return _delete_module_video(tenant_id, module_video_del_match.group(1), module_video_del_match.group(2))
+
+    # POST /api/lms/admin/modules/{moduleNum}/pdf
+    module_pdf_match = re.search(r"/admin/modules/(\w+)/pdf$", path)
+    if method == "POST" and module_pdf_match:
+        return _update_module_pdf(event, tenant_id, module_pdf_match.group(1))
 
     return err(404, "Admin route not found")

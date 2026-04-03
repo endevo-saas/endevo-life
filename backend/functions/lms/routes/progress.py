@@ -22,6 +22,7 @@ Routes handled:
 """
 import json
 import logging
+import os
 import re
 import uuid
 from decimal import Decimal
@@ -111,7 +112,9 @@ def _get_inline_questions_for_module(
     return all_qs
 
 
-def _mark_module_complete(user_id: str, module_num: str, tenant_id: str) -> None:
+def _mark_module_complete(
+    user_id: str, module_num: str, tenant_id: str, email: Optional[str] = None
+) -> None:
     """
     Mark module as complete and issue a certificate if this is Module 6.
 
@@ -134,13 +137,19 @@ def _mark_module_complete(user_id: str, module_num: str, tenant_id: str) -> None
 
     # Issue certificate on completion of the final module (Module 6: Communicate)
     if int(module_num) == TOTAL_MODULES:
-        _issue_certificate(user_id, tenant_id, now)
+        cert_id = _issue_certificate(user_id, tenant_id, now)
+        if email and cert_id:
+            try:
+                _issue_certificate_email(user_id, tenant_id, email, cert_id, now)
+            except Exception as exc:  # noqa: BLE001
+                logger.error("Certificate email failed (non-fatal): %s", exc)
 
 
-def _issue_certificate(user_id: str, tenant_id: str, issued_at: str) -> None:
+def _issue_certificate(user_id: str, tenant_id: str, issued_at: str) -> Optional[str]:
     """Create a certificate record in endevo-uat-certificates.
 
     Schema: PK=userId SK=issuedAt, fields: tenantId, moduleNum, certificateId, type.
+    Returns the certificateId on success, None on failure.
     """
     certificate_id = str(uuid.uuid4())
     try:
@@ -151,19 +160,84 @@ def _issue_certificate(user_id: str, tenant_id: str, issued_at: str) -> None:
                 "certificateId": certificate_id,
                 "tenantId": tenant_id,
                 "moduleNum": str(TOTAL_MODULES),
-                "type": "completion",
+                "type": "lms_completion",
             }
         )
         logger.info(
             "Certificate issued for user %s certificateId=%s", user_id, certificate_id
         )
+        return certificate_id
     except ClientError as exc:
         logger.error("Failed to issue certificate for user %s: %s", user_id, exc)
-        raise
+        return None
+
+
+def _issue_certificate_email(
+    user_id: str, tenant_id: str, email: str, cert_id: str, issued_at: str
+) -> None:
+    """Send certificate completion email via SES."""
+    import boto3 as _boto3
+    ses = _boto3.client("ses", region_name=os.environ.get("REGION", "us-east-1"))
+
+    verify_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/certificates/verify/{cert_id}"
+    download_url = "https://main.d1vgn9nzfx4cxk.amplifyapp.com/employee/certificates"
+
+    html_body = f"""
+    <html>
+    <body style="font-family: Georgia, serif; background: #0D1825; color: #ffffff; padding: 40px; max-width: 600px; margin: 0 auto;">
+      <div style="text-align: center; margin-bottom: 32px;">
+        <h1 style="color: #2BBFC5; font-size: 28px; margin: 0;">Endevo Life</h1>
+        <p style="color: #94a3b8; margin: 4px 0 0;">Digital Legacy Platform</p>
+      </div>
+
+      <div style="background: #1e293b; border: 1px solid #2BBFC5; border-radius: 16px; padding: 32px; text-align: center;">
+        <div style="font-size: 48px; margin-bottom: 16px;">&#127942;</div>
+        <h2 style="color: #ffffff; font-size: 24px; margin: 0 0 8px;">Certificate of Completion</h2>
+        <p style="color: #94a3b8; margin: 0 0 24px;">You have completed the Endevo Life 6-Module Digital Legacy Program</p>
+
+        <div style="background: #0f172a; border-radius: 12px; padding: 20px; margin: 24px 0;">
+          <p style="color: #64748b; font-size: 12px; margin: 0 0 4px;">Certificate ID</p>
+          <p style="color: #2BBFC5; font-family: monospace; font-size: 14px; margin: 0;">{cert_id}</p>
+        </div>
+
+        <p style="color: #94a3b8; font-size: 14px; margin: 0 0 24px;">
+          Issued: {issued_at[:10]}<br>
+          Your digital legacy is now protected.
+        </p>
+
+        <a href="{download_url}" style="display: inline-block; background: #E8612A; color: white; padding: 14px 28px; border-radius: 10px; text-decoration: none; font-weight: bold; margin-right: 12px;">View Certificate</a>
+        <a href="{verify_url}" style="display: inline-block; background: transparent; color: #2BBFC5; padding: 14px 28px; border-radius: 10px; text-decoration: none; font-weight: bold; border: 1px solid #2BBFC5;">Verify Certificate</a>
+      </div>
+
+      <p style="color: #475569; font-size: 12px; text-align: center; margin-top: 24px;">
+        Endevo Life — Protecting families through digital legacy planning.
+      </p>
+    </body>
+    </html>
+    """
+
+    ses.send_email(
+        Source="noreply@endevo.life",
+        Destination={"ToAddresses": [email]},
+        Message={
+            "Subject": {"Data": "Your Endevo Life Certificate of Completion", "Charset": "UTF-8"},
+            "Body": {
+                "Html": {"Data": html_body, "Charset": "UTF-8"},
+                "Text": {
+                    "Data": (
+                        f"Congratulations! You completed the Endevo Life program. "
+                        f"Certificate ID: {cert_id}. Verify at: {verify_url}"
+                    ),
+                    "Charset": "UTF-8",
+                },
+            },
+        },
+    )
+    logger.info("Certificate email sent to %s cert_id=%s", email, cert_id)
 
 
 def _check_module_auto_complete(
-    user_id: str, module_num: str, tenant_id: str
+    user_id: str, module_num: str, tenant_id: str, email: Optional[str] = None
 ) -> bool:
     """
     Returns True and triggers module completion if all auto-complete conditions
@@ -216,7 +290,7 @@ def _check_module_auto_complete(
                 return False
 
         # All conditions met — mark complete
-        _mark_module_complete(user_id, module_num, tenant_id)
+        _mark_module_complete(user_id, module_num, tenant_id, email=email)
         return True
     except ClientError as exc:
         logger.error(
@@ -413,7 +487,7 @@ def _get_video_progress(user_id: str, video_id: str) -> dict:
         return err(500, "Failed to retrieve video progress")
 
 
-def _complete_module(event: dict, tenant_id: str, user_id: str) -> dict:
+def _complete_module(event: dict, tenant_id: str, user_id: str, email: Optional[str] = None) -> dict:
     """POST /api/lms/progress/module/complete"""
     body = get_body(event)
     module_num: str = str(body.get("moduleNum", "")).strip()
@@ -432,7 +506,7 @@ def _complete_module(event: dict, tenant_id: str, user_id: str) -> dict:
                 {"message": f"Module {module_num} is already complete", "moduleNum": module_num}
             )
 
-        _mark_module_complete(user_id, module_num, tenant_id)
+        _mark_module_complete(user_id, module_num, tenant_id, email=email)
 
         return ok(
             {
@@ -471,7 +545,7 @@ def handle(
 
     # POST /api/lms/progress/module/complete  — check before module/{moduleNum} to avoid clash
     if method == "POST" and re.search(r"/progress/module/complete$", path):
-        return _complete_module(event, tenant_id, user_id)
+        return _complete_module(event, tenant_id, user_id, email=email)
 
     # GET /api/lms/progress/module/{moduleNum}
     module_match = re.search(r"/progress/module/(\w+)$", path)
