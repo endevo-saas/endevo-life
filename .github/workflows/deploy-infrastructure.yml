@@ -40,6 +40,12 @@ jobs:
         working-directory: infrastructure
         run: npx cdk bootstrap aws://${{ secrets.AWS_ACCOUNT_ID }}/${{ secrets.AWS_REGION }}
 
+      - name: Acknowledge CDK version notices (prevent exit code 1 from informational warnings)
+        working-directory: infrastructure
+        run: |
+          npx cdk acknowledge 34892 2>/dev/null || true
+          npx cdk acknowledge 32775 2>/dev/null || true
+
       - name: CDK Deploy IAM first (removes old cross-stack imports before other stacks update)
         working-directory: infrastructure
         run: npx cdk deploy EndevoUatIam --require-approval never
