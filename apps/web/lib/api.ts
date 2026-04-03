@@ -166,6 +166,15 @@ export const api = {
   lmsAdminGetUserProgress: (userId: string) => apiFetch(`/api/lms/admin/users/${userId}/progress`),
   lmsAdminUnlockModule: (userId: string, moduleNum: string) =>
     apiFetch(`/api/lms/admin/users/${userId}/unlock`, { method: 'POST', body: JSON.stringify({ moduleNum }) }),
+  lmsAdminGetModuleVideos: (moduleNum: string) => apiFetch(`/api/lms/admin/modules/${moduleNum}/videos`),
+  lmsAdminAddVideo: (moduleNum: string, body: Record<string, unknown>) =>
+    apiFetch(`/api/lms/admin/modules/${moduleNum}/videos`, { method: 'POST', body: JSON.stringify(body) }),
+  lmsAdminDeleteVideo: (moduleNum: string, videoId: string) =>
+    apiFetch(`/api/lms/admin/modules/${moduleNum}/videos/${videoId}`, { method: 'DELETE' }),
+  lmsAdminGetUploadUrl: (moduleNum: string, body: { fileName: string; fileType: string; contentType: string }) =>
+    apiFetch(`/api/lms/admin/modules/${moduleNum}/upload-url`, { method: 'POST', body: JSON.stringify(body) }),
+  lmsAdminUpdateModulePdf: (moduleNum: string, body: { pdfKey: string; pdfName: string }) =>
+    apiFetch(`/api/lms/admin/modules/${moduleNum}/pdf`, { method: 'POST', body: JSON.stringify(body) }),
 }
 
 // Types

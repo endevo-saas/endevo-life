@@ -5,7 +5,7 @@ import React, { useEffect, useState, useCallback } from 'react'
 import {
   BookOpen, Plus, Edit2, Save, X, ChevronDown, ChevronUp,
   Loader2, RefreshCw, AlertTriangle, Check, FileText,
-  ToggleLeft, ToggleRight
+  ToggleLeft, ToggleRight, ArrowRight
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
@@ -230,6 +230,14 @@ function ModuleCard({
         {/* Actions (only when not editing) */}
         {!editing && (
           <div className="flex items-center gap-2 flex-shrink-0">
+            <Link
+              href={`/admin/lms/modules/${mod.moduleNum}`}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl border border-white/8 bg-white/3 hover:bg-indigo-600/20 hover:border-indigo-500/30 text-slate-400 hover:text-indigo-300 transition-all text-xs font-semibold"
+              title="Manage videos, PDFs, quizzes"
+            >
+              Manage Content
+              <ArrowRight className="w-3.5 h-3.5" />
+            </Link>
             <button
               onClick={() => onToggleActive(mod.moduleNum, !mod.isActive)}
               title={mod.isActive ? 'Deactivate' : 'Activate'}
