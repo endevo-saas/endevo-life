@@ -175,6 +175,26 @@ export const api = {
     apiFetch(`/api/lms/admin/modules/${moduleNum}/upload-url`, { method: 'POST', body: JSON.stringify(body) }),
   lmsAdminUpdateModulePdf: (moduleNum: string, body: { pdfKey: string; pdfName: string }) =>
     apiFetch(`/api/lms/admin/modules/${moduleNum}/pdf`, { method: 'POST', body: JSON.stringify(body) }),
+
+  // LMS — Lessons (v2 lesson engine)
+  lmsGetLessons: (moduleNum: string) =>
+    apiFetch(`/api/lms/lessons/module/${moduleNum}`),
+  lmsGetLesson: (lessonId: string) =>
+    apiFetch(`/api/lms/lessons/${lessonId}`),
+  lmsStartLesson: (lessonId: string) =>
+    apiFetch(`/api/lms/lessons/${lessonId}/start`, { method: 'POST' }),
+  lmsUpdateLessonProgress: (lessonId: string, body: { lastPosition: number; percentWatched: number }) =>
+    apiFetch(`/api/lms/lessons/${lessonId}/progress`, { method: 'POST', body: JSON.stringify(body) }),
+  lmsCompleteLesson: (lessonId: string) =>
+    apiFetch(`/api/lms/lessons/${lessonId}/complete`, { method: 'POST' }),
+
+  // LMS — Lesson Quizzes
+  lmsGetQuiz: (lessonId: string) =>
+    apiFetch(`/api/lms/lessons/${lessonId}/quiz`),
+  lmsSubmitQuiz: (lessonId: string, answers: { questionId: string; selectedLabel: string }[]) =>
+    apiFetch(`/api/lms/lessons/${lessonId}/quiz/submit`, { method: 'POST', body: JSON.stringify({ answers }) }),
+  lmsGetQuizResults: (lessonId: string) =>
+    apiFetch(`/api/lms/lessons/${lessonId}/quiz/results`),
 }
 
 // Types

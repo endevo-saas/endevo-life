@@ -12,7 +12,7 @@ import logging
 
 from utils.response import ok, err, cors
 from utils.auth import get_caller
-from routes import assessment, course, progress, quiz, admin
+from routes import assessment, course, progress, quiz, admin, lessons, lesson_quiz
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -49,6 +49,12 @@ def handler(event: dict, context) -> dict:  # noqa: ANN001
         return course.handle(event, method, path, tenant_id, email, user_id, role)
     if "/lms/progress" in path:
         return progress.handle(event, method, path, tenant_id, email, user_id, role)
+    # Lesson quiz routes must be checked before generic /lessons/ to avoid
+    # the quiz sub-path being swallowed by the lessons dispatcher.
+    if "/lms/lessons/" in path and "/quiz" in path:
+        return lesson_quiz.handle(event, method, path, tenant_id, email, user_id, role)
+    if "/lms/lessons" in path:
+        return lessons.handle(event, method, path, tenant_id, email, user_id, role)
     if "/lms/quiz" in path:
         return quiz.handle(event, method, path, tenant_id, email, user_id, role)
     if "/lms/admin" in path:
