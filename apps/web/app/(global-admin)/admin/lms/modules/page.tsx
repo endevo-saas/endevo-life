@@ -200,22 +200,22 @@ function ModuleCard({
                   className="flex items-center gap-1.5 hover:text-teal-400 transition-colors"
                 >
                   <FileText className="w-3.5 h-3.5" />
-                  {mod.videoIds.length} video{mod.videoIds.length !== 1 ? 's' : ''} assigned
+                  {(mod.videoIds || []).length} video{(mod.videoIds || []).length !== 1 ? 's' : ''} assigned
                 </Link>
-                {mod.objectives.length > 0 && (
+                {(mod.objectives || []).length > 0 && (
                   <button
                     onClick={() => setExpanded(!expanded)}
                     className="flex items-center gap-1 hover:text-slate-300 transition-colors"
                   >
                     {expanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                    {mod.objectives.length} objective{mod.objectives.length !== 1 ? 's' : ''}
+                    {(mod.objectives || []).length} objective{(mod.objectives || []).length !== 1 ? 's' : ''}
                   </button>
                 )}
               </div>
 
-              {expanded && mod.objectives.length > 0 && (
+              {expanded && (mod.objectives || []).length > 0 && (
                 <ul className="mt-3 space-y-1.5">
-                  {mod.objectives.map((obj, i) => (
+                  {(mod.objectives || []).map((obj, i) => (
                     <li key={i} className="flex items-start gap-2 text-xs text-slate-400">
                       <Check className="w-3 h-3 text-teal-400 mt-0.5 flex-shrink-0" />
                       {obj}
