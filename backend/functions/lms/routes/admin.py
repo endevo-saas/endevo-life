@@ -757,6 +757,11 @@ def handle(
     if admin_err:
         return admin_err
 
+    # GLOBAL_ADMIN users have tenantId="endevo-global" in Cognito but
+    # shared/template data lives under tenantId="SYSTEM" in DynamoDB.
+    if role == "GLOBAL_ADMIN":
+        tenant_id = "SYSTEM"
+
     # ── Question routes ────────────────────────────────────────────────────────
     # GET/POST /api/lms/admin/questions
     if re.search(r"/admin/questions$", path):
