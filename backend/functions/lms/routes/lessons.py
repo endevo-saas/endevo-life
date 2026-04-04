@@ -303,33 +303,55 @@ def _update_lesson_progress(
     percent_watched = body.get("percentWatched", 0)
     now = _now_iso()
 
+    # Lookup lesson to get moduleNum for the progress record GSI
+    lesson_meta = None
+    try:
+        resp = LESSONS_T.query(
+            IndexName="lessonId-index",
+            KeyConditionExpression=Key("lessonId").eq(lesson_id),
+        )
+        items = resp.get("Items", [])
+        if items:
+            lesson_meta = items[0]
+    except ClientError:
+        pass
+    module_num = lesson_meta.get("moduleNum", "") if lesson_meta else ""
+
     try:
         # Auto-complete if watched >= threshold
-        status = "in_progress"
-        completed_at_expr = ""
-        expr_values: dict = {
-            ":lp": Decimal(str(last_position)),
-            ":pw": Decimal(str(percent_watched)),
-            ":now": now,
-            ":ip": "in_progress",
-            ":tid": tenant_id,
-        }
-
         if int(percent_watched) >= VIDEO_COMPLETE_THRESHOLD:
             status = "completed"
-            expr_values[":comp"] = "completed"
             update_expr = (
                 "SET lastPosition = :lp, percentWatched = :pw, "
                 "#s = :comp, updatedAt = :now, "
                 "completedAt = if_not_exists(completedAt, :now), "
-                "tenantId = :tid"
+                "tenantId = :tid, moduleNum = :mn, lessonType = :lt"
             )
+            expr_values: dict = {
+                ":lp": Decimal(str(last_position)),
+                ":pw": Decimal(str(percent_watched)),
+                ":now": now,
+                ":comp": "completed",
+                ":tid": tenant_id,
+                ":mn": module_num,
+                ":lt": lesson_meta.get("lessonType", "video") if lesson_meta else "video",
+            }
         else:
+            status = "in_progress"
             update_expr = (
                 "SET lastPosition = :lp, percentWatched = :pw, "
                 "#s = if_not_exists(#s, :ip), updatedAt = :now, "
-                "tenantId = :tid"
+                "tenantId = :tid, moduleNum = :mn, lessonType = :lt"
             )
+            expr_values = {
+                ":lp": Decimal(str(last_position)),
+                ":pw": Decimal(str(percent_watched)),
+                ":now": now,
+                ":ip": "in_progress",
+                ":tid": tenant_id,
+                ":mn": module_num,
+                ":lt": lesson_meta.get("lessonType", "video") if lesson_meta else "video",
+            }
 
         LESSON_PROG_T.update_item(
             Key={"userId": user_id, "lessonId": lesson_id},
