@@ -1,17 +1,20 @@
 """
-Lesson quiz routes — in-app quiz engine for lesson-type quizzes.
+Lesson quiz routes — supports two quiz modes:
+
+1. **likert_scale** (self-assessment): 1-5 rating per question, no right/wrong,
+   completion = all questions answered. Score = average rating.
+2. **multiple_choice** (knowledge test): pick correct answer, pass/fail threshold.
 
 Business rules:
   - Quiz questions stored in endevo-uat-questions with type="lesson_quiz".
   - Questions grouped by quizId field.
-  - Scoring: (correct / total) * 100, pass if >= passThreshold.
-  - maxAttempts=0 means unlimited retries.
-  - Best score is always preserved; retaking cannot lower it.
-  - Quiz completion triggers lesson completion which triggers module auto-complete.
+  - quizMode on the lesson record: "likert_scale" | "multiple_choice" (default).
+  - Likert quizzes always pass on completion (no threshold).
+  - Multiple choice: scoring = (correct / total) * 100, pass if >= passThreshold.
 
 Routes handled:
-  GET  /api/lms/lessons/{lessonId}/quiz          — get quiz questions (answers stripped)
-  POST /api/lms/lessons/{lessonId}/quiz/submit   — submit quiz attempt, returns score
+  GET  /api/lms/lessons/{lessonId}/quiz          — get quiz questions
+  POST /api/lms/lessons/{lessonId}/quiz/submit   — submit quiz attempt
   GET  /api/lms/lessons/{lessonId}/quiz/results  — get past attempt results
 """
 import json
@@ -53,7 +56,6 @@ def _paginate_query(table, **kwargs) -> list:
 
 
 def _get_lesson_by_id(lesson_id: str) -> Optional[dict]:
-    """Fetch a lesson by lessonId via GSI."""
     try:
         resp = LESSONS_T.query(
             IndexName="lessonId-index",
@@ -80,7 +82,7 @@ def _decimal_to_num(obj):
 def _get_quiz_questions(
     tenant_id: str, user_id: str, lesson_id: str
 ) -> dict:
-    """Return quiz questions for a lesson. Strip isCorrect from answers."""
+    """Return quiz questions for a lesson."""
     lesson = _get_lesson_by_id(lesson_id)
     if not lesson:
         return err(404, "Lesson not found")
@@ -92,11 +94,11 @@ def _get_quiz_questions(
     if not quiz_id:
         return err(404, "Quiz not configured for this lesson")
 
+    quiz_mode = lesson.get("quizMode", "multiple_choice")
     pass_threshold = lesson.get("passThreshold", 70)
     max_attempts = lesson.get("maxAttempts", 0)
 
     try:
-        # Query questions by tenantId, filter by quizId
         questions = _paginate_query(
             QUESTIONS_T,
             KeyConditionExpression=Key("tenantId").eq(tenant_id),
@@ -104,26 +106,35 @@ def _get_quiz_questions(
         )
         questions.sort(key=lambda q: int(q.get("order", q.get("number", 0))))
 
-        # Strip isCorrect from answers for the student view
         sanitized = []
         for q in questions:
-            answers = q.get("answers", [])
-            safe_answers = []
-            for a in answers:
-                safe_answers.append({
-                    "label": a.get("label", ""),
-                    "text": a.get("text", ""),
-                })
-            sanitized.append({
+            q_type = q.get("questionType", "multiple_choice")
+            item = {
                 "questionId": q.get("questionId", ""),
+                "title": q.get("title", ""),
                 "text": q.get("text", ""),
-                "questionType": q.get("questionType", "multiple_choice"),
+                "questionType": q_type,
                 "order": q.get("order", q.get("number", 0)),
-                "answers": safe_answers,
-                "points": q.get("points", 1),
-            })
+            }
 
-        # Get current progress (attempt count, passed status)
+            if q_type == "likert_scale":
+                item["scaleMin"] = q.get("scaleMin", 1)
+                item["scaleMax"] = q.get("scaleMax", 5)
+                item["scaleMinLabel"] = q.get("scaleMinLabel", "Not at all accurate")
+                item["scaleMidLabel"] = q.get("scaleMidLabel", "Somewhat accurate")
+                item["scaleMaxLabel"] = q.get("scaleMaxLabel", "Very accurate")
+            else:
+                # Multiple choice — strip isCorrect
+                answers = q.get("answers", [])
+                item["answers"] = [
+                    {"label": a.get("label", ""), "text": a.get("text", "")}
+                    for a in answers
+                ]
+                item["points"] = q.get("points", 1)
+
+            sanitized.append(item)
+
+        # Get current progress
         try:
             prog = LESSON_PROG_T.get_item(
                 Key={"userId": user_id, "lessonId": lesson_id}
@@ -132,18 +143,17 @@ def _get_quiz_questions(
             prog = {}
 
         attempts_used = int(prog.get("quizAttempts", 0))
-        already_passed = prog.get("passed", False)
-        can_retry = max_attempts == 0 or attempts_used < max_attempts
+        already_completed = prog.get("status") == "completed"
 
         return ok(_decimal_to_num({
             "quizId": quiz_id,
             "lessonId": lesson_id,
             "title": lesson.get("title", ""),
+            "quizMode": quiz_mode,
             "passThreshold": pass_threshold,
             "maxAttempts": max_attempts,
             "attemptsUsed": attempts_used,
-            "alreadyPassed": already_passed,
-            "canRetry": can_retry and not already_passed,
+            "alreadyCompleted": already_completed,
             "questions": sanitized,
             "totalQuestions": len(sanitized),
         }))
@@ -157,10 +167,9 @@ def _get_quiz_questions(
 def _submit_quiz(
     event: dict, tenant_id: str, user_id: str, lesson_id: str
 ) -> dict:
-    """Score a quiz attempt and update progress."""
+    """Score a quiz attempt. Handles both likert_scale and multiple_choice."""
     body = get_body(event)
     answers = body.get("answers", [])
-    # answers = [{questionId: "...", selectedLabel: "A"}, ...]
 
     if not answers:
         return err(400, "answers array is required")
@@ -173,6 +182,7 @@ def _submit_quiz(
         return err(400, "This lesson is not a quiz")
 
     quiz_id = lesson.get("quizId", "")
+    quiz_mode = lesson.get("quizMode", "multiple_choice")
     pass_threshold = int(lesson.get("passThreshold", 70))
     max_attempts = int(lesson.get("maxAttempts", 0))
 
@@ -185,15 +195,18 @@ def _submit_quiz(
         prog = {}
 
     attempts_used = int(prog.get("quizAttempts", 0))
-    already_passed = prog.get("passed", False)
+    already_completed = prog.get("status") == "completed"
 
-    if already_passed:
-        return err(400, "You have already passed this quiz")
+    if already_completed and quiz_mode == "likert_scale":
+        return err(400, "You have already completed this assessment")
 
-    if max_attempts > 0 and attempts_used >= max_attempts:
-        return err(400, f"Maximum attempts ({max_attempts}) reached")
+    if quiz_mode == "multiple_choice":
+        if prog.get("passed", False):
+            return err(400, "You have already passed this quiz")
+        if max_attempts > 0 and attempts_used >= max_attempts:
+            return err(400, f"Maximum attempts ({max_attempts}) reached")
 
-    # Fetch correct answers
+    # Fetch questions
     try:
         questions = _paginate_query(
             QUESTIONS_T,
@@ -204,19 +217,81 @@ def _submit_quiz(
         logger.error("Failed to fetch quiz questions: %s", exc)
         return err(500, "Failed to score quiz")
 
-    # Build answer key
+    now = _now_iso()
+    new_attempt_count = attempts_used + 1
+
+    # ── LIKERT SCALE SCORING ──
+    if quiz_mode == "likert_scale":
+        # answers = [{questionId: "...", rating: 3}, ...]
+        answer_map = {a.get("questionId", ""): int(a.get("rating", 0)) for a in answers}
+        total_questions = len(questions)
+        total_rating = sum(answer_map.values())
+        avg_rating = round(total_rating / max(total_questions, 1), 1)
+        max_possible = total_questions * 5
+
+        # Build per-question results
+        results = []
+        for q in sorted(questions, key=lambda x: int(x.get("order", 0))):
+            qid = q.get("questionId", "")
+            results.append({
+                "questionId": qid,
+                "title": q.get("title", ""),
+                "text": q.get("text", ""),
+                "rating": answer_map.get(qid, 0),
+            })
+
+        # Likert always completes (self-assessment, no pass/fail)
+        try:
+            LESSON_PROG_T.update_item(
+                Key={"userId": user_id, "lessonId": lesson_id},
+                UpdateExpression=(
+                    "SET quizAttempts = :ac, lastScore = :ls, bestScore = :bs, "
+                    "passed = :p, #s = :st, updatedAt = :now, "
+                    "completedAt = if_not_exists(completedAt, :now), "
+                    "tenantId = :tid, moduleNum = :mn, lessonType = :lt, "
+                    "quizMode = :qm, likertResponses = :lr"
+                ),
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":ac": new_attempt_count,
+                    ":ls": Decimal(str(avg_rating)),
+                    ":bs": Decimal(str(avg_rating)),
+                    ":p": True,
+                    ":st": "completed",
+                    ":now": now,
+                    ":tid": tenant_id,
+                    ":mn": lesson.get("moduleNum", ""),
+                    ":lt": "quiz",
+                    ":qm": "likert_scale",
+                    ":lr": answer_map,
+                },
+            )
+            from routes.lessons import _check_module_auto_complete
+            _check_module_auto_complete(user_id, tenant_id, lesson_id)
+        except ClientError as exc:
+            logger.error("Failed to update likert progress: %s", exc)
+
+        return ok({
+            "quizMode": "likert_scale",
+            "totalQuestions": total_questions,
+            "totalRating": total_rating,
+            "maxPossible": max_possible,
+            "averageRating": avg_rating,
+            "completed": True,
+            "results": results,
+        })
+
+    # ── MULTIPLE CHOICE SCORING ──
     answer_key: dict = {}
     explanations: dict = {}
     for q in questions:
         qid = q.get("questionId", "")
-        # Find correct answer(s)
         for a in q.get("answers", []):
             if a.get("isCorrect", False):
                 answer_key[qid] = a.get("label", "")
                 break
         explanations[qid] = q.get("explanation", "")
 
-    # Score
     total_points = len(answer_key)
     correct = 0
     results = []
@@ -236,16 +311,13 @@ def _submit_quiz(
 
     score = round((correct / max(total_points, 1)) * 100)
     passed = score >= pass_threshold
-    now = _now_iso()
-    new_attempt_count = attempts_used + 1
     best_score = max(score, int(prog.get("bestScore", 0)))
 
-    # Update progress
     try:
         update_expr = (
             "SET quizAttempts = :ac, lastScore = :ls, bestScore = :bs, "
             "passed = :p, #s = :st, updatedAt = :now, "
-            "tenantId = :tid, moduleNum = :mn, lessonType = :lt"
+            "tenantId = :tid, moduleNum = :mn, lessonType = :lt, quizMode = :qm"
         )
         expr_values: dict = {
             ":ac": new_attempt_count,
@@ -257,8 +329,8 @@ def _submit_quiz(
             ":tid": tenant_id,
             ":mn": lesson.get("moduleNum", ""),
             ":lt": "quiz",
+            ":qm": "multiple_choice",
         }
-
         if passed:
             update_expr += ", completedAt = if_not_exists(completedAt, :now)"
 
@@ -268,16 +340,14 @@ def _submit_quiz(
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues=expr_values,
         )
-
-        # Trigger module auto-complete check if passed
         if passed:
             from routes.lessons import _check_module_auto_complete
             _check_module_auto_complete(user_id, tenant_id, lesson_id)
-
     except ClientError as exc:
         logger.error("Failed to update quiz progress: %s", exc)
 
     return ok({
+        "quizMode": "multiple_choice",
         "score": score,
         "passed": passed,
         "passThreshold": pass_threshold,
@@ -292,22 +362,24 @@ def _submit_quiz(
 # ── GET /api/lms/lessons/{lessonId}/quiz/results ─────────────────────────────
 
 def _get_quiz_results(user_id: str, lesson_id: str) -> dict:
-    """Return current quiz progress for review."""
     try:
         prog = LESSON_PROG_T.get_item(
             Key={"userId": user_id, "lessonId": lesson_id}
         ).get("Item", {})
 
         if not prog:
-            return ok({"attempts": 0, "bestScore": 0, "passed": False})
+            return ok({"attempts": 0, "completed": False})
 
         return ok(_decimal_to_num({
             "lessonId": lesson_id,
+            "quizMode": prog.get("quizMode", "multiple_choice"),
             "attempts": prog.get("quizAttempts", 0),
             "lastScore": prog.get("lastScore", 0),
             "bestScore": prog.get("bestScore", 0),
             "passed": prog.get("passed", False),
+            "completed": prog.get("status") == "completed",
             "completedAt": prog.get("completedAt", ""),
+            "likertResponses": prog.get("likertResponses", {}),
         }))
     except ClientError as exc:
         logger.error("Failed to get quiz results: %s", exc)
@@ -332,17 +404,14 @@ def handle(
     if role == "GLOBAL_ADMIN":
         tenant_id = "SYSTEM"
 
-    # POST /api/lms/lessons/{lessonId}/quiz/submit
     submit_match = re.search(r"/lessons/([^/]+)/quiz/submit$", path)
     if method == "POST" and submit_match:
         return _submit_quiz(event, tenant_id, user_id, submit_match.group(1))
 
-    # GET /api/lms/lessons/{lessonId}/quiz/results
     results_match = re.search(r"/lessons/([^/]+)/quiz/results$", path)
     if method == "GET" and results_match:
         return _get_quiz_results(user_id, results_match.group(1))
 
-    # GET /api/lms/lessons/{lessonId}/quiz
     quiz_match = re.search(r"/lessons/([^/]+)/quiz$", path)
     if method == "GET" and quiz_match:
         return _get_quiz_questions(tenant_id, user_id, quiz_match.group(1))
