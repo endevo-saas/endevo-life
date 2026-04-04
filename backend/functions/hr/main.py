@@ -24,6 +24,22 @@ ses       = boto3.client("ses", region_name=REGION)
 USERS_T   = dynamo.Table("endevo-uat-users")
 AUDIT_T   = dynamo.Table("endevo-uat-audit")
 
+# ── CORS ─────────────────────────────────────────────────────────────────────
+
+ALLOWED_ORIGINS = [
+    "https://uat.endevo.life",
+    "https://main.d1vvfv8oltolcf.amplifyapp.com",
+    "http://localhost:3000",
+]
+
+_current_event = {}
+
+def _get_cors_origin():
+    origin = (_current_event.get("headers") or {}).get("origin", "")
+    if origin in ALLOWED_ORIGINS:
+        return origin
+    return ALLOWED_ORIGINS[0]
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def resp(status, body):
@@ -31,7 +47,7 @@ def resp(status, body):
         "statusCode": status,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": _get_cors_origin(),
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "GET,POST,PUT,DELETE,OPTIONS"
         },
@@ -154,6 +170,9 @@ def audit(tenant_id, actor, action, details="", ip="", device="", severity="INFO
 # ── Handler ───────────────────────────────────────────────────────────────────
 
 def handler(event, context):
+    global _current_event
+    _current_event = event
+
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     path   = event.get("rawPath", "")
     qs     = event.get("queryStringParameters") or {}

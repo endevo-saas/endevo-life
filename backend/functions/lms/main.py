@@ -10,7 +10,7 @@ Routes dispatched:
 """
 import logging
 
-from utils.response import ok, err, cors
+from utils.response import ok, err, cors, set_event
 from utils.auth import get_caller
 from routes import assessment, course, progress, quiz, admin, lessons, lesson_quiz
 
@@ -20,6 +20,8 @@ logger.setLevel(logging.INFO)
 
 def handler(event: dict, context) -> dict:  # noqa: ANN001
     """Lambda entry point — route incoming HTTP events."""
+    set_event(event)
+
     method: str = (
         event.get("requestContext", {})
         .get("http", {})

@@ -3,7 +3,13 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   output: 'standalone',
   experimental: {
-    serverActions: { allowedOrigins: ['*'] },
+    serverActions: {
+      allowedOrigins: [
+        'uat.endevo.life',
+        'main.d1vvfv8oltolcf.amplifyapp.com',
+        'localhost:3000',
+      ],
+    },
   },
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL || '',

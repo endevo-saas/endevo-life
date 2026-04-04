@@ -17,8 +17,22 @@ QUEST_T  = dynamo.Table("endevo-uat-questions")
 RESP_T   = dynamo.Table("endevo-uat-responses")
 CERT_T   = dynamo.Table("endevo-uat-certificates")
 
+ALLOWED_ORIGINS = [
+    "https://uat.endevo.life",
+    "https://main.d1vvfv8oltolcf.amplifyapp.com",
+    "http://localhost:3000",
+]
+
+_current_event = {}
+
+def _get_cors_origin():
+    origin = (_current_event.get("headers") or {}).get("origin", "")
+    if origin in ALLOWED_ORIGINS:
+        return origin
+    return ALLOWED_ORIGINS[0]
+
 def resp(status, body):
-    return {"statusCode": status, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "Content-Type,Authorization", "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS"}, "body": json.dumps(body, default=str)}
+    return {"statusCode": status, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": _get_cors_origin(), "Access-Control-Allow-Headers": "Content-Type,Authorization", "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS"}, "body": json.dumps(body, default=str)}
 
 def err(status, msg): return resp(status, {"detail": msg})
 def get_body(event):
@@ -35,6 +49,9 @@ def get_caller(event):
     except: return None, None, None
 
 def handler(event, context):
+    global _current_event
+    _current_event = event
+
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     path   = event.get("rawPath", "")
     if method == "OPTIONS": return resp(200, {})

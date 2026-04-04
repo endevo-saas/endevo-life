@@ -31,6 +31,22 @@ MAX_FAILED  = 5    # lock out after 5 consecutive failures
 LOCKOUT_MIN = 15   # lockout window in minutes
 OTP_TTL_MIN = 10   # OTP expires after 10 minutes
 
+# ── CORS ─────────────────────────────────────────────────────────────────────
+
+ALLOWED_ORIGINS = [
+    "https://uat.endevo.life",
+    "https://main.d1vvfv8oltolcf.amplifyapp.com",
+    "http://localhost:3000",
+]
+
+_current_event = {}
+
+def _get_cors_origin():
+    origin = (_current_event.get("headers") or {}).get("origin", "")
+    if origin in ALLOWED_ORIGINS:
+        return origin
+    return ALLOWED_ORIGINS[0]
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def resp(status, body):
@@ -38,7 +54,7 @@ def resp(status, body):
         "statusCode": status,
         "headers": {
             "Content-Type": "application/json",
-            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Origin": _get_cors_origin(),
             "Access-Control-Allow-Headers": "Content-Type,Authorization",
             "Access-Control-Allow-Methods": "GET,POST,OPTIONS"
         },
@@ -184,6 +200,9 @@ def send_otp_email(email, otp_code, first_name=""):
         return False
 
 def handler(event, context):
+    global _current_event
+    _current_event = event
+
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
     path   = event.get("rawPath", "")
     ip     = get_ip(event)

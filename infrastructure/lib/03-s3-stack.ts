@@ -10,6 +10,12 @@ export class S3Stack extends cdk.Stack {
   constructor(scope: Construct, id: string, props: cdk.StackProps) {
     super(scope, id, props)
 
+    const allowedOrigins = [
+      'https://uat.endevo.life',
+      'https://main.d1vvfv8oltolcf.amplifyapp.com',
+      'http://localhost:3000',
+    ]
+
     // --- Assets bucket (PDFs, CSV imports, certificates) ---
     const assets = new s3.Bucket(this, 'Assets', {
       bucketName: 'endevo-uat-assets',
@@ -18,8 +24,8 @@ export class S3Stack extends cdk.Stack {
       versioned: true,
       cors: [{
         allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.PUT, s3.HttpMethods.POST],
-        allowedOrigins: ['*'],
-        allowedHeaders: ['*'],
+        allowedOrigins,
+        allowedHeaders: ['Content-Type', 'Authorization'],
         maxAge: 3000,
       }],
       lifecycleRules: [{
@@ -38,8 +44,8 @@ export class S3Stack extends cdk.Stack {
       versioned: false,
       cors: [{
         allowedMethods: [s3.HttpMethods.GET, s3.HttpMethods.PUT],
-        allowedOrigins: ['*'],
-        allowedHeaders: ['*'],
+        allowedOrigins,
+        allowedHeaders: ['Content-Type', 'Authorization'],
         maxAge: 3000,
       }],
       removalPolicy: cdk.RemovalPolicy.RETAIN,

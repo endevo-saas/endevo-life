@@ -47,18 +47,25 @@ interface QuizData {
   quizId: string
   lessonId: string
   title: string
+  quizMode: string
   passThreshold: number
   maxAttempts: number
   attemptsUsed: number
-  alreadyPassed: boolean
-  canRetry: boolean
+  alreadyCompleted: boolean
   questions: {
     questionId: string
+    title: string
     text: string
     questionType: string
     order: number
-    answers: { label: string; text: string }[]
-    points: number
+    answers?: { label: string; text: string }[]
+    points?: number
+    scaleMin?: number
+    scaleMax?: number
+    scaleMinLabel?: string
+    scaleMidLabel?: string
+    scaleMaxLabel?: string
+    fields?: { fieldId: string; label: string; placeholder: string; required: boolean }[]
   }[]
   totalQuestions: number
 }

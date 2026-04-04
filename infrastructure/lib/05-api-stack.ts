@@ -77,9 +77,13 @@ export class ApiStack extends cdk.Stack {
       apiName: 'endevo-uat-api',
       description: 'Endevo Life backend API',
       corsPreflight: {
-        allowOrigins: ['*'],
+        allowOrigins: [
+          'https://uat.endevo.life',
+          'https://main.d1vvfv8oltolcf.amplifyapp.com',
+          'http://localhost:3000',
+        ],
         allowMethods: [apigw.CorsHttpMethod.ANY],
-        allowHeaders: ['*'],
+        allowHeaders: ['Content-Type', 'Authorization'],
         maxAge: cdk.Duration.days(1),
       },
     })
