@@ -14,11 +14,11 @@ interface AssessmentQuestion {
   scoreWeight?: number
 }
 
-interface LegacyResult {
-  passed: boolean
-  score: number
-  maxScore: number
-  domainBreakdown: { domain: string; score: number; maxScore: number }[]
+interface SubmitResult {
+  submittedAt: string
+  attemptNumber: number
+  modulesUnlocked: boolean
+  message: string
   scorecard?: ScorecardResult
 }
 
@@ -45,7 +45,7 @@ export default function AssessmentPage() {
   const [questions, setQuestions] = useState<AssessmentQuestion[]>([])
   const [currentIndex, setCurrentIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
-  const [result, setResult] = useState<LegacyResult | null>(null)
+  const [result, setResult] = useState<SubmitResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [selectedOption, setSelectedOption] = useState<string | null>(null)
@@ -89,7 +89,7 @@ export default function AssessmentPage() {
         questionId,
         selectedLabel,
       }))
-      const res = await api.lmsSubmitAssessment(payload) as LegacyResult
+      const res = await api.lmsSubmitAssessment(payload) as SubmitResult
       setResult(res)
       setPhase('results')
     } catch (e: unknown) {
@@ -225,7 +225,7 @@ export default function AssessmentPage() {
         <div className="fixed inset-0 pointer-events-none overflow-hidden">
           <div
             className="blur-orb w-96 h-96 -top-20 -left-20 animate-pulse-slow"
-            style={{ background: hasScorecard ? (result.scorecard?.overallTier.color ?? '#2BBFC5') : (result.passed ? '#2BBFC5' : '#E8612A'), opacity: 0.07 }}
+            style={{ background: hasScorecard ? (result.scorecard?.overallTier.color ?? '#2BBFC5') : '#2BBFC5', opacity: 0.07 }}
           />
           <div
             className="blur-orb w-80 h-80 bottom-0 right-0 animate-pulse-slow"
@@ -254,116 +254,29 @@ export default function AssessmentPage() {
             /* Fallback: simple results when no scorecard object returned */
             <div className="space-y-5">
               <div className="text-center">
-                <div className="text-6xl mb-3">{result.passed ? '🎉' : '📚'}</div>
-                <h1 className="text-3xl font-black text-white">
-                  {result.passed ? 'Assessment Passed!' : 'Keep Going'}
-                </h1>
+                <div className="text-6xl mb-3">🎉</div>
+                <h1 className="text-3xl font-black text-white">Assessment Complete!</h1>
                 <p className="text-sm mt-1" style={{ color: 'var(--text-secondary)' }}>
-                  {result.passed
-                    ? 'Your knowledge is solid. Module 1 is now unlocked.'
-                    : `You scored ${result.maxScore > 0 ? Math.round((result.score / result.maxScore) * 100) : 0}%. You need 90% to proceed — every attempt builds your understanding.`}
+                  {result.message || 'All modules are now unlocked. Your personalised plan is ready.'}
                 </p>
               </div>
-
-              {/* Score display */}
-              <div
-                className="rounded-2xl p-6 text-center"
-                style={{
-                  background: result.passed
-                    ? 'linear-gradient(135deg, rgba(43,191,197,0.15), rgba(16,185,129,0.08))'
-                    : 'linear-gradient(135deg, rgba(232,97,42,0.15), rgba(249,115,22,0.08))',
-                  border: `1px solid ${result.passed ? 'rgba(43,191,197,0.4)' : 'rgba(232,97,42,0.4)'}`,
-                }}
-              >
-                <p className="text-6xl font-black" style={{ color: result.passed ? '#2BBFC5' : '#E8612A' }}>
-                  {result.maxScore > 0 ? Math.round((result.score / result.maxScore) * 100) : 0}%
-                </p>
-                <p className="text-sm mt-1 font-semibold" style={{ color: 'var(--text-secondary)' }}>
-                  {result.score} / {result.maxScore} points
-                </p>
-                <div className="mt-3 w-full rounded-full h-2" style={{ background: 'var(--bg-elevated)' }}>
-                  <div
-                    className="h-2 rounded-full transition-all duration-1000"
-                    style={{
-                      width: `${result.maxScore > 0 ? Math.round((result.score / result.maxScore) * 100) : 0}%`,
-                      background: result.passed
-                        ? 'linear-gradient(90deg,#2BBFC5,#10b981)'
-                        : 'linear-gradient(90deg,#E8612A,#f97316)',
-                    }}
-                  />
-                </div>
-                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>Pass threshold: 90%</p>
-              </div>
-
-              {/* Domain breakdown */}
-              {result.domainBreakdown?.length > 0 && (
-                <div
-                  className="rounded-2xl p-5 space-y-3"
-                  style={{ background: 'var(--bg-card)', border: '1px solid var(--border-subtle)' }}
-                >
-                  <p className="text-sm font-black text-white">Your Four Pillars</p>
-                  {result.domainBreakdown.map(d => {
-                    const pct = d.maxScore > 0 ? Math.round((d.score / d.maxScore) * 100) : 0
-                    return (
-                      <div key={d.domain}>
-                        <div className="flex justify-between text-xs mb-1">
-                          <span className="font-semibold" style={{ color: DOMAIN_COLORS[d.domain] || 'var(--text-secondary)' }}>
-                            {DOMAIN_ICONS[d.domain]} {d.domain}
-                          </span>
-                          <span className="font-bold text-white">{pct}%</span>
-                        </div>
-                        <div className="w-full rounded-full h-1.5" style={{ background: 'var(--bg-elevated)' }}>
-                          <div
-                            className="h-1.5 rounded-full transition-all duration-1000"
-                            style={{
-                              width: `${pct}%`,
-                              background: DOMAIN_COLORS[d.domain] || 'var(--accent-1)',
-                            }}
-                          />
-                        </div>
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
 
               {/* Action buttons */}
               <div className="flex gap-3">
-                {result.passed ? (
-                  <>
-                    <button
-                      onClick={() => router.push('/employee/lms')}
-                      className="flex-1 py-3 rounded-xl font-semibold text-sm transition-all"
-                      style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
-                    >
-                      Back to LMS
-                    </button>
-                    <button
-                      onClick={() => router.push('/employee/lms/module/1')}
-                      className="flex-1 py-3 rounded-xl font-bold text-sm text-white transition-all hover:scale-105"
-                      style={{ background: 'linear-gradient(135deg,#2BBFC5,#10b981)' }}
-                    >
-                      Start Module 1 →
-                    </button>
-                  </>
-                ) : (
-                  <>
-                    <button
-                      onClick={() => router.push('/employee/lms')}
-                      className="flex-1 py-3 rounded-xl font-semibold text-sm transition-all"
-                      style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
-                    >
-                      Back to LMS
-                    </button>
-                    <button
-                      onClick={handleRetake}
-                      className="flex-1 py-3 rounded-xl font-bold text-sm text-white transition-all hover:scale-105"
-                      style={{ background: 'linear-gradient(135deg,#E8612A,#f97316)' }}
-                    >
-                      Retake Assessment
-                    </button>
-                  </>
-                )}
+                <button
+                  onClick={() => router.push('/employee/lms')}
+                  className="flex-1 py-3 rounded-xl font-semibold text-sm transition-all"
+                  style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
+                >
+                  Back to LMS
+                </button>
+                <button
+                  onClick={() => router.push('/employee/lms/module/1')}
+                  className="flex-1 py-3 rounded-xl font-bold text-sm text-white transition-all hover:scale-105"
+                  style={{ background: 'linear-gradient(135deg,#2BBFC5,#10b981)' }}
+                >
+                  Start Module 1 →
+                </button>
               </div>
             </div>
           )}

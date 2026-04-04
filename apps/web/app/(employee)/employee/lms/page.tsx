@@ -17,12 +17,14 @@ interface ModuleSummary {
   quizScore?: number
 }
 
-interface AssessmentStatus {
+interface AssessmentStatusResponse {
   attempted: boolean
-  passed: boolean
-  score?: number
-  maxScore?: number
-  scorecard?: ScorecardResult
+  latestResult?: {
+    overallScore: number
+    submittedAt: string
+    attemptNumber: number
+    scorecard: ScorecardResult
+  }
 }
 
 interface AssessmentHistoryEntry {
@@ -174,7 +176,7 @@ function ScoreTrendBadge({ attempts }: { attempts: AssessmentHistoryEntry[] }) {
 export default function LMSDashboard() {
   const router = useRouter()
   const [modules, setModules] = useState<ModuleSummary[]>([])
-  const [assessment, setAssessment] = useState<AssessmentStatus | null>(null)
+  const [assessment, setAssessment] = useState<AssessmentStatusResponse | null>(null)
   const [history, setHistory] = useState<AssessmentHistory | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -187,7 +189,7 @@ export default function LMSDashboard() {
     try {
       const [modulesRes, assessRes, historyRes] = await Promise.all([
         api.lmsGetModules() as Promise<{ modules: ModuleSummary[] }>,
-        api.lmsGetAssessmentStatus() as Promise<AssessmentStatus>,
+        api.lmsGetAssessmentStatus() as Promise<AssessmentStatusResponse>,
         api.lmsGetAssessmentHistory() as Promise<AssessmentHistory>,
       ])
       setModules(modulesRes.modules || [])
@@ -205,10 +207,19 @@ export default function LMSDashboard() {
     load()
   }, [load])
 
-  const assessmentPassed = assessment?.passed ?? false
+  const assessmentCompleted = assessment?.attempted ?? false
+  const latestResult = assessment?.latestResult ?? null
+  const latestScorecard = latestResult?.scorecard ?? history?.latestScorecard ?? null
   const overallComplete = modules.length > 0 && modules.every(m => m.lockStatus === 'complete')
-  const latestScorecard = history?.latestScorecard ?? assessment?.scorecard ?? null
   const hasHistory = (history?.attempts?.length ?? 0) > 0
+
+  // Find weakest domain for recommendation
+  const weakestDomain = latestScorecard
+    ? Object.values(latestScorecard.domainScores).reduce(
+        (weakest, d) => (d.percentage < (weakest?.percentage ?? 101) ? d : weakest),
+        null as (typeof latestScorecard.domainScores)[string] | null
+      )
+    : null
 
   return (
     <div className="min-h-screen p-6" style={{ background: 'var(--bg-base)' }}>
@@ -266,8 +277,8 @@ export default function LMSDashboard() {
           </div>
         )}
 
-        {/* Assessment gate banner */}
-        {!loading && !assessmentPassed && (
+        {/* Assessment banner — not yet taken */}
+        {!loading && !assessmentCompleted && (
           <div
             className="rounded-2xl p-5 flex flex-col sm:flex-row items-start sm:items-center gap-4"
             style={{
@@ -283,14 +294,10 @@ export default function LMSDashboard() {
             </div>
             <div className="flex-1">
               <p className="text-base font-black text-white">
-                {assessment?.attempted
-                  ? `Readiness Assessment — Score: ${assessment.score ?? 0}/${assessment.maxScore ?? 40}. You need 90% to proceed.`
-                  : 'Start with the Readiness Assessment to unlock Module 1'}
+                Start with the Readiness Assessment to unlock all modules
               </p>
               <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                {assessment?.attempted
-                  ? 'You can retake the assessment to improve your score and unlock your learning path.'
-                  : '40 questions across 4 life domains. This helps us personalise your learning journey.'}
+                40 questions across 4 life domains. This helps us personalise your learning journey.
               </p>
             </div>
             <Link
@@ -298,13 +305,98 @@ export default function LMSDashboard() {
               className="flex-shrink-0 px-5 py-2.5 rounded-xl font-bold text-sm text-white transition-all hover:scale-105"
               style={{ background: 'linear-gradient(135deg,#E8612A,#f97316)' }}
             >
-              {assessment?.attempted ? 'Retake Assessment' : 'Take Assessment'} →
+              Take Assessment →
             </Link>
           </div>
         )}
 
-        {/* Passed assessment confirmation */}
-        {!loading && assessmentPassed && (
+        {/* Assessment completed — domain breakdown + recommendation */}
+        {!loading && assessmentCompleted && latestScorecard && (
+          <div
+            className="rounded-2xl p-5 space-y-4"
+            style={{
+              background: 'var(--bg-card)',
+              border: '1px solid rgba(43,191,197,0.25)',
+            }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-lg">✅</span>
+                <div>
+                  <p className="text-sm font-bold text-white">
+                    Readiness Assessment Complete — Overall: {latestScorecard.overallScore}%
+                  </p>
+                  <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                    All 6 modules are unlocked
+                  </p>
+                </div>
+              </div>
+              <Link
+                href="/employee/lms/assessment"
+                className="flex-shrink-0 px-4 py-2 rounded-xl font-bold text-xs text-white transition-all hover:scale-105"
+                style={{ background: 'linear-gradient(135deg,#E8612A,#f97316)' }}
+              >
+                Retake →
+              </Link>
+            </div>
+
+            {/* Per-domain score bars */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {Object.values(latestScorecard.domainScores).map(d => {
+                const domainShort = d.domain.replace(' Readiness', '')
+                const isWeakest = weakestDomain?.domain === d.domain
+                return (
+                  <div key={d.domain} className="space-y-1">
+                    <div className="flex justify-between text-xs">
+                      <span className="font-semibold" style={{ color: d.tier.color }}>
+                        {d.tier.emoji} {domainShort}
+                        {isWeakest && (
+                          <span className="ml-1 text-[10px] font-black px-1.5 py-0.5 rounded-full" style={{ background: 'rgba(239,68,68,0.15)', color: '#ef4444' }}>
+                            FOCUS
+                          </span>
+                        )}
+                      </span>
+                      <span className="font-bold text-white">{d.percentage}%</span>
+                    </div>
+                    <div className="w-full rounded-full h-1.5" style={{ background: 'var(--bg-elevated)' }}>
+                      <div
+                        className="h-1.5 rounded-full transition-all duration-1000"
+                        style={{
+                          width: `${d.percentage}%`,
+                          background: `linear-gradient(90deg, ${d.tier.color}, ${d.tier.color}aa)`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Recommendation */}
+            {weakestDomain && (
+              <div
+                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs"
+                style={{ background: 'rgba(232,97,42,0.08)', border: '1px solid rgba(232,97,42,0.2)' }}
+              >
+                <span className="text-sm">🧭</span>
+                <p style={{ color: 'var(--text-secondary)' }}>
+                  We recommend starting with{' '}
+                  <button
+                    onClick={() => router.push(`/employee/lms/module/${weakestDomain.moduleNum}`)}
+                    className="font-bold underline underline-offset-2"
+                    style={{ color: '#E8612A' }}
+                  >
+                    Module {weakestDomain.moduleNum}: {weakestDomain.domain.replace(' Readiness', '')}
+                  </button>{' '}
+                  (your weakest area at {weakestDomain.percentage}%)
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Assessment completed but no scorecard (edge case) */}
+        {!loading && assessmentCompleted && !latestScorecard && (
           <div
             className="rounded-2xl p-4 flex items-center gap-3"
             style={{
@@ -314,10 +406,7 @@ export default function LMSDashboard() {
           >
             <span className="text-lg">✅</span>
             <p className="text-sm font-semibold" style={{ color: '#2BBFC5' }}>
-              Readiness Assessment passed
-              {assessment?.score !== undefined &&
-                ` — Score: ${assessment.score}/${assessment.maxScore ?? 40}`}
-              . Module 1 is unlocked.
+              Readiness Assessment complete. All modules are unlocked.
             </p>
           </div>
         )}
