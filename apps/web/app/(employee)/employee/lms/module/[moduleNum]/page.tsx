@@ -361,36 +361,22 @@ export default function ModuleDetailPage() {
               </div>
             )}
 
-            {/* PDF + Complete row */}
-            <div className="flex flex-col sm:flex-row gap-3">
-              {module.pdfKey && (
-                <button
-                  onClick={handleDownloadPDF}
-                  className="flex items-center gap-2 px-5 py-3 rounded-xl font-semibold text-sm transition-all hover:scale-105"
-                  style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}
-                >
-                  📄 Download Module {moduleNum} PDF
-                </button>
-              )}
-              {!completed && (
-                <button
-                  onClick={handleMarkComplete}
-                  disabled={completing || !allWatched}
-                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm text-white transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-                  style={{ background: 'linear-gradient(135deg,#2BBFC5,#10b981)' }}
-                >
-                  {completing ? 'Marking complete…' : !allWatched ? `Watch all videos to complete (${watchedCount}/${allVideos.length})` : '✅ Mark Module Complete'}
-                </button>
-              )}
-              {completed && (
-                <div
-                  className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl font-bold text-sm"
-                  style={{ background: 'rgba(43,191,197,0.12)', border: '1px solid rgba(43,191,197,0.3)', color: '#2BBFC5' }}
-                >
-                  ✅ Module Complete — great work!
-                </div>
-              )}
-            </div>
+            {/* Module completion status */}
+            {completed ? (
+              <div
+                className="flex items-center justify-center gap-2 py-4 rounded-xl font-bold text-sm"
+                style={{ background: 'rgba(43,191,197,0.12)', border: '1px solid rgba(43,191,197,0.3)', color: '#2BBFC5' }}
+              >
+                Module Complete — great work!
+              </div>
+            ) : lessonsTotal > 0 ? (
+              <div
+                className="flex items-center justify-center gap-2 py-4 rounded-xl text-sm"
+                style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}
+              >
+                Complete all {lessonsTotal - lessonsCompleted} remaining required lessons to finish this module
+              </div>
+            ) : null}
           </>
         ) : (
           <div className="text-center py-12">
