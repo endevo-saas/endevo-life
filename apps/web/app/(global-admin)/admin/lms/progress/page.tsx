@@ -23,6 +23,16 @@ interface UserProgressSummary {
 // Shape returned by GET /api/lms/admin/users/{userId}/progress (full detail)
 interface UserProgressDetail {
   userId: string
+  firstName?: string
+  lastName?: string
+  email?: string
+  assessmentScore?: number
+  assessmentTaken?: boolean
+  assessmentPassed?: boolean
+  moduleStatus?: { [key: string]: string }
+  modulesCompleted?: number
+  lastActivity?: string
+  overallTier?: { label: string; color: string }
   moduleProgress: ModuleStatus[]    // per-user module records from lms-user-modules
   videoProgress: { videoId: string; title?: string; percent?: number; completed?: boolean }[]
   latestAssessment: {
@@ -161,8 +171,8 @@ function DetailModal({
                 const mod = userModules.find(m => (m.moduleNum ?? (m as ModuleStatus & { weekNum?: string }).weekNum) === mn)
                 const isLocked = !mod || mod.lockStatus === 'locked'
                 const isComplete = mod?.lockStatus === 'complete'
-                const pct = mod && mod.videosTotal > 0
-                  ? Math.round((mod.videosComplete / mod.videosTotal) * 100)
+                const pct = mod && (mod.videosTotal ?? 0) > 0
+                  ? Math.round(((mod.videosComplete ?? 0) / (mod.videosTotal ?? 1)) * 100)
                   : 0
 
                 return (
