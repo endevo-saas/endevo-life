@@ -1,16 +1,19 @@
 """
-Lesson quiz routes — supports two quiz modes:
+Lesson quiz routes — supports three quiz modes:
 
 1. **likert_scale** (self-assessment): 1-5 rating per question, no right/wrong,
    completion = all questions answered. Score = average rating.
 2. **multiple_choice** (knowledge test): pick correct answer, pass/fail threshold.
+3. **open_text** (free-form text): user types responses into text fields,
+   completion = all required fields answered. No scoring / no pass-fail.
 
 Business rules:
   - Quiz questions stored in endevo-uat-questions with type="lesson_quiz".
   - Questions grouped by quizId field.
-  - quizMode on the lesson record: "likert_scale" | "multiple_choice" (default).
+  - quizMode on the lesson record: "likert_scale" | "multiple_choice" | "open_text" (default: multiple_choice).
   - Likert quizzes always pass on completion (no threshold).
   - Multiple choice: scoring = (correct / total) * 100, pass if >= passThreshold.
+  - Open text: always completes on submission (all required fields answered).
 
 Routes handled:
   GET  /api/lms/lessons/{lessonId}/quiz          — get quiz questions
@@ -123,6 +126,17 @@ def _get_quiz_questions(
                 item["scaleMinLabel"] = q.get("scaleMinLabel", "Not at all accurate")
                 item["scaleMidLabel"] = q.get("scaleMidLabel", "Somewhat accurate")
                 item["scaleMaxLabel"] = q.get("scaleMaxLabel", "Very accurate")
+            elif q_type == "open_text":
+                # Free-form text fields (e.g. trusted people, emergency contacts)
+                item["fields"] = [
+                    {
+                        "fieldId": f.get("fieldId", ""),
+                        "label": f.get("label", ""),
+                        "placeholder": f.get("placeholder", ""),
+                        "required": bool(f.get("required", True)),
+                    }
+                    for f in q.get("fields", [])
+                ]
             else:
                 # Multiple choice — strip isCorrect
                 answers = q.get("answers", [])
@@ -197,7 +211,7 @@ def _submit_quiz(
     attempts_used = int(prog.get("quizAttempts", 0))
     already_completed = prog.get("status") == "completed"
 
-    if already_completed and quiz_mode == "likert_scale":
+    if already_completed and quiz_mode in ("likert_scale", "open_text"):
         return err(400, "You have already completed this assessment")
 
     if quiz_mode == "multiple_choice":
@@ -279,6 +293,72 @@ def _submit_quiz(
             "averageRating": avg_rating,
             "completed": True,
             "results": results,
+        })
+
+    # ── OPEN TEXT SCORING ──
+    if quiz_mode == "open_text":
+        # answers = [{questionId: "...", responses: [{fieldId: "f1", value: "John"}, ...]}, ...]
+        # Validate: all required fields must have a non-empty value
+        q_map = {q.get("questionId", ""): q for q in questions}
+
+        for ans in answers:
+            qid = ans.get("questionId", "")
+            q_def = q_map.get(qid, {})
+            responses_map = {
+                r.get("fieldId", ""): r.get("value", "").strip()
+                for r in ans.get("responses", [])
+            }
+            for field in q_def.get("fields", []):
+                if field.get("required", True) and not responses_map.get(field.get("fieldId", "")):
+                    return err(
+                        400,
+                        f"Required field '{field.get('label', field.get('fieldId', ''))}' is empty",
+                    )
+
+        # Store responses securely — no scoring, always completes
+        open_text_responses = [
+            {
+                "questionId": ans.get("questionId", ""),
+                "responses": ans.get("responses", []),
+            }
+            for ans in answers
+        ]
+
+        try:
+            LESSON_PROG_T.update_item(
+                Key={"userId": user_id, "lessonId": lesson_id},
+                UpdateExpression=(
+                    "SET quizAttempts = :ac, lastScore = :ls, bestScore = :bs, "
+                    "passed = :p, #s = :st, updatedAt = :now, "
+                    "completedAt = if_not_exists(completedAt, :now), "
+                    "tenantId = :tid, moduleNum = :mn, lessonType = :lt, "
+                    "quizMode = :qm, openTextResponses = :otr"
+                ),
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":ac": new_attempt_count,
+                    ":ls": Decimal("0"),
+                    ":bs": Decimal("0"),
+                    ":p": True,
+                    ":st": "completed",
+                    ":now": now,
+                    ":tid": tenant_id,
+                    ":mn": lesson.get("moduleNum", ""),
+                    ":lt": "quiz",
+                    ":qm": "open_text",
+                    ":otr": open_text_responses,
+                },
+            )
+            from routes.lessons import _check_module_auto_complete
+            _check_module_auto_complete(user_id, tenant_id, lesson_id)
+        except ClientError as exc:
+            logger.error("Failed to update open_text progress: %s", exc)
+
+        return ok({
+            "quizMode": "open_text",
+            "totalQuestions": len(questions),
+            "completed": True,
+            "responses": open_text_responses,
         })
 
     # ── MULTIPLE CHOICE SCORING ──
@@ -380,6 +460,7 @@ def _get_quiz_results(user_id: str, lesson_id: str) -> dict:
             "completed": prog.get("status") == "completed",
             "completedAt": prog.get("completedAt", ""),
             "likertResponses": prog.get("likertResponses", {}),
+            "openTextResponses": prog.get("openTextResponses", []),
         }))
     except ClientError as exc:
         logger.error("Failed to get quiz results: %s", exc)

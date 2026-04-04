@@ -4,6 +4,13 @@ import { useState } from 'react'
 import { api } from '@/lib/api'
 import { CheckCircle2, XCircle, AlertTriangle, RotateCcw, Loader2, ArrowRight, ArrowLeft } from 'lucide-react'
 
+interface QuizField {
+  fieldId: string
+  label: string
+  placeholder: string
+  required: boolean
+}
+
 interface QuizQuestion {
   questionId: string
   title: string
@@ -19,6 +26,8 @@ interface QuizQuestion {
   scaleMinLabel?: string
   scaleMidLabel?: string
   scaleMaxLabel?: string
+  // Open text
+  fields?: QuizField[]
 }
 
 interface QuizData {
@@ -387,11 +396,230 @@ function MultipleChoiceQuiz({ quiz, onComplete }: Props) {
   )
 }
 
+// ── OPEN TEXT COMPONENT ────────────────────────────────────────────────────
+
+function OpenTextQuiz({ quiz, onComplete }: Props) {
+  const [currentQ, setCurrentQ] = useState(0)
+  // responses[questionId][fieldId] = value
+  const [responses, setResponses] = useState<Record<string, Record<string, string>>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<{
+    completed: boolean
+    responses: { questionId: string; responses: { fieldId: string; value: string }[] }[]
+  } | null>(null)
+  const [error, setError] = useState('')
+
+  const q = quiz.questions[currentQ]
+  const totalQ = quiz.questions.length
+  const fields = q?.fields || []
+
+  const handleFieldChange = (questionId: string, fieldId: string, value: string) => {
+    setResponses(prev => ({
+      ...prev,
+      [questionId]: { ...prev[questionId], [fieldId]: value },
+    }))
+  }
+
+  const isQuestionComplete = (question: QuizQuestion): boolean => {
+    const qResponses = responses[question.questionId] || {}
+    return (question.fields || [])
+      .filter(f => f.required)
+      .every(f => (qResponses[f.fieldId] || '').trim() !== '')
+  }
+
+  const allComplete = quiz.questions.every(isQuestionComplete)
+
+  const handleNext = () => {
+    if (currentQ < totalQ - 1) setCurrentQ(currentQ + 1)
+  }
+
+  const handlePrev = () => {
+    if (currentQ > 0) setCurrentQ(currentQ - 1)
+  }
+
+  const handleSubmit = async () => {
+    if (!allComplete) return
+    setSubmitting(true)
+    setError('')
+    try {
+      const answers = quiz.questions.map(question => ({
+        questionId: question.questionId,
+        responses: (question.fields || []).map(f => ({
+          fieldId: f.fieldId,
+          value: (responses[question.questionId]?.[f.fieldId] || '').trim(),
+        })),
+      }))
+      const res = await api.lmsSubmitQuiz(quiz.lessonId, answers as unknown as { questionId: string; selectedLabel: string }[]) as typeof result
+      setResult(res)
+      onComplete()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to submit')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleRetake = () => {
+    setResponses({})
+    setResult(null)
+    setError('')
+    setCurrentQ(0)
+  }
+
+  // Results / confirmation view
+  if (result) {
+    return (
+      <div className="space-y-6">
+        <div className="p-6 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center">
+          <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+          <h3 className="text-lg font-bold text-emerald-300 mb-1">Responses Saved</h3>
+          <p className="text-slate-400 text-sm">Your answers have been securely recorded.</p>
+        </div>
+
+        <div className="space-y-4">
+          <h4 className="text-sm font-medium text-slate-400">Your Responses</h4>
+          {result.responses.map((r) => {
+            const qDef = quiz.questions.find(q => q.questionId === r.questionId)
+            return (
+              <div key={r.questionId} className="p-4 bg-[#0a1220] rounded-xl border border-slate-800">
+                <p className="text-sm font-medium text-white mb-3">{qDef?.title || r.questionId}</p>
+                <div className="space-y-2">
+                  {r.responses.map((resp) => {
+                    const fieldDef = qDef?.fields?.find(f => f.fieldId === resp.fieldId)
+                    return (
+                      <div key={resp.fieldId} className="flex items-start gap-2">
+                        <span className="text-xs text-slate-500 min-w-[80px]">{fieldDef?.label || resp.fieldId}:</span>
+                        <span className="text-sm text-teal-300">{resp.value}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+
+        <button
+          onClick={handleRetake}
+          className="flex items-center gap-2 px-6 py-3 bg-teal-600 hover:bg-teal-500 text-white rounded-xl font-medium transition-colors"
+        >
+          <RotateCcw className="w-4 h-4" /> Retake
+        </button>
+      </div>
+    )
+  }
+
+  if (quiz.alreadyCompleted) {
+    return (
+      <div className="p-6 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center">
+        <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+        <h3 className="text-lg font-bold text-emerald-300">Already Completed</h3>
+        <p className="text-slate-400 text-sm mt-1">You have already completed this exercise.</p>
+      </div>
+    )
+  }
+
+  // One question at a time
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-white">{quiz.title}</h2>
+        <span className="text-xs text-slate-400 bg-slate-800 px-3 py-1 rounded-full">
+          {currentQ + 1} of {totalQ}
+        </span>
+      </div>
+
+      {/* Progress dots */}
+      {totalQ > 1 && (
+        <div className="flex gap-1.5 justify-center">
+          {quiz.questions.map((_, i) => (
+            <button
+              key={i}
+              onClick={() => setCurrentQ(i)}
+              className={`w-2.5 h-2.5 rounded-full transition-all ${
+                i === currentQ
+                  ? 'bg-teal-400 scale-125'
+                  : isQuestionComplete(quiz.questions[i])
+                  ? 'bg-teal-600'
+                  : 'bg-slate-700'
+              }`}
+            />
+          ))}
+        </div>
+      )}
+
+      {error && <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg text-sm text-red-300">{error}</div>}
+
+      {/* Question card */}
+      {q && (
+        <div className="p-8 bg-[#0a1220] rounded-xl border border-slate-800 space-y-6">
+          <div>
+            <h3 className="text-lg font-semibold text-white mb-2">{q.title}</h3>
+            {q.text && <p className="text-slate-400">{q.text}</p>}
+          </div>
+
+          {/* Text input fields */}
+          <div className="space-y-5">
+            {fields.map((field) => (
+              <div key={field.fieldId}>
+                <label className="block text-sm text-slate-300 mb-2">
+                  {field.label}
+                  {field.required && <span className="text-red-400 ml-1">*</span>}
+                </label>
+                <input
+                  type="text"
+                  value={responses[q.questionId]?.[field.fieldId] || ''}
+                  onChange={(e) => handleFieldChange(q.questionId, field.fieldId, e.target.value)}
+                  placeholder={field.placeholder}
+                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-lg text-white placeholder-slate-600 focus:outline-none focus:border-teal-500 focus:ring-1 focus:ring-teal-500 transition-colors"
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Navigation */}
+      <div className="flex items-center justify-between">
+        <button
+          onClick={handlePrev}
+          disabled={currentQ === 0}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-slate-400 hover:text-teal-400 disabled:opacity-30 transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" /> Previous
+        </button>
+
+        {currentQ < totalQ - 1 ? (
+          <button
+            onClick={handleNext}
+            disabled={!isQuestionComplete(q)}
+            className="flex items-center gap-2 px-6 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl text-sm font-medium transition-colors"
+          >
+            Next <ArrowRight className="w-4 h-4" />
+          </button>
+        ) : (
+          <button
+            onClick={handleSubmit}
+            disabled={!allComplete || submitting}
+            className="flex items-center gap-2 px-6 py-3 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl text-sm font-medium transition-colors"
+          >
+            {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</> : 'Save My Answers'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── MAIN EXPORT — routes to correct component ───────────────────────────────
 
 export default function QuizEngine({ quiz, onComplete }: Props) {
   if (quiz.quizMode === 'likert_scale') {
     return <LikertQuiz quiz={quiz} onComplete={onComplete} />
+  }
+  if (quiz.quizMode === 'open_text') {
+    return <OpenTextQuiz quiz={quiz} onComplete={onComplete} />
   }
   return <MultipleChoiceQuiz quiz={quiz} onComplete={onComplete} />
 }
