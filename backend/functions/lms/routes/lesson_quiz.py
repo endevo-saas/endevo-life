@@ -1,17 +1,19 @@
 """
-Lesson quiz routes — supports three quiz modes:
+Lesson quiz routes — supports four quiz modes:
 
 1. **likert_scale** (self-assessment): 1-5 rating per question, no right/wrong,
    completion = all questions answered. Score = average rating.
 2. **multiple_choice** (knowledge test): pick correct answer, pass/fail threshold.
 3. **open_text** (free-form text): user types responses into text fields,
    completion = all required fields answered. No scoring / no pass-fail.
+4. **checklist** (action verification): Check / Not Yet per item,
+   completion = all items answered. No pass/fail — tracks what's done vs not yet.
 
 Business rules:
   - Quiz questions stored in endevo-uat-questions with type="lesson_quiz".
   - Questions grouped by quizId field.
-  - quizMode on the lesson record: "likert_scale" | "multiple_choice" | "open_text" (default: multiple_choice).
-  - Likert quizzes always pass on completion (no threshold).
+  - quizMode on the lesson record: "likert_scale" | "multiple_choice" | "open_text" | "checklist".
+  - Likert/checklist quizzes always pass on completion (no threshold).
   - Multiple choice: scoring = (correct / total) * 100, pass if >= passThreshold.
   - Open text: always completes on submission (all required fields answered).
 
@@ -137,6 +139,12 @@ def _get_quiz_questions(
                     }
                     for f in q.get("fields", [])
                 ]
+            elif q_type == "checklist":
+                # Action verification: Check / Not Yet per item
+                item["answers"] = [
+                    {"label": a.get("label", ""), "text": a.get("text", "")}
+                    for a in q.get("answers", [])
+                ]
             else:
                 # Multiple choice — strip isCorrect
                 answers = q.get("answers", [])
@@ -211,7 +219,7 @@ def _submit_quiz(
     attempts_used = int(prog.get("quizAttempts", 0))
     already_completed = prog.get("status") == "completed"
 
-    if already_completed and quiz_mode in ("likert_scale", "open_text"):
+    if already_completed and quiz_mode in ("likert_scale", "open_text", "checklist"):
         return err(400, "You have already completed this assessment")
 
     if quiz_mode == "multiple_choice":
@@ -361,6 +369,60 @@ def _submit_quiz(
             "responses": open_text_responses,
         })
 
+    # ── CHECKLIST SCORING ──
+    if quiz_mode == "checklist":
+        # answers = [{questionId: "...", selectedLabel: "A"}, ...] where A=Check, B=Not Yet
+        checklist_responses = []
+        for ans in answers:
+            qid = ans.get("questionId", "")
+            selected = ans.get("selectedLabel", "")
+            checklist_responses.append({
+                "questionId": qid,
+                "selectedLabel": selected,
+                "done": selected == "A",
+            })
+
+        done_count = sum(1 for r in checklist_responses if r["done"])
+        total_items = len(checklist_responses)
+
+        try:
+            LESSON_PROG_T.update_item(
+                Key={"userId": user_id, "lessonId": lesson_id},
+                UpdateExpression=(
+                    "SET quizAttempts = :ac, lastScore = :ls, bestScore = :bs, "
+                    "passed = :p, #s = :st, updatedAt = :now, "
+                    "completedAt = if_not_exists(completedAt, :now), "
+                    "tenantId = :tid, moduleNum = :mn, lessonType = :lt, "
+                    "quizMode = :qm, checklistResponses = :cr"
+                ),
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":ac": new_attempt_count,
+                    ":ls": done_count,
+                    ":bs": done_count,
+                    ":p": True,
+                    ":st": "completed",
+                    ":now": now,
+                    ":tid": tenant_id,
+                    ":mn": lesson.get("moduleNum", ""),
+                    ":lt": "quiz",
+                    ":qm": "checklist",
+                    ":cr": checklist_responses,
+                },
+            )
+            from routes.lessons import _check_module_auto_complete
+            _check_module_auto_complete(user_id, tenant_id, lesson_id)
+        except ClientError as exc:
+            logger.error("Failed to update checklist progress: %s", exc)
+
+        return ok({
+            "quizMode": "checklist",
+            "totalItems": total_items,
+            "doneCount": done_count,
+            "completed": True,
+            "results": checklist_responses,
+        })
+
     # ── MULTIPLE CHOICE SCORING ──
     answer_key: dict = {}
     explanations: dict = {}
@@ -461,6 +523,7 @@ def _get_quiz_results(user_id: str, lesson_id: str) -> dict:
             "completedAt": prog.get("completedAt", ""),
             "likertResponses": prog.get("likertResponses", {}),
             "openTextResponses": prog.get("openTextResponses", []),
+            "checklistResponses": prog.get("checklistResponses", []),
         }))
     except ClientError as exc:
         logger.error("Failed to get quiz results: %s", exc)

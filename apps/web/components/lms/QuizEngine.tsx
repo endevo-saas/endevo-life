@@ -612,6 +612,158 @@ function OpenTextQuiz({ quiz, onComplete }: Props) {
   )
 }
 
+// ── CHECKLIST COMPONENT ──────────────────────────────────────────────────────
+
+function ChecklistQuiz({ quiz, onComplete }: Props) {
+  const [currentQ, setCurrentQ] = useState(0)
+  const [selections, setSelections] = useState<Record<string, string>>({})
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState<{
+    doneCount: number; totalItems: number; completed: boolean;
+    results: { questionId: string; selectedLabel: string; done: boolean }[]
+  } | null>(null)
+
+  const q = quiz.questions[currentQ]
+  const totalQ = quiz.questions.length
+  const allAnswered = Object.keys(selections).length === totalQ
+
+  const handleSelect = (label: string) => {
+    if (!q) return
+    setSelections(prev => ({ ...prev, [q.questionId]: label }))
+  }
+
+  const handleNext = () => {
+    if (currentQ < totalQ - 1) setCurrentQ(currentQ + 1)
+  }
+  const handlePrev = () => {
+    if (currentQ > 0) setCurrentQ(currentQ - 1)
+  }
+
+  const handleSubmit = async () => {
+    if (!allAnswered) return
+    setSubmitting(true)
+    try {
+      const answers = Object.entries(selections).map(([questionId, selectedLabel]) => ({
+        questionId, selectedLabel,
+      }))
+      const res = await api.lmsSubmitQuiz(quiz.lessonId, answers) as typeof result
+      setResult(res)
+      onComplete()
+    } catch {
+      // Silent
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  if (result) {
+    return (
+      <div className="space-y-6">
+        <div className="p-6 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center">
+          <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+          <h3 className="text-lg font-bold text-emerald-300 mb-1">Checklist Complete</h3>
+          <p className="text-slate-400 text-sm">
+            {result.doneCount} of {result.totalItems} items checked off
+          </p>
+        </div>
+        <div className="space-y-3">
+          {result.results.map((r, i) => {
+            const qDef = quiz.questions.find(q => q.questionId === r.questionId)
+            return (
+              <div key={r.questionId} className={`flex items-center gap-3 p-4 rounded-xl border ${
+                r.done ? 'bg-emerald-500/10 border-emerald-500/30' : 'bg-orange-500/10 border-orange-500/30'
+              }`}>
+                <span className={`text-lg ${r.done ? 'text-emerald-400' : 'text-orange-400'}`}>
+                  {r.done ? '\u2705' : '\u23F3'}
+                </span>
+                <span className="text-sm text-slate-300">{qDef?.text || `Item ${i + 1}`}</span>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  if (quiz.alreadyCompleted) {
+    return (
+      <div className="p-6 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-center">
+        <CheckCircle2 className="w-12 h-12 text-emerald-400 mx-auto mb-3" />
+        <h3 className="text-lg font-bold text-emerald-300">Checklist Already Completed</h3>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold text-white">{quiz.title}</h2>
+        <span className="text-xs text-slate-400 bg-slate-800 px-3 py-1 rounded-full">
+          {currentQ + 1} of {totalQ}
+        </span>
+      </div>
+
+      <div className="flex gap-1.5 justify-center">
+        {quiz.questions.map((_, i) => (
+          <button
+            key={i}
+            onClick={() => setCurrentQ(i)}
+            className={`w-2.5 h-2.5 rounded-full transition-all ${
+              i === currentQ ? 'bg-teal-400 scale-125'
+              : selections[quiz.questions[i].questionId] ? 'bg-teal-600' : 'bg-slate-700'
+            }`}
+          />
+        ))}
+      </div>
+
+      {q && (
+        <div className="p-8 bg-[#0a1220] rounded-xl border border-slate-800 space-y-6">
+          <p className="text-lg text-white font-medium text-center">{q.text}</p>
+          <div className="flex justify-center gap-4">
+            {(q.answers || []).map(a => {
+              const selected = selections[q.questionId] === a.label
+              const isCheck = a.label === 'A'
+              return (
+                <button
+                  key={a.label}
+                  onClick={() => handleSelect(a.label)}
+                  className={`px-8 py-4 rounded-xl text-sm font-semibold transition-all ${
+                    selected
+                      ? isCheck
+                        ? 'bg-emerald-500 text-white scale-105 shadow-lg shadow-emerald-500/30'
+                        : 'bg-orange-500 text-white scale-105 shadow-lg shadow-orange-500/30'
+                      : 'bg-slate-800 text-slate-400 hover:bg-slate-700 hover:scale-105'
+                  }`}
+                >
+                  {isCheck ? '\u2705 ' : ''}{a.text}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-between">
+        <button onClick={handlePrev} disabled={currentQ === 0}
+          className="flex items-center gap-2 px-4 py-2 text-sm text-slate-400 hover:text-teal-400 disabled:opacity-30 transition-colors">
+          <ArrowLeft className="w-4 h-4" /> Previous
+        </button>
+        {currentQ < totalQ - 1 ? (
+          <button onClick={handleNext} disabled={!selections[q?.questionId]}
+            className="flex items-center gap-2 px-6 py-2 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl text-sm font-medium transition-colors">
+            Next <ArrowRight className="w-4 h-4" />
+          </button>
+        ) : (
+          <button onClick={handleSubmit} disabled={!allAnswered || submitting}
+            className="flex items-center gap-2 px-6 py-3 bg-teal-600 hover:bg-teal-500 disabled:bg-slate-700 disabled:text-slate-500 text-white rounded-xl text-sm font-medium transition-colors">
+            {submitting ? <><Loader2 className="w-4 h-4 animate-spin" /> Submitting...</> : 'Complete Checklist'}
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // ── MAIN EXPORT — routes to correct component ───────────────────────────────
 
 export default function QuizEngine({ quiz, onComplete }: Props) {
@@ -620,6 +772,9 @@ export default function QuizEngine({ quiz, onComplete }: Props) {
   }
   if (quiz.quizMode === 'open_text') {
     return <OpenTextQuiz quiz={quiz} onComplete={onComplete} />
+  }
+  if (quiz.quizMode === 'checklist') {
+    return <ChecklistQuiz quiz={quiz} onComplete={onComplete} />
   }
   return <MultipleChoiceQuiz quiz={quiz} onComplete={onComplete} />
 }
