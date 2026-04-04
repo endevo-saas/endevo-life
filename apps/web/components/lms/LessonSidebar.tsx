@@ -42,7 +42,7 @@ export default function LessonSidebar({ lessons, currentLessonId, moduleNum }: P
   const pct = lessons.length > 0 ? Math.round((completed / lessons.length) * 100) : 0
 
   return (
-    <div className="w-full lg:w-80 shrink-0 bg-[#0a1220] border border-slate-800 rounded-xl overflow-hidden">
+    <div className="w-full lg:w-80 shrink-0 bg-[#0a1220] border border-slate-800 rounded-xl overflow-hidden flex flex-col h-[calc(100vh-120px)]">
       {/* Progress header */}
       <div className="p-4 border-b border-slate-800">
         <div className="flex justify-between text-xs text-slate-400 mb-2">
@@ -58,7 +58,7 @@ export default function LessonSidebar({ lessons, currentLessonId, moduleNum }: P
       </div>
 
       {/* Lesson list */}
-      <nav className="max-h-[calc(100vh-200px)] overflow-y-auto scrollbar-thin">
+      <nav className="flex-1 overflow-y-auto">
         {lessons.map((lesson) => {
           const active = lesson.lessonId === currentLessonId
           return (
