@@ -42,7 +42,7 @@ export default function LessonSidebar({ lessons, currentLessonId, moduleNum }: P
   const pct = lessons.length > 0 ? Math.round((completed / lessons.length) * 100) : 0
 
   return (
-    <div className="w-full lg:w-80 shrink-0 bg-[#0a1220] border border-slate-800 rounded-xl overflow-hidden flex flex-col h-[calc(100vh-120px)]">
+    <div className="w-full lg:w-80 shrink-0 bg-[#0a1220] border border-slate-800 rounded-xl overflow-hidden lg:sticky lg:top-4 lg:self-start" style={{ maxHeight: 'calc(100dvh - 2rem)' }}>
       {/* Progress header */}
       <div className="p-4 border-b border-slate-800">
         <div className="flex justify-between text-xs text-slate-400 mb-2">
