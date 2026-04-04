@@ -382,8 +382,10 @@ export default function ModuleDetailPage() {
 
   const [mod, setMod] = useState<LmsModule | null>(null)
   const [videos, setVideos] = useState<VideoRecord[]>([])
+  const [lessons, setLessons] = useState<{lessonId:string;order:number;title:string;lessonType:string;isRequired:boolean;status:string}[]>([])
   const [loadingMod, setLoadingMod] = useState(true)
   const [loadingVideos, setLoadingVideos] = useState(true)
+  const [loadingLessons, setLoadingLessons] = useState(true)
   const [error, setError] = useState('')
   const [showAddVideo, setShowAddVideo] = useState(false)
   const [deletingVideoId, setDeletingVideoId] = useState<string | null>(null)
@@ -413,10 +415,21 @@ export default function ModuleDetailPage() {
     }
   }, [moduleNum])
 
+  const loadLessons = useCallback(async () => {
+    setLoadingLessons(true)
+    try {
+      const data = await api.lmsGetLessons(moduleNum) as { lessons: typeof lessons }
+      setLessons(data.lessons || [])
+    } catch { /* silent */ } finally {
+      setLoadingLessons(false)
+    }
+  }, [moduleNum])
+
   useEffect(() => {
     loadModule()
     loadVideos()
-  }, [loadModule, loadVideos])
+    loadLessons()
+  }, [loadModule, loadVideos, loadLessons])
 
   const handleDeleteVideo = async (videoId: string) => {
     if (!confirm('Delete this video? This cannot be undone.')) return
@@ -506,6 +519,54 @@ export default function ModuleDetailPage() {
             Module {moduleNum} not found in database. Create it first on the Modules page.
           </div>
         )}
+
+        {/* ── Lessons Section (v2 Engine) ──────────────────────────────── */}
+        <section className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white flex items-center gap-2">
+              <BookOpen className="w-5 h-5 text-teal-400" />
+              Lessons ({lessons.length})
+            </h2>
+          </div>
+
+          {loadingLessons ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map(i => (
+                <div key={i} className="rounded-xl border border-white/5 bg-white/3 p-4 animate-pulse h-14" />
+              ))}
+            </div>
+          ) : lessons.length === 0 ? (
+            <div className="rounded-2xl border border-white/8 bg-white/3 p-8 text-center">
+              <BookOpen className="w-8 h-8 text-slate-600 mx-auto mb-2" />
+              <p className="text-slate-400 text-sm font-medium">No lessons configured yet</p>
+              <p className="text-slate-600 text-xs mt-1">Lessons are managed via the database seed scripts.</p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {lessons.map(lesson => {
+                const typeColors: Record<string, string> = {
+                  video: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
+                  quiz: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+                  pdf: 'bg-orange-500/20 text-orange-300 border-orange-500/30',
+                  podcast: 'bg-purple-500/20 text-purple-300 border-purple-500/30',
+                  resource: 'bg-slate-500/20 text-slate-300 border-slate-500/30',
+                }
+                return (
+                  <div key={lesson.lessonId} className="flex items-center gap-3 px-4 py-3 rounded-xl border border-white/8 bg-white/3">
+                    <span className="text-xs text-slate-500 w-6 text-right font-mono">{lesson.order}</span>
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-md text-[10px] font-semibold border ${typeColors[lesson.lessonType] || typeColors.resource}`}>
+                      {lesson.lessonType}
+                    </span>
+                    <span className="text-sm text-white flex-1 truncate">{lesson.title}</span>
+                    {lesson.isRequired && (
+                      <span className="text-[10px] text-amber-400 border border-amber-500/30 rounded-md px-1.5 py-0.5">Required</span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
 
         {/* ── Videos Section ─────────────────────────────────────────────── */}
         <section className="space-y-4">
