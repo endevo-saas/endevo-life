@@ -76,7 +76,9 @@ def _paginate_query(table, **kwargs) -> list:
 def _list_module_lessons(
     tenant_id: str, user_id: str, module_num: str
 ) -> dict:
-    """Return ordered lessons for a module, enriched with per-user progress."""
+    """Return ordered lessons for a module, enriched with per-user progress.
+    Falls back to SYSTEM lessons if tenant has no custom lessons (shared template).
+    """
     try:
         lessons = _paginate_query(
             LESSONS_T,
@@ -85,6 +87,15 @@ def _list_module_lessons(
                 & Key("moduleOrder").begins_with(f"{module_num}#")
             ),
         )
+        # Fallback: if tenant has no custom lessons, use SYSTEM template
+        if not lessons and tenant_id != "SYSTEM":
+            lessons = _paginate_query(
+                LESSONS_T,
+                KeyConditionExpression=(
+                    Key("tenantId").eq("SYSTEM")
+                    & Key("moduleOrder").begins_with(f"{module_num}#")
+                ),
+            )
         lessons.sort(key=lambda l: l.get("moduleOrder", ""))
 
         # Filter to active lessons only
@@ -406,7 +417,7 @@ def _check_module_auto_complete(
         if not module_num:
             return
 
-        # Get all required lessons for this module
+        # Get all required lessons for this module (with SYSTEM fallback)
         all_lessons = _paginate_query(
             LESSONS_T,
             KeyConditionExpression=(
@@ -414,6 +425,14 @@ def _check_module_auto_complete(
                 & Key("moduleOrder").begins_with(f"{module_num}#")
             ),
         )
+        if not all_lessons and tenant_id != "SYSTEM":
+            all_lessons = _paginate_query(
+                LESSONS_T,
+                KeyConditionExpression=(
+                    Key("tenantId").eq("SYSTEM")
+                    & Key("moduleOrder").begins_with(f"{module_num}#")
+                ),
+            )
         required = [
             l for l in all_lessons
             if l.get("isRequired", True) and l.get("isActive", True)

@@ -109,6 +109,13 @@ def _get_quiz_questions(
             KeyConditionExpression=Key("tenantId").eq(tenant_id),
             FilterExpression=Attr("quizId").eq(quiz_id) & Attr("type").eq("lesson_quiz"),
         )
+        # Fallback to SYSTEM quiz questions if tenant has none
+        if not questions and tenant_id != "SYSTEM":
+            questions = _paginate_query(
+                QUESTIONS_T,
+                KeyConditionExpression=Key("tenantId").eq("SYSTEM"),
+                FilterExpression=Attr("quizId").eq(quiz_id) & Attr("type").eq("lesson_quiz"),
+            )
         questions.sort(key=lambda q: int(q.get("order", q.get("number", 0))))
 
         sanitized = []
@@ -228,13 +235,19 @@ def _submit_quiz(
         if max_attempts > 0 and attempts_used >= max_attempts:
             return err(400, f"Maximum attempts ({max_attempts}) reached")
 
-    # Fetch questions
+    # Fetch questions (with SYSTEM fallback)
     try:
         questions = _paginate_query(
             QUESTIONS_T,
             KeyConditionExpression=Key("tenantId").eq(tenant_id),
             FilterExpression=Attr("quizId").eq(quiz_id) & Attr("type").eq("lesson_quiz"),
         )
+        if not questions and tenant_id != "SYSTEM":
+            questions = _paginate_query(
+                QUESTIONS_T,
+                KeyConditionExpression=Key("tenantId").eq("SYSTEM"),
+                FilterExpression=Attr("quizId").eq(quiz_id) & Attr("type").eq("lesson_quiz"),
+            )
     except ClientError as exc:
         logger.error("Failed to fetch quiz questions: %s", exc)
         return err(500, "Failed to score quiz")
