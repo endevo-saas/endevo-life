@@ -51,11 +51,8 @@ CONFIG_DEFAULTS = {
         "tagline": "Digital Legacy & Estate Planning"
     },
     "pricing": {
-        "trial":           {"price": 0,    "max_seats": 10,   "duration_days": 14, "label": "Trial",          "custom": False},
-        "starter":         {"price": 249,  "max_seats": 25,   "label": "Starter",         "custom": False},
-        "professional":    {"price": 599,  "max_seats": 100,  "label": "Professional",    "custom": False},
-        "enterprise":      {"price": 1499, "max_seats": 500,  "label": "Enterprise",      "custom": False},
-        "enterprise-plus": {"price": 0,    "max_seats": 9999, "label": "Enterprise Plus", "custom": True}
+        "basic":   {"price_monthly": 29, "price_yearly": 299, "max_seats": 100,  "label": "Endevo Basic",   "custom": False},
+        "premium": {"price_monthly": 49, "price_yearly": 499, "max_seats": 9999, "label": "Endevo Premium", "custom": False}
     },
     "security": {
         "otp_enabled": False,
@@ -322,7 +319,7 @@ def handler(event, context):
     # ── POST /api/admin/tenants ───────────────────────────────────────────
     if path.endswith("/tenants") and method == "POST":
         name       = sanitize(body.get("name") or "", 100)
-        plan       = sanitize(body.get("plan") or "enterprise", 50)
+        plan       = sanitize(body.get("plan") or "basic", 50)
         max_seats  = body.get("maxSeats")
         website    = sanitize(body.get("website") or "", 200)
         hr_contact = sanitize(body.get("hrContact") or "", 100)
@@ -343,7 +340,7 @@ def handler(event, context):
             return err(400, "HR Admin email is required. Every tenant must have an HR admin to manage their organization.")
         if not validate_email(hr_email):
             return err(400, "Invalid HR admin email format")
-        if plan not in ("trial", "starter", "professional", "enterprise", "enterprise-plus"):
+        if plan not in ("basic", "premium"):
             return err(400, "Invalid plan")
         try:
             max_seats = int(max_seats or 50)
@@ -492,7 +489,7 @@ def handler(event, context):
                 updates[k] = sanitize(str(v), 200) if isinstance(v, str) else v
         if not updates:
             return err(400, "Nothing to update")
-        if "plan" in updates and updates["plan"] not in ("trial", "starter", "professional", "enterprise", "enterprise-plus"):
+        if "plan" in updates and updates["plan"] not in ("basic", "premium"):
             return err(400, "Invalid plan")
         expr  = "SET " + ", ".join([f"#{k} = :{k}" for k in updates])
         names = {f"#{k}": k for k in updates}

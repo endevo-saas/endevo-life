@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import {
   CreditCard, Loader2, RefreshCw, AlertCircle, Users, Globe,
-  Mail, Building2, CheckCircle, Crown, Calendar, Shield
+  Mail, Building2, CheckCircle, Crown, Calendar, Shield, Star, Sparkles
 } from 'lucide-react'
 import { api } from '@/lib/api'
 
@@ -24,31 +24,39 @@ interface TenantInfo {
   hr_count: number
 }
 
-const PLAN_META: Record<string, { label: string; color: string; features: string[] }> = {
-  trial: {
-    label: 'Trial',
-    color: 'text-yellow-400 border-yellow-500/30 bg-yellow-500/10',
-    features: ['Up to 10 seats', '14-day free trial', '2 training courses', 'Email support']
+const BASIC_FEATURES = [
+  '6-module LMS access',
+  '40-question readiness assessment',
+  'Progress tracking',
+  'Completion certificates',
+  'Email support',
+]
+
+const PREMIUM_FEATURES = [
+  '1-on-1 live sessions with estate planning expert',
+  'Priority support (24-hour response)',
+  'Advanced analytics dashboard',
+  'Custom company branding',
+  'Dedicated account manager',
+  'API access',
+]
+
+const PLAN_META: Record<string, { label: string; priceYearly: number; priceMonthly: number; color: string; features: string[]; icon: typeof Star }> = {
+  basic: {
+    label: 'Endevo Basic',
+    priceYearly: 299,
+    priceMonthly: 29,
+    color: 'brand',
+    features: BASIC_FEATURES,
+    icon: Star,
   },
-  starter: {
-    label: 'Starter',
-    color: 'text-blue-400 border-blue-500/30 bg-blue-500/10',
-    features: ['Up to 25 seats', 'All training courses', 'Certificates', 'Email support']
-  },
-  professional: {
-    label: 'Professional',
-    color: 'text-brand-300 border-brand-500/30 bg-brand-500/10',
-    features: ['Up to 100 seats', 'All training courses', 'Certificates', 'Priority support', 'Audit logs']
-  },
-  enterprise: {
-    label: 'Enterprise',
-    color: 'text-purple-400 border-purple-500/30 bg-purple-500/10',
-    features: ['Up to 500 seats', 'All features', 'Dedicated support', 'SLA guarantee', 'Custom reporting']
-  },
-  'enterprise-plus': {
-    label: 'Enterprise Plus',
-    color: 'text-orange-400 border-orange-500/30 bg-orange-500/10',
-    features: ['Unlimited seats', 'All features', 'Dedicated account manager', 'Custom integrations', '24/7 support']
+  premium: {
+    label: 'Endevo Premium',
+    priceYearly: 499,
+    priceMonthly: 49,
+    color: 'orange',
+    features: [...BASIC_FEATURES, ...PREMIUM_FEATURES],
+    icon: Crown,
   },
 }
 
@@ -69,16 +77,16 @@ export default function HrSubscriptionPage() {
 
   useEffect(() => { load() }, [])
 
-  const plan = tenant ? (PLAN_META[tenant.plan] || PLAN_META['starter']) : null
+  const activePlan = tenant?.plan || 'basic'
   const seatPct = tenant ? Math.round((tenant.user_count / Math.max(tenant.maxSeats, 1)) * 100) : 0
 
   return (
     <div className="p-6">
-      <div className="max-w-3xl mx-auto">
+      <div className="max-w-5xl mx-auto">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-bold text-white">Subscription & Plan</h1>
-            <p className="text-slate-400 text-sm mt-0.5">Your organisation's current plan and usage</p>
+            <h1 className="text-2xl font-bold text-white">Subscription & Plans</h1>
+            <p className="text-slate-400 text-sm mt-0.5">Choose the plan that fits your organisation</p>
           </div>
           <button onClick={load} className="p-2 text-slate-400 hover:text-white hover:bg-white/5 rounded-lg transition-all">
             <RefreshCw className="w-4 h-4"/>
@@ -88,42 +96,162 @@ export default function HrSubscriptionPage() {
         {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex gap-2"><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5"/>{error}</div>}
 
         {loading ? (
-          <div className="glass p-12 flex justify-center"><Loader2 className="w-7 h-7 animate-spin text-green-400"/></div>
-        ) : tenant && plan ? (
-          <div className="space-y-4">
+          <div className="glass p-12 flex justify-center"><Loader2 className="w-7 h-7 animate-spin text-[#2BBFC5]"/></div>
+        ) : tenant ? (
+          <div className="space-y-6">
 
-            {/* Current plan */}
-            <div className="glass p-6">
-              <div className="flex items-center gap-3 mb-5">
-                <Crown className="w-5 h-5 text-slate-400"/>
-                <h2 className="text-base font-semibold text-white">Current Plan</h2>
-              </div>
-              <div className="flex items-center gap-4">
-                <span className={`px-4 py-2 rounded-xl text-sm font-bold border ${plan.color}`}>
-                  {plan.label}
-                </span>
-                <span className={`px-2.5 py-1 rounded-lg text-xs font-medium ${
-                  tenant.status === 'active' ? 'bg-green-500/10 text-green-400' :
-                  tenant.status === 'trial'  ? 'bg-yellow-500/10 text-yellow-400' :
-                  'bg-red-500/10 text-red-400'
-                }`}>{tenant.status}</span>
-              </div>
+            {/* ── Plan Cards ── */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
-              <div className="mt-5 grid grid-cols-2 gap-3">
-                {plan.features.map(f => (
-                  <div key={f} className="flex items-center gap-2 text-sm text-slate-300">
-                    <CheckCircle className="w-4 h-4 text-green-400 flex-shrink-0"/>
-                    {f}
+              {/* Basic Plan */}
+              <div className={`relative rounded-2xl border p-6 transition-all ${
+                activePlan === 'basic'
+                  ? 'border-[#2BBFC5]/50 bg-[#2BBFC5]/5 shadow-lg shadow-[#2BBFC5]/10'
+                  : 'border-white/10 bg-white/[0.02] hover:border-white/20'
+              }`}>
+                {activePlan === 'basic' && (
+                  <div className="absolute -top-3 left-6 px-3 py-1 rounded-full text-xs font-bold bg-[#2BBFC5] text-slate-900">
+                    Current Plan
                   </div>
-                ))}
+                )}
+                <div className="flex items-center gap-3 mb-4 mt-1">
+                  <div className="w-10 h-10 rounded-xl bg-[#2BBFC5]/10 border border-[#2BBFC5]/20 flex items-center justify-center">
+                    <Star className="w-5 h-5 text-[#2BBFC5]" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Endevo Basic</h3>
+                  </div>
+                </div>
+
+                <div className="mb-5">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-4xl font-black text-white">$299</span>
+                    <span className="text-slate-400 text-sm">/year</span>
+                  </div>
+                  <p className="text-slate-500 text-sm mt-1">or $29/month billed monthly</p>
+                </div>
+
+                <div className="space-y-3 mb-6">
+                  {BASIC_FEATURES.map(f => (
+                    <div key={f} className="flex items-start gap-2.5 text-sm text-slate-300">
+                      <CheckCircle className="w-4 h-4 text-[#2BBFC5] flex-shrink-0 mt-0.5"/>
+                      {f}
+                    </div>
+                  ))}
+                </div>
+
+                {activePlan === 'basic' ? (
+                  <div className="w-full py-2.5 rounded-xl text-center text-sm font-medium bg-[#2BBFC5]/10 text-[#2BBFC5] border border-[#2BBFC5]/30">
+                    Your Active Plan
+                  </div>
+                ) : (
+                  <div className="w-full py-2.5 rounded-xl text-center text-sm font-medium bg-white/5 text-slate-400 border border-white/10">
+                    Contact admin to switch
+                  </div>
+                )}
               </div>
 
-              <div className="mt-5 pt-4 border-t border-white/5">
-                <p className="text-xs text-slate-500">To upgrade your plan or change billing, contact your platform administrator.</p>
+              {/* Premium Plan */}
+              <div className={`relative rounded-2xl border p-6 transition-all ${
+                activePlan === 'premium'
+                  ? 'border-[#E8612A]/50 bg-[#E8612A]/5 shadow-lg shadow-[#E8612A]/10'
+                  : 'border-[#E8612A]/30 bg-gradient-to-br from-[#E8612A]/5 to-transparent hover:border-[#E8612A]/50'
+              }`}>
+                <div className="absolute -top-3 right-6 px-3 py-1 rounded-full text-xs font-bold bg-[#E8612A] text-white flex items-center gap-1">
+                  <Sparkles className="w-3 h-3" /> Recommended
+                </div>
+                {activePlan === 'premium' && (
+                  <div className="absolute -top-3 left-6 px-3 py-1 rounded-full text-xs font-bold bg-[#E8612A] text-white">
+                    Current Plan
+                  </div>
+                )}
+                <div className="flex items-center gap-3 mb-4 mt-1">
+                  <div className="w-10 h-10 rounded-xl bg-[#E8612A]/10 border border-[#E8612A]/20 flex items-center justify-center">
+                    <Crown className="w-5 h-5 text-[#E8612A]" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">Endevo Premium</h3>
+                  </div>
+                </div>
+
+                <div className="mb-5">
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-4xl font-black text-white">$499</span>
+                    <span className="text-slate-400 text-sm">/year</span>
+                  </div>
+                  <p className="text-slate-500 text-sm mt-1">or $49/month billed monthly</p>
+                </div>
+
+                <p className="text-xs text-[#E8612A] font-medium mb-3 uppercase tracking-wider">Everything in Basic, plus:</p>
+                <div className="space-y-3 mb-6">
+                  {PREMIUM_FEATURES.map(f => (
+                    <div key={f} className="flex items-start gap-2.5 text-sm text-slate-300">
+                      <CheckCircle className="w-4 h-4 text-[#E8612A] flex-shrink-0 mt-0.5"/>
+                      {f}
+                    </div>
+                  ))}
+                </div>
+
+                {activePlan === 'premium' ? (
+                  <div className="w-full py-2.5 rounded-xl text-center text-sm font-medium bg-[#E8612A]/10 text-[#E8612A] border border-[#E8612A]/30">
+                    Your Active Plan
+                  </div>
+                ) : (
+                  <button className="w-full py-2.5 rounded-xl text-center text-sm font-bold bg-[#E8612A] text-white hover:bg-[#E8612A]/90 transition-all shadow-lg shadow-[#E8612A]/20">
+                    Contact admin to upgrade
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Seat usage */}
+            {/* ── Feature Comparison Table ── */}
+            <div className="glass overflow-hidden">
+              <div className="px-6 py-4 border-b border-white/5">
+                <h2 className="text-base font-semibold text-white">Feature Comparison</h2>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b border-white/5">
+                      <th className="px-6 py-3 text-left text-xs font-medium text-slate-500">Feature</th>
+                      <th className="px-6 py-3 text-center text-xs font-medium text-[#2BBFC5]">Basic</th>
+                      <th className="px-6 py-3 text-center text-xs font-medium text-[#E8612A]">Premium</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-white/5">
+                    {[
+                      { feature: '6-module LMS access', basic: true, premium: true },
+                      { feature: '40-question readiness assessment', basic: true, premium: true },
+                      { feature: 'Progress tracking', basic: true, premium: true },
+                      { feature: 'Completion certificates', basic: true, premium: true },
+                      { feature: 'Email support', basic: true, premium: true },
+                      { feature: '1-on-1 live sessions with expert', basic: false, premium: true },
+                      { feature: 'Priority support (24-hour response)', basic: false, premium: true },
+                      { feature: 'Advanced analytics dashboard', basic: false, premium: true },
+                      { feature: 'Custom company branding', basic: false, premium: true },
+                      { feature: 'Dedicated account manager', basic: false, premium: true },
+                      { feature: 'API access', basic: false, premium: true },
+                    ].map(row => (
+                      <tr key={row.feature} className="hover:bg-white/[0.02]">
+                        <td className="px-6 py-3 text-sm text-slate-300">{row.feature}</td>
+                        <td className="px-6 py-3 text-center">
+                          {row.basic
+                            ? <CheckCircle className="w-4 h-4 text-[#2BBFC5] mx-auto" />
+                            : <span className="text-slate-600">--</span>}
+                        </td>
+                        <td className="px-6 py-3 text-center">
+                          {row.premium
+                            ? <CheckCircle className="w-4 h-4 text-[#E8612A] mx-auto" />
+                            : <span className="text-slate-600">--</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* ── Seat Usage ── */}
             <div className="glass p-6">
               <div className="flex items-center gap-3 mb-5">
                 <Users className="w-5 h-5 text-slate-400"/>
@@ -131,7 +259,7 @@ export default function HrSubscriptionPage() {
               </div>
               <div className="flex items-end justify-between mb-2">
                 <div>
-                  <span className={`text-4xl font-black ${seatPct >= 90 ? 'text-red-400' : seatPct >= 70 ? 'text-yellow-400' : 'text-green-400'}`}>
+                  <span className={`text-4xl font-black ${seatPct >= 90 ? 'text-red-400' : seatPct >= 70 ? 'text-yellow-400' : 'text-[#2BBFC5]'}`}>
                     {tenant.user_count}
                   </span>
                   <span className="text-slate-500 text-lg"> / {tenant.maxSeats} seats</span>
@@ -141,12 +269,12 @@ export default function HrSubscriptionPage() {
                 </span>
               </div>
               <div className="h-2.5 bg-white/10 rounded-full overflow-hidden mb-4">
-                <div className={`h-full rounded-full transition-all ${seatPct >= 90 ? 'bg-red-500' : seatPct >= 70 ? 'bg-yellow-500' : 'bg-green-500'}`}
+                <div className={`h-full rounded-full transition-all ${seatPct >= 90 ? 'bg-red-500' : seatPct >= 70 ? 'bg-yellow-500' : 'bg-[#2BBFC5]'}`}
                   style={{width:`${Math.min(seatPct,100)}%`}}/>
               </div>
               <div className="grid grid-cols-3 gap-3">
                 {[
-                  {label:'Active Users',  value: tenant.active_count,   color: 'text-green-400'},
+                  {label:'Active Users',  value: tenant.active_count,   color: 'text-[#2BBFC5]'},
                   {label:'HR Admins',     value: tenant.hr_count,       color: 'text-brand-300'},
                   {label:'Employees',     value: tenant.employee_count, color: 'text-blue-400'},
                 ].map(s => (
@@ -158,7 +286,7 @@ export default function HrSubscriptionPage() {
               </div>
             </div>
 
-            {/* Organisation info */}
+            {/* ── Organisation Details ── */}
             <div className="glass p-6">
               <div className="flex items-center gap-3 mb-5">
                 <Building2 className="w-5 h-5 text-slate-400"/>
@@ -176,7 +304,7 @@ export default function HrSubscriptionPage() {
                 {tenant.website && (
                   <div className="flex items-center justify-between py-2 border-b border-white/5">
                     <div className="flex items-center gap-2 text-sm text-slate-400"><Globe className="w-4 h-4"/>Website</div>
-                    <a href={tenant.website} target="_blank" rel="noreferrer" className="text-sm text-brand-400 hover:underline">{tenant.website}</a>
+                    <a href={tenant.website} target="_blank" rel="noreferrer" className="text-sm text-[#2BBFC5] hover:underline">{tenant.website}</a>
                   </div>
                 )}
                 {tenant.hrContact && (
@@ -192,6 +320,11 @@ export default function HrSubscriptionPage() {
                   </div>
                 )}
               </div>
+            </div>
+
+            {/* ── Upgrade CTA ── */}
+            <div className="mt-4 pt-4 border-t border-white/5">
+              <p className="text-xs text-slate-500">To upgrade your plan or change billing, contact your platform administrator or email <a href="mailto:support@endevo.life" className="text-[#2BBFC5] hover:underline">support@endevo.life</a>.</p>
             </div>
 
           </div>

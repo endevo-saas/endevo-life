@@ -4,8 +4,8 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import {
   CreditCard, Loader2, AlertCircle, RefreshCw, TrendingUp,
-  Building2, CheckCircle, Clock, AlertTriangle, ChevronDown,
-  Star, Zap, Crown, Sparkles, ArrowUpRight, Edit3, DollarSign,
+  Building2, CheckCircle, AlertTriangle, ChevronDown,
+  Star, Crown, ArrowUpRight, Edit3, DollarSign,
   Users, Plus, Save, X, BarChart3, Calendar, Settings, Download
 } from 'lucide-react'
 import { api, Tenant } from '@/lib/api'
@@ -13,23 +13,17 @@ import { exportCsv } from '@/lib/export'
 
 // ── Plan definitions (editable pricing) ───────────────────────────────────────
 const DEFAULT_PLANS = [
-  { key: 'trial',           label: 'Trial',         price: 0,   seats: 5,    color: 'slate',  icon: Clock,     badge: 'bg-slate-500/20 text-slate-400 border-slate-500/30' },
-  { key: 'starter',         label: 'Starter',        price: 49,  seats: 25,   color: 'blue',   icon: Zap,       badge: 'bg-blue-500/20 text-blue-400 border-blue-500/30' },
-  { key: 'professional',    label: 'Professional',   price: 149, seats: 100,  color: 'brand',  icon: Star,      badge: 'bg-brand-500/20 text-brand-400 border-brand-500/30' },
-  { key: 'enterprise',      label: 'Enterprise',     price: 399, seats: 500,  color: 'purple', icon: Crown,     badge: 'bg-purple-500/20 text-purple-400 border-purple-500/30' },
-  { key: 'enterprise-plus', label: 'Enterprise+',    price: 999, seats: 9999, color: 'yellow', icon: Sparkles,  badge: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30' },
+  { key: 'basic',   label: 'Endevo Basic',   priceMonthly: 29, priceYearly: 299, seats: 100,  color: 'brand',  icon: Star,    badge: 'bg-brand-500/20 text-brand-400 border-brand-500/30' },
+  { key: 'premium', label: 'Endevo Premium', priceMonthly: 49, priceYearly: 499, seats: 9999, color: 'orange', icon: Crown,   badge: 'bg-orange-500/20 text-orange-400 border-orange-500/30' },
 ]
 
 const BILLING_PERIODS = [
-  { key: 'monthly',   label: 'Monthly',    multiplier: 1 },
-  { key: 'quarterly', label: '3 Months',   multiplier: 2.85 },
-  { key: 'biannual',  label: '6 Months',   multiplier: 5.5 },
-  { key: 'annual',    label: '12 Months',  multiplier: 10 },
+  { key: 'monthly', label: 'Monthly',  multiplier: 1 },
+  { key: 'annual',  label: 'Yearly',   multiplier: 1 },
 ]
 
 const STATUS_COLORS: Record<string, string> = {
   active:    'bg-green-500/10 text-green-400 border border-green-500/30',
-  trial:     'bg-yellow-500/10 text-yellow-400 border border-yellow-500/30',
   suspended: 'bg-red-500/10 text-red-400 border border-red-500/30',
   inactive:  'bg-slate-500/10 text-slate-400 border border-slate-500/30',
 }
@@ -156,8 +150,8 @@ export default function SubscriptionsPage() {
     return true
   })
 
-  const totalMRR    = tenants.reduce((s, t) => s + (planInfo(t.plan, plans).price), 0)
-  const activeMRR   = tenants.filter(t => t.status === 'active').reduce((s, t) => s + (planInfo(t.plan, plans).price), 0)
+  const totalMRR    = tenants.reduce((s, t) => s + (planInfo(t.plan, plans).priceMonthly), 0)
+  const activeMRR   = tenants.filter(t => t.status === 'active').reduce((s, t) => s + (planInfo(t.plan, plans).priceMonthly), 0)
   const planCounts  = plans.reduce((acc, p) => { acc[p.key] = tenants.filter(t => t.plan === p.key).length; return acc }, {} as Record<string, number>)
 
   return (
@@ -201,7 +195,7 @@ export default function SubscriptionsPage() {
           {[
             { label: 'Total MRR',     value: `$${totalMRR.toLocaleString()}`,  sub: `${tenants.length} tenants`, color: 'text-green-400', icon: TrendingUp, bg: 'from-green-600/20 to-green-800/10 border-green-500/30' },
             { label: 'Active MRR',    value: `$${activeMRR.toLocaleString()}`, sub: `${tenants.filter(t=>t.status==='active').length} active`, color: 'text-brand-400', icon: BarChart3, bg: 'from-brand-600/20 to-brand-800/10 border-brand-500/30' },
-            { label: 'Trial Tenants', value: String(tenants.filter(t=>t.plan==='trial'||t.status==='trial').length), sub: 'Converting soon', color: 'text-yellow-400', icon: Clock, bg: 'from-yellow-600/20 to-yellow-800/10 border-yellow-500/30' },
+            { label: 'Premium',       value: String(tenants.filter(t=>t.plan==='premium').length), sub: 'Premium plan', color: 'text-orange-400', icon: Crown, bg: 'from-orange-600/20 to-orange-800/10 border-orange-500/30' },
             { label: 'Suspended',     value: String(tenants.filter(t=>t.status==='suspended').length), sub: 'Need action', color: 'text-red-400', icon: AlertTriangle, bg: 'from-red-600/20 to-red-800/10 border-red-500/30' },
           ].map(s => {
             const Icon = s.icon
@@ -217,7 +211,7 @@ export default function SubscriptionsPage() {
         </div>
 
         {/* Plan breakdown cards */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           {plans.map(p => {
             const Icon = p.icon
             const count = planCounts[p.key] || 0
@@ -233,8 +227,8 @@ export default function SubscriptionsPage() {
                   <Icon className="w-3 h-3" />{p.label}
                 </div>
                 <p className="text-2xl font-black text-white">{count}</p>
-                <p className="text-xs text-slate-500">${p.price}/mo base</p>
-                {count > 0 && <p className="text-xs text-brand-400 mt-1">${(p.price * count).toLocaleString()} MRR</p>}
+                <p className="text-xs text-slate-500">${p.priceYearly}/yr (${p.priceMonthly}/mo)</p>
+                {count > 0 && <p className="text-xs text-brand-400 mt-1">${(p.priceMonthly * count).toLocaleString()} MRR</p>}
               </button>
             )
           })}
@@ -243,7 +237,7 @@ export default function SubscriptionsPage() {
         {/* Filters */}
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-1">
-            {['all','active','trial','suspended','inactive'].map(s => (
+            {['all','active','suspended','inactive'].map(s => (
               <button key={s} onClick={() => setFilterStatus(s)}
                 className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${filterStatus === s ? 'bg-brand-600/30 text-brand-300 border border-brand-500/40' : 'bg-white/3 text-slate-500 border border-white/8 hover:text-white'}`}>
                 {s === 'all' ? 'All Status' : s.charAt(0).toUpperCase() + s.slice(1)}
@@ -323,7 +317,7 @@ export default function SubscriptionsPage() {
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <span className="text-sm font-bold text-white">${p.price}</span>
+                          <span className="text-sm font-bold text-white">${p.priceMonthly}</span>
                           <span className="text-xs text-slate-500">/mo</span>
                         </td>
                         <td className="px-4 py-3 text-xs text-slate-400">Monthly</td>
@@ -402,7 +396,7 @@ export default function SubscriptionsPage() {
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="text-sm font-bold text-white">{p.price === 0 ? 'Free' : `$${p.price}/mo`}</p>
+                        <p className="text-sm font-bold text-white">${p.priceYearly}/yr</p>
                         {selected && !current && <CheckCircle className="w-4 h-4 text-brand-400 ml-auto mt-0.5" />}
                       </div>
                     </button>
@@ -445,7 +439,7 @@ export default function SubscriptionsPage() {
                   <span className="text-slate-400 text-sm">$</span>
                   <input type="number" min={0} step={0.01} value={modal.customPrice}
                     onChange={e => setModal(m => m ? { ...m, customPrice: e.target.value } : null)}
-                    placeholder={String(planInfo(modal.newPlan, plans).price)}
+                    placeholder={String(planInfo(modal.newPlan, plans).priceMonthly)}
                     className="input-field text-sm flex-1" />
                   <span className="text-slate-400 text-sm">/mo</span>
                 </div>
@@ -456,7 +450,7 @@ export default function SubscriptionsPage() {
             {modal.newPlan !== modal.tenant.plan && (
               <div className="mb-4 p-3 bg-brand-500/10 border border-brand-500/30 rounded-xl text-xs text-brand-300">
                 Changing: <strong>{planInfo(modal.tenant.plan, plans).label}</strong> → <strong>{planInfo(modal.newPlan, plans).label}</strong>
-                {' '}· ${modal.useCustomPrice && modal.customPrice ? modal.customPrice : planInfo(modal.newPlan, plans).price}/mo
+                {' '}· ${modal.useCustomPrice && modal.customPrice ? modal.customPrice : planInfo(modal.newPlan, plans).priceMonthly}/mo
               </div>
             )}
 
@@ -485,29 +479,47 @@ export default function SubscriptionsPage() {
               </h3>
               <button onClick={() => setPricing(p => ({ ...p, open: false }))} className="text-slate-400 hover:text-white text-lg">×</button>
             </div>
-            <p className="text-xs text-slate-500 mb-4">Set base price per plan. This affects MRR calculations and new subscription offers.</p>
+            <p className="text-xs text-slate-500 mb-4">Set base pricing per plan. This affects MRR calculations and new subscription offers.</p>
             <div className="space-y-3 mb-5">
               {pricingModal.plans.map((p, i) => {
                 const Icon = p.icon
                 return (
-                  <div key={p.key} className="flex items-center gap-3 p-3 bg-white/3 rounded-xl border border-white/5">
-                    <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${p.badge}`}>
-                      <Icon className="w-4 h-4" />
+                  <div key={p.key} className="p-3 bg-white/3 rounded-xl border border-white/5 space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className={`w-8 h-8 rounded-lg flex items-center justify-center ${p.badge}`}>
+                        <Icon className="w-4 h-4" />
+                      </div>
+                      <span className="text-sm text-white flex-1 font-medium">{p.label}</span>
                     </div>
-                    <span className="text-sm text-white flex-1 font-medium">{p.label}</span>
-                    <div className="flex items-center gap-1">
-                      <span className="text-slate-400 text-sm">$</span>
-                      <input
-                        type="number" min={0} step={1}
-                        value={pricingModal.plans[i].price}
-                        onChange={e => setPricing(pm => {
-                          const updated = [...pm.plans]
-                          updated[i] = { ...updated[i], price: parseInt(e.target.value) || 0 }
-                          return { ...pm, plans: updated }
-                        })}
-                        className="w-24 bg-white/10 border border-white/20 rounded-lg px-2 py-1 text-white text-sm text-right"
-                      />
-                      <span className="text-slate-500 text-xs">/mo</span>
+                    <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-1 flex-1">
+                        <span className="text-slate-400 text-sm">$</span>
+                        <input
+                          type="number" min={0} step={1}
+                          value={pricingModal.plans[i].priceMonthly}
+                          onChange={e => setPricing(pm => {
+                            const updated = [...pm.plans]
+                            updated[i] = { ...updated[i], priceMonthly: parseInt(e.target.value) || 0 }
+                            return { ...pm, plans: updated }
+                          })}
+                          className="w-20 bg-white/10 border border-white/20 rounded-lg px-2 py-1 text-white text-sm text-right"
+                        />
+                        <span className="text-slate-500 text-xs">/mo</span>
+                      </div>
+                      <div className="flex items-center gap-1 flex-1">
+                        <span className="text-slate-400 text-sm">$</span>
+                        <input
+                          type="number" min={0} step={1}
+                          value={pricingModal.plans[i].priceYearly}
+                          onChange={e => setPricing(pm => {
+                            const updated = [...pm.plans]
+                            updated[i] = { ...updated[i], priceYearly: parseInt(e.target.value) || 0 }
+                            return { ...pm, plans: updated }
+                          })}
+                          className="w-20 bg-white/10 border border-white/20 rounded-lg px-2 py-1 text-white text-sm text-right"
+                        />
+                        <span className="text-slate-500 text-xs">/yr</span>
+                      </div>
                     </div>
                   </div>
                 )

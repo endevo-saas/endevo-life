@@ -12,11 +12,8 @@ import {
 import { api, TenantDetail, User } from '@/lib/api'
 
 const PLAN_BADGE: Record<string, string> = {
-  trial:           'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-  starter:         'bg-blue-500/10 text-blue-400 border-blue-500/20',
-  professional:    'bg-brand-500/10 text-brand-300 border-brand-500/20',
-  enterprise:      'bg-purple-500/10 text-purple-400 border-purple-500/20',
-  'enterprise-plus':'bg-orange-500/10 text-orange-400 border-orange-500/20',
+  basic:           'bg-brand-500/10 text-brand-300 border-brand-500/20',
+  premium:         'bg-orange-500/10 text-orange-400 border-orange-500/20',
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -123,7 +120,7 @@ export default function TenantDetailPage() {
                 <h1 className="text-2xl font-black text-white">{data.name}</h1>
                 <div className="flex items-center gap-2 mt-1 flex-wrap">
                   <span className="text-xs text-slate-500 font-mono">{data.tenantId}</span>
-                  <span className={`px-2 py-0.5 rounded-lg text-xs font-medium border ${PLAN_BADGE[data.plan] || PLAN_BADGE.trial}`}>
+                  <span className={`px-2 py-0.5 rounded-lg text-xs font-medium border ${PLAN_BADGE[data.plan] || PLAN_BADGE.basic}`}>
                     {data.plan}
                   </span>
                   <span className={`px-2 py-0.5 rounded-md text-xs font-medium ${STATUS_COLOR[data.status] || STATUS_COLOR.inactive}`}>

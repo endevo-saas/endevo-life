@@ -53,16 +53,16 @@ def delete_old_users():
 # ── Step 3: Create 10 real tenants ────────────────────────────────────────────
 TENANTS = [
     # (seq, name, plan, seats, website, industry, hr_first, hr_last, hr_email, status)
-    ( 1, "Maple Financial Group",    "enterprise-plus", 500, "https://maplefinancial.ca",  "Finance",     "Jennifer", "Clarke",  "hr@maplefinancial.ca",   "active"),
-    ( 2, "TechNova Solutions",       "enterprise",      200, "https://technovasolutions.io","Technology",  "Rajan",    "Mehta",   "hr@technovasolutions.io",  "active"),
-    ( 3, "Apex Healthcare",          "professional",    80,  "https://apexhealthcare.com", "Healthcare",  "Sarah",    "Mitchell","hr@apexhealthcare.com",   "active"),
-    ( 4, "Horizon Logistics",        "professional",    60,  "https://horizonlogistics.co","Logistics",   "David",    "Park",    "hr@horizonlogistics.co",  "active"),
-    ( 5, "GreenLeaf Energy",         "starter",         20,  "https://greenleafenergy.com","Energy",      "Natalie",  "Wong",    "hr@greenleafenergy.com",  "active"),
-    ( 6, "Atlas Construction",       "starter",         18,  "https://atlasconstruction.ca","Construction","Marcus",  "Rivera",  "hr@atlasconstruction.ca", "active"),
-    ( 7, "Pinnacle Law Partners",    "professional",    45,  "https://pinnaclelaw.com",    "Legal",       "Priya",    "Sharma",  "hr@pinnaclelaw.com",      "active"),
-    ( 8, "BlueSky Retail Corp",      "enterprise",      150, "https://blueskyretail.com",  "Retail",      "Thomas",   "Bennett", "hr@blueskyretail.com",    "active"),
-    ( 9, "Quantum AI Labs",          "trial",           8,   "https://quantumailabs.io",   "AI Research", "Zara",     "Hassan",  "hr@quantumailabs.io",    "trial"),
-    (10, "Meridian Education Group", "enterprise-plus", 400, "https://meridianedu.ca",     "Education",   "Lisa",     "Nakamura","hr@meridianedu.ca",       "active"),
+    ( 1, "Maple Financial Group",    "premium",  500, "https://maplefinancial.ca",  "Finance",     "Jennifer", "Clarke",  "hr@maplefinancial.ca",   "active"),
+    ( 2, "TechNova Solutions",       "premium",  200, "https://technovasolutions.io","Technology",  "Rajan",    "Mehta",   "hr@technovasolutions.io",  "active"),
+    ( 3, "Apex Healthcare",          "basic",    80,  "https://apexhealthcare.com", "Healthcare",  "Sarah",    "Mitchell","hr@apexhealthcare.com",   "active"),
+    ( 4, "Horizon Logistics",        "basic",    60,  "https://horizonlogistics.co","Logistics",   "David",    "Park",    "hr@horizonlogistics.co",  "active"),
+    ( 5, "GreenLeaf Energy",         "basic",    20,  "https://greenleafenergy.com","Energy",      "Natalie",  "Wong",    "hr@greenleafenergy.com",  "active"),
+    ( 6, "Atlas Construction",       "basic",    18,  "https://atlasconstruction.ca","Construction","Marcus",  "Rivera",  "hr@atlasconstruction.ca", "active"),
+    ( 7, "Pinnacle Law Partners",    "premium",  45,  "https://pinnaclelaw.com",    "Legal",       "Priya",    "Sharma",  "hr@pinnaclelaw.com",      "active"),
+    ( 8, "BlueSky Retail Corp",      "premium",  150, "https://blueskyretail.com",  "Retail",      "Thomas",   "Bennett", "hr@blueskyretail.com",    "active"),
+    ( 9, "Quantum AI Labs",          "basic",    8,   "https://quantumailabs.io",   "AI Research", "Zara",     "Hassan",  "hr@quantumailabs.io",     "active"),
+    (10, "Meridian Education Group", "premium",  400, "https://meridianedu.ca",     "Education",   "Lisa",     "Nakamura","hr@meridianedu.ca",       "active"),
 ]
 
 # 3 employees per tenant

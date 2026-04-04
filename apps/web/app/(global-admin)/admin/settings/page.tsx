@@ -20,18 +20,15 @@ interface PlatformCfg {
   tagline: string
 }
 interface PlanCfg {
-  price: number
+  price_monthly: number
+  price_yearly: number
   max_seats: number
   label: string
   custom?: boolean
-  duration_days?: number
 }
 interface PricingCfg {
-  trial: PlanCfg
-  starter: PlanCfg
-  professional: PlanCfg
-  enterprise: PlanCfg
-  'enterprise-plus': PlanCfg
+  basic: PlanCfg
+  premium: PlanCfg
 }
 interface SecurityCfg {
   otp_enabled: boolean
@@ -57,10 +54,9 @@ interface Config {
 
 type Tab = 'account' | 'platform' | 'pricing' | 'security' | 'notifications'
 
-const PLAN_KEYS: Array<keyof PricingCfg> = ['trial', 'starter', 'professional', 'enterprise', 'enterprise-plus']
+const PLAN_KEYS: Array<keyof PricingCfg> = ['basic', 'premium']
 const PLAN_COLORS: Record<string, string> = {
-  trial: 'text-yellow-400', starter: 'text-blue-400',
-  professional: 'text-brand-300', enterprise: 'text-purple-400', 'enterprise-plus': 'text-orange-400'
+  basic: 'text-brand-300', premium: 'text-orange-400'
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────
@@ -342,7 +338,6 @@ export default function AdminSettingsPage() {
                       <div className="flex items-center gap-2 mb-4">
                         <DollarSign className={`w-4 h-4 ${PLAN_COLORS[planKey]}`} />
                         <h3 className={`text-sm font-semibold ${PLAN_COLORS[planKey]}`}>{plan.label}</h3>
-                        {plan.custom && <span className="text-xs bg-orange-500/10 text-orange-400 border border-orange-500/20 px-2 py-0.5 rounded">Custom Pricing</span>}
                       </div>
                       <div className="grid grid-cols-3 gap-4">
                         <div>
@@ -351,14 +346,25 @@ export default function AdminSettingsPage() {
                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
                             <input
                               type="number"
-                              value={plan.price}
+                              value={plan.price_monthly}
                               min={0}
-                              onChange={e => setCfg(c => c ? { ...c, pricing: { ...c.pricing, [planKey]: { ...plan, price: Number(e.target.value) } } } : c)}
+                              onChange={e => setCfg(c => c ? { ...c, pricing: { ...c.pricing, [planKey]: { ...plan, price_monthly: Number(e.target.value) } } } : c)}
                               className="input-field text-sm pl-7"
-                              disabled={plan.custom}
                             />
                           </div>
-                          {plan.custom && <p className="text-xs text-slate-600 mt-1">Set per-tenant in Subscriptions</p>}
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-500 mb-1.5">Yearly Price (USD)</label>
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-sm">$</span>
+                            <input
+                              type="number"
+                              value={plan.price_yearly}
+                              min={0}
+                              onChange={e => setCfg(c => c ? { ...c, pricing: { ...c.pricing, [planKey]: { ...plan, price_yearly: Number(e.target.value) } } } : c)}
+                              className="input-field text-sm pl-7"
+                            />
+                          </div>
                         </div>
                         <div>
                           <label className="block text-xs text-slate-500 mb-1.5">Max Seats</label>
@@ -370,18 +376,6 @@ export default function AdminSettingsPage() {
                             className="input-field text-sm"
                           />
                         </div>
-                        {planKey === 'trial' && (
-                          <div>
-                            <label className="block text-xs text-slate-500 mb-1.5">Trial Duration (days)</label>
-                            <input
-                              type="number"
-                              value={plan.duration_days || 14}
-                              min={1}
-                              onChange={e => setCfg(c => c ? { ...c, pricing: { ...c.pricing, trial: { ...c.pricing.trial, duration_days: Number(e.target.value) } } } : c)}
-                              className="input-field text-sm"
-                            />
-                          </div>
-                        )}
                       </div>
                     </div>
                   )

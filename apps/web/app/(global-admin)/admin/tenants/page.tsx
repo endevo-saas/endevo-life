@@ -14,24 +14,18 @@ import Link from 'next/link'
 type Modal = 'create' | 'edit' | 'view' | 'confirm-toggle' | null
 
 const PLANS = [
-  { id: 'trial', label: 'Trial (14 days free)', maxSeats: 10, price: '$0' },
-  { id: 'starter', label: 'Starter', maxSeats: 25, price: '$249/mo' },
-  { id: 'professional', label: 'Professional', maxSeats: 100, price: '$599/mo' },
-  { id: 'enterprise', label: 'Enterprise', maxSeats: 500, price: '$1,499/mo' },
-  { id: 'enterprise-plus', label: 'Enterprise Plus', maxSeats: 9999, price: 'Custom' },
+  { id: 'basic', label: 'Endevo Basic', maxSeats: 100, price: '$299/yr ($29/mo)' },
+  { id: 'premium', label: 'Endevo Premium', maxSeats: 9999, price: '$499/yr ($49/mo)' },
 ]
-const STATUSES = ['active', 'inactive', 'suspended', 'trial']
+const STATUSES = ['active', 'inactive', 'suspended']
 
 const planColor = (p: string) =>
-  p==='trial' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' :
-  p==='starter' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' :
-  p==='professional' ? 'bg-brand-500/10 text-brand-300 border-brand-500/20' :
-  p==='enterprise' ? 'bg-purple-500/10 text-purple-400 border-purple-500/20' :
-  'bg-orange-500/10 text-orange-400 border-orange-500/20'
+  p==='basic' ? 'bg-brand-500/10 text-brand-300 border-brand-500/20' :
+  p==='premium' ? 'bg-orange-500/10 text-orange-400 border-orange-500/20' :
+  'bg-slate-500/20 text-slate-400 border-slate-500/20'
 
 const statusColor = (s: string) =>
   s==='active'   ? 'bg-green-500/10 text-green-400' :
-  s==='trial'    ? 'bg-yellow-500/10 text-yellow-400' :
   s==='suspended'? 'bg-orange-500/10 text-orange-400' :
   s==='disabled' ? 'bg-red-500/10 text-red-400' :
   s==='system'   ? 'bg-brand-500/10 text-brand-300' :
@@ -55,7 +49,7 @@ export default function TenantsPage() {
   const [modal, setModal] = useState<Modal>(null)
   const [selected, setSelected] = useState<TenantFull | null>(null)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ name:'', website:'', hrContact:'', hrEmail:'', hrFirstName:'', hrLastName:'', plan:'professional', maxSeats:'50', status:'active' })
+  const [form, setForm] = useState({ name:'', website:'', hrContact:'', hrEmail:'', hrFirstName:'', hrLastName:'', plan:'basic', maxSeats:'50', status:'active' })
 
   async function load() {
     setLoading(true); setError('')
@@ -67,7 +61,7 @@ export default function TenantsPage() {
 
   const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(()=>setSuccess(''),4000) }
   const closeModal = () => { setModal(null); setSelected(null); setError('') }
-  const openCreate = () => { setForm({name:'',website:'',hrContact:'',hrEmail:'',hrFirstName:'',hrLastName:'',plan:'professional',maxSeats:'50',status:'active'}); setModal('create') }
+  const openCreate = () => { setForm({name:'',website:'',hrContact:'',hrEmail:'',hrFirstName:'',hrLastName:'',plan:'basic',maxSeats:'50',status:'active'}); setModal('create') }
   const openEdit = (t: TenantFull) => { setSelected(t); setForm({name:t.name,website:t.website||'',hrContact:t.hrContact||'',hrEmail:t.hrEmail||'',hrFirstName:'',hrLastName:'',plan:t.plan,maxSeats:String(t.maxSeats||50),status:t.status}); setModal('edit') }
   const openView = (t: TenantFull) => { setSelected(t); setModal('view') }
   const openToggle = (t: TenantFull) => { setSelected(t); setModal('confirm-toggle') }
