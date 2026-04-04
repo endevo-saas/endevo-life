@@ -138,6 +138,9 @@ export default function ModuleDetailPage() {
   const router = useRouter()
 
   const [module, setModule] = useState<ModuleDetail | null>(null)
+  const [lessons, setLessons] = useState<{lessonId:string;order:number;title:string;lessonType:string;isRequired:boolean;status:string;percentWatched:number;quizPassed:boolean}[]>([])
+  const [lessonsTotal, setLessonsTotal] = useState(0)
+  const [lessonsCompleted, setLessonsCompleted] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [completing, setCompleting] = useState(false)
@@ -149,9 +152,15 @@ export default function ModuleDetailPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await api.lmsGetModule(moduleNum) as ModuleDetail
-      setModule(res)
-      setCompleted(res.lockStatus === 'complete')
+      const [moduleRes, lessonsRes] = await Promise.all([
+        api.lmsGetModule(moduleNum) as Promise<ModuleDetail>,
+        api.lmsGetLessons(moduleNum) as Promise<{lessons: typeof lessons; total: number; completed: number; moduleComplete: boolean}>,
+      ])
+      setModule(moduleRes)
+      setCompleted(moduleRes.lockStatus === 'complete' || lessonsRes.moduleComplete)
+      setLessons(lessonsRes.lessons || [])
+      setLessonsTotal(lessonsRes.total || 0)
+      setLessonsCompleted(lessonsRes.completed || 0)
       setTimeout(() => setEntered(true), 80)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load module')
@@ -265,17 +274,17 @@ export default function ModuleDetailPage() {
               <div className="mt-4 space-y-1.5">
                 <div className="flex justify-between text-xs">
                   <span style={{ color: 'var(--text-muted)' }}>
-                    {watchedCount}/{allVideos.length} videos watched
+                    {lessonsCompleted}/{lessonsTotal} lessons completed
                   </span>
                   <span className="font-semibold" style={{ color: '#2BBFC5' }}>
-                    {allVideos.length > 0 ? Math.round((watchedCount / allVideos.length) * 100) : 0}%
+                    {lessonsTotal > 0 ? Math.round((lessonsCompleted / lessonsTotal) * 100) : 0}%
                   </span>
                 </div>
                 <div className="w-full rounded-full h-2" style={{ background: 'var(--bg-elevated)' }}>
                   <div
                     className="h-2 rounded-full transition-all duration-700"
                     style={{
-                      width: `${allVideos.length > 0 ? Math.round((watchedCount / allVideos.length) * 100) : 0}%`,
+                      width: `${lessonsTotal > 0 ? Math.round((lessonsCompleted / lessonsTotal) * 100) : 0}%`,
                       background: 'linear-gradient(90deg,#2BBFC5,#10b981)',
                     }}
                   />
@@ -300,26 +309,54 @@ export default function ModuleDetailPage() {
               </div>
             )}
 
-            {/* Main videos */}
-            {mainVideos.length > 0 && (
+            {/* Lessons list */}
+            {lessons.length > 0 && (
               <div>
-                <p className="text-sm font-black text-white mb-3">Main Video</p>
-                <div className="space-y-3">
-                  {mainVideos.map(v => (
-                    <VideoCard key={v.videoId} video={v} moduleNum={moduleNum} />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Action videos */}
-            {actionVideos.length > 0 && (
-              <div>
-                <p className="text-sm font-black text-white mb-3">Action Steps</p>
-                <div className="space-y-3">
-                  {actionVideos.map(v => (
-                    <VideoCard key={v.videoId} video={v} moduleNum={moduleNum} />
-                  ))}
+                <p className="text-sm font-black text-white mb-3">Lessons</p>
+                <div className="space-y-2">
+                  {lessons.map(lesson => {
+                    const typeIcons: Record<string, string> = {
+                      video: '\u25B6\uFE0F', quiz: '\u270F\uFE0F', pdf: '\uD83D\uDCC4', podcast: '\uD83C\uDFA7', resource: '\uD83D\uDCDA',
+                    }
+                    const isDone = lesson.status === 'completed'
+                    const inProgress = lesson.status === 'in_progress'
+                    return (
+                      <Link
+                        key={lesson.lessonId}
+                        href={`/employee/lms/module/${moduleNum}/lesson/${lesson.lessonId}`}
+                        className="flex items-center gap-3 p-4 rounded-xl transition-all hover:-translate-y-0.5 group"
+                        style={{
+                          background: 'var(--bg-elevated)',
+                          border: `1px solid ${isDone ? 'rgba(43,191,197,0.3)' : inProgress ? 'rgba(232,97,42,0.3)' : 'var(--border-subtle)'}`,
+                        }}
+                      >
+                        <span className="text-lg w-8 text-center">{typeIcons[lesson.lessonType] || '\uD83D\uDCDA'}</span>
+                        <span className="text-xs font-mono w-6 text-right" style={{ color: 'var(--text-muted)' }}>{lesson.order}</span>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-bold text-white truncate">{lesson.title}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full" style={{
+                              background: lesson.lessonType === 'video' ? 'rgba(43,191,197,0.15)' :
+                                lesson.lessonType === 'quiz' ? 'rgba(139,92,246,0.15)' :
+                                lesson.lessonType === 'pdf' ? 'rgba(232,97,42,0.15)' :
+                                'rgba(168,85,247,0.15)',
+                              color: lesson.lessonType === 'video' ? '#2BBFC5' :
+                                lesson.lessonType === 'quiz' ? '#8B5CF6' :
+                                lesson.lessonType === 'pdf' ? '#E8612A' : '#A855F7',
+                            }}>
+                              {lesson.lessonType}
+                            </span>
+                            {lesson.isRequired && (
+                              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Required</span>
+                            )}
+                          </div>
+                        </div>
+                        <span className="text-sm flex-shrink-0">
+                          {isDone ? '\u2705' : inProgress ? '\uD83D\uDD36' : '\u26AA'}
+                        </span>
+                      </Link>
+                    )
+                  })}
                 </div>
               </div>
             )}
