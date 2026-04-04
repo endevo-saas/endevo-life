@@ -58,7 +58,7 @@ export default function LessonSidebar({ lessons, currentLessonId, moduleNum }: P
       </div>
 
       {/* Lesson list */}
-      <nav className="max-h-[calc(100vh-280px)] overflow-y-auto">
+      <nav className="max-h-[calc(100vh-200px)] overflow-y-auto scrollbar-thin">
         {lessons.map((lesson) => {
           const active = lesson.lessonId === currentLessonId
           return (

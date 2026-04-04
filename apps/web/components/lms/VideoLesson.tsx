@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { api } from '@/lib/api'
+import { RotateCcw, ArrowRight, CheckCircle2 } from 'lucide-react'
 
 interface Props {
   lessonId: string
@@ -9,13 +10,20 @@ interface Props {
   title: string
   description: string
   lastPosition: number
+  percentWatched: number
   onComplete: () => void
+  nextLessonId?: string | null
+  onNavigateNext?: () => void
 }
 
-export default function VideoLesson({ lessonId, streamUrl, title, description, lastPosition, onComplete }: Props) {
+export default function VideoLesson({
+  lessonId, streamUrl, title, description, lastPosition, percentWatched,
+  onComplete, nextLessonId, onNavigateNext
+}: Props) {
   const videoRef = useRef<HTMLVideoElement>(null)
-  const [playing, setPlaying] = useState(false)
-  const [progress, setProgress] = useState(0)
+  const [progress, setProgress] = useState(percentWatched || 0)
+  const [finished, setFinished] = useState(percentWatched >= 95)
+  const [marked, setMarked] = useState(percentWatched >= 95)
   const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const saveProgress = useCallback(async () => {
@@ -30,42 +38,47 @@ export default function VideoLesson({ lessonId, streamUrl, title, description, l
         lastPosition: Math.round(video.currentTime),
         percentWatched: pct,
       })
-      if (pct >= 95) {
+      if (pct >= 95 && !marked) {
+        setMarked(true)
         onComplete()
       }
     } catch {
       // Silent — progress save is best-effort
     }
-  }, [lessonId, onComplete])
+  }, [lessonId, onComplete, marked])
 
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
 
-    // Resume from last position
-    if (lastPosition > 5) {
-      video.currentTime = lastPosition - 3 // rewind 3s for context
+    // Resume from last position only if not completed
+    if (lastPosition > 5 && percentWatched < 95) {
+      video.currentTime = lastPosition - 3
     }
 
-    // Start progress tracker
     const handlePlay = () => {
-      setPlaying(true)
-      // Mark lesson as started
       api.lmsStartLesson(lessonId).catch(() => {})
-      // Save progress every 15 seconds
       progressTimerRef.current = setInterval(saveProgress, 15000)
     }
 
     const handlePause = () => {
-      setPlaying(false)
       if (progressTimerRef.current) clearInterval(progressTimerRef.current)
       saveProgress()
     }
 
     const handleEnded = () => {
-      setPlaying(false)
       if (progressTimerRef.current) clearInterval(progressTimerRef.current)
-      saveProgress()
+      setFinished(true)
+      setProgress(100)
+      // Final save at 100%
+      api.lmsUpdateLessonProgress(lessonId, {
+        lastPosition: Math.round(video.duration),
+        percentWatched: 100,
+      }).catch(() => {})
+      if (!marked) {
+        setMarked(true)
+        onComplete()
+      }
     }
 
     video.addEventListener('play', handlePlay)
@@ -78,23 +91,57 @@ export default function VideoLesson({ lessonId, streamUrl, title, description, l
       video.removeEventListener('ended', handleEnded)
       if (progressTimerRef.current) clearInterval(progressTimerRef.current)
     }
-  }, [lessonId, lastPosition, saveProgress])
+  }, [lessonId, lastPosition, percentWatched, saveProgress, marked, onComplete])
+
+  const handleReplay = () => {
+    const video = videoRef.current
+    if (!video) return
+    video.currentTime = 0
+    video.play()
+    setFinished(false)
+  }
 
   return (
     <div className="space-y-4">
-      <video
-        ref={videoRef}
-        src={streamUrl}
-        controls
-        className="w-full rounded-xl bg-black aspect-video"
-        controlsList="nodownload"
-        playsInline
-      />
+      <div className="relative">
+        <video
+          ref={videoRef}
+          src={streamUrl}
+          controls
+          className="w-full rounded-xl bg-black aspect-video"
+          controlsList="nodownload"
+          playsInline
+        />
+
+        {/* Overlay when video finishes */}
+        {finished && (
+          <div className="absolute inset-0 bg-black/70 rounded-xl flex flex-col items-center justify-center gap-4">
+            <CheckCircle2 className="w-16 h-16 text-emerald-400" />
+            <p className="text-white font-bold text-lg">Lesson Complete</p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={handleReplay}
+                className="flex items-center gap-2 px-5 py-2.5 bg-slate-700 hover:bg-slate-600 text-white rounded-xl text-sm font-medium transition-colors"
+              >
+                <RotateCcw className="w-4 h-4" /> Replay
+              </button>
+              {nextLessonId && onNavigateNext && (
+                <button
+                  onClick={onNavigateNext}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-sm font-medium transition-colors"
+                >
+                  Next Lesson <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* Progress bar */}
       <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
         <div
-          className="h-full bg-teal-500 rounded-full transition-all"
+          className={`h-full rounded-full transition-all ${progress >= 95 ? 'bg-emerald-500' : 'bg-teal-500'}`}
           style={{ width: `${progress}%` }}
         />
       </div>

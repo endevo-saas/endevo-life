@@ -165,7 +165,10 @@ export default function LessonPage() {
               title={lesson.title}
               description={lesson.description}
               lastPosition={lesson.progress?.lastPosition || 0}
+              percentWatched={lesson.progress?.percentWatched || 0}
               onComplete={handleComplete}
+              nextLessonId={lesson.nextLessonId}
+              onNavigateNext={lesson.nextLessonId ? () => router.push(`/employee/lms/module/${moduleNum}/lesson/${lesson.nextLessonId}`) : undefined}
             />
           ) : lesson.lessonType === 'quiz' && quiz ? (
             <QuizEngine
