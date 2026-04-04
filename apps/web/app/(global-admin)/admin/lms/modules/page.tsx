@@ -424,21 +424,21 @@ export default function LmsModulesPage() {
   useEffect(() => { load() }, [load])
 
   const handleSave = async (moduleNum: string, updates: Partial<LmsModule>) => {
-    await api.post('/api/lms/admin/modules', { moduleNum, ...updates })
+    await api.lmsAdminUpsertModule({ moduleNum, ...updates })
     setModules(prev =>
       prev.map(m => m.moduleNum === moduleNum ? { ...m, ...updates } : m)
     )
   }
 
   const handleToggleActive = async (moduleNum: string, isActive: boolean) => {
-    await api.post('/api/lms/admin/modules', { moduleNum, isActive })
+    await api.lmsAdminUpsertModule({ moduleNum, isActive })
     setModules(prev =>
       prev.map(m => m.moduleNum === moduleNum ? { ...m, isActive } : m)
     )
   }
 
   const handleAdd = async (data: Partial<LmsModule>) => {
-    await api.post('/api/lms/admin/modules', data)
+    await api.lmsAdminUpsertModule(data)
     await load()
   }
 
