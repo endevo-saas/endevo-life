@@ -411,8 +411,9 @@ export default function LmsModulesPage() {
     setLoading(true)
     setError('')
     try {
-      const data = await api.get('/api/lms/admin/modules') as LmsModule[]
-      setModules(Array.isArray(data) ? data : [])
+      const data = await api.lmsAdminGetModules() as { modules: LmsModule[] } | LmsModule[]
+      const modules = Array.isArray(data) ? data : (data as { modules: LmsModule[] }).modules ?? []
+      setModules(modules)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load modules')
     } finally {
