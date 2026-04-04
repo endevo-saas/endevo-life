@@ -1,7 +1,7 @@
 """
 Admin routes — super admin / admin CRUD for questions, modules, and user progress.
 
-All routes require role in ("super_admin", "admin").
+All routes require role in ("GLOBAL_ADMIN", "HR_ADMIN").
 
 Schema notes:
   - endevo-uat-lms-user-modules: field lockStatus (locked|unlocked|complete).

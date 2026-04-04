@@ -61,6 +61,6 @@ def require_admin(role: Optional[str]) -> Optional[dict]:
     """Return a 403 response dict if caller does not have admin role, else None."""
     from utils.response import err  # local import avoids circular dependency
 
-    if role not in ("super_admin", "admin"):
+    if role not in ("GLOBAL_ADMIN", "HR_ADMIN"):
         return err(403, "Admin access required")
     return None
