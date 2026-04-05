@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Building2, Users, Award, Activity, Loader2, RefreshCw,
+  Building2, Users, Award, Activity, RefreshCw,
   TrendingUp, Shield, Globe, CreditCard, ArrowUpRight,
   CheckCircle, AlertTriangle, Sparkles, BookOpen, ClipboardList,
   Clock

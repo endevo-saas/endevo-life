@@ -3,6 +3,7 @@ Endevo Life — Auth Lambda  v2.0 (2026-03-28)
 Zero Trust foundation: IP tracking, device fingerprint, brute-force protection, security audit.
 
 Routes:
+  GET  /api/auth/health             (Route 53 health check)
   POST /api/auth/login
   POST /api/auth/mfa
   POST /api/auth/register
@@ -210,6 +211,10 @@ def handler(event, context):
 
     if method == "OPTIONS":
         return resp(200, {})
+
+    # ── GET /api/auth/health — Route 53 health check endpoint ────────
+    if path.endswith("/health") and method == "GET":
+        return resp(200, {"status": "healthy", "region": REGION})
 
     body = get_body(event)
 
