@@ -1,190 +1,483 @@
-# Endevo Life
+# Endevo Life — Enterprise Digital Legacy Platform
 
-> AI-Powered Digital Legacy & Estate Planning Platform for Enterprise HR
+> The first purpose-built SaaS platform that transforms estate and legacy planning into a structured, measurable employee benefit — delivered through an enterprise LMS with multi-tenant isolation, serverless infrastructure, and zero-dependency Lambda functions.
 
-[![Live Platform](https://img.shields.io/badge/Live-Platform-brightgreen)](https://main.d1vvfv8oltolcf.amplifyapp.com)
+[![Live Platform](https://img.shields.io/badge/Live-Platform-brightgreen)](https://main.d1vgn9nzfx4cxk.amplifyapp.com)
 [![AWS Serverless](https://img.shields.io/badge/Stack-AWS_Serverless-orange)](https://aws.amazon.com)
 [![Next.js 15](https://img.shields.io/badge/Frontend-Next.js_15-black)](https://nextjs.org)
-[![Python Lambda](https://img.shields.io/badge/Backend-Python_Lambda-blue)](https://aws.amazon.com/lambda/)
+[![Python 3.12](https://img.shields.io/badge/Backend-Python_3.12-blue)](https://aws.amazon.com/lambda/)
+[![107+ Commits](https://img.shields.io/badge/Commits-107%2B-purple)](#)
 
 ---
 
-## What is Endevo Life?
+## The Problem
 
-Endevo Life is an enterprise SaaS platform that helps organizations prepare their employees for life's most important — and most neglected — planning decisions: legacy, estate, legal, financial, and digital affairs. Through a structured Learning Management System (LMS), employees complete guided modules covering everything from wills and trusts to digital asset management, earning verifiable certificates along the way.
+Estate and legacy planning is the most important employee benefit that no company offers. Employees deal with wills, trusts, digital assets, healthcare directives, and financial succession — yet HR departments have no structured way to guide them through it. When a life event strikes, employees are unprepared, families are left navigating chaos, and employers bear the productivity cost of distracted, stressed workers. The $68B corporate wellness market covers fitness, mental health, and financial literacy — but legacy planning is entirely absent.
 
-Built for Corporate HR teams, Endevo Life turns legacy planning from an uncomfortable conversation into a measurable, trackable employee benefit — one that companies can offer alongside health insurance and retirement plans.
-
----
-
-## Product Features
-
-### For Employees
-- **Readiness Assessment** — Personalized scorecard across Legal, Financial, Physical, and Digital readiness domains with targeted recommendations
-- **6-Module Learning Path** — Structured curriculum with video lessons, PDFs, podcasts, and interactive quizzes
-- **4 Quiz Types** — Multiple choice, Likert scale, open text, and checklist — each designed for different learning objectives
-- **Video Player with Resume** — Pick up exactly where you left off; inline quiz popups during playback
-- **Progress Tracking** — Duolingo-style dashboard showing module completion, streaks, and milestones
-- **Verifiable Certificates** — Earned upon module completion, downloadable and shareable
-
-### For HR Administrators
-- **Tenant-Scoped Dashboard** — See your organization's enrollment, completion rates, and certificate stats
-- **Employee Management** — Invite, onboard, and track employee progress through the curriculum
-- **Email Invitations** — One-click invite via SES with automatic account provisioning
-- **Progress Analytics** — Module-by-module breakdown per employee with completion tracking
-- **Audit Trail** — Every action logged with timestamp, IP address, and severity
-
-### For Platform Administrators (Global Admin)
-- **Multi-Tenant Control Center** — Manage all organizations, users, and subscriptions from one dashboard
-- **LMS Content Management** — Create and edit modules, lessons, quizzes, and video content
-- **User & Role Management** — Full CRUD for all users across all tenants with role assignment
-- **System Health Monitor** — Live probe of DynamoDB, Cognito, and Lambda status
-- **Subscription Management** — Plan assignment, seat limits, and billing tier control
-- **Security Audit Log** — Global audit trail with IP tracking, action badges, and CSV export
-
-### Platform-Wide
-- **Multi-Tenant Architecture** — Complete data isolation between organizations
-- **Three-Role RBAC** — Global Admin, HR Admin, Employee — enforced at the JWT token level
-- **Zero Trust Security** — CORS restrictions, WAF protection, brute-force detection, encrypted data at rest and in transit
-- **Responsive Design** — Works on desktop, tablet, and mobile browsers
-- **Theme Support** — Multiple user-selectable themes (Eclipse, Canvas, Neon)
+The gap exists because estate planning has historically required expensive attorneys and financial advisors, making it inaccessible as a scalable employee benefit. Generic LMS platforms like Coursera or LinkedIn Learning cannot serve this need — they lack the specialized content structure, the sensitivity-aware quiz formats (Likert self-assessment, checklists, reflective exercises), and the multi-tenant HR reporting that corporate buyers require. Endevo Life fills this gap with a purpose-built platform that treats legacy planning as education, not legal advice — making it deployable, trackable, and measurable like any other HR program.
 
 ---
 
-## Architecture Overview
+## The Solution
+
+Endevo Life is a B2B SaaS platform that delivers estate and legacy planning education to employees through a structured Learning Management System. HR administrators enroll their organization, employees complete a six-module curriculum covering legal, financial, physical, digital, and communication aspects of legacy planning, and the platform tracks every interaction — completion rates, quiz scores, certificate issuance — giving HR teams a measurable benefit to report alongside health insurance and retirement plans.
+
+**Measurable outcomes:**
+- Employees receive a personalized Readiness Assessment across four domains (Legal, Financial, Physical, Digital)
+- 15 structured lessons in Module 1 alone, spanning video, PDF, podcast, and four distinct quiz types
+- Automatic certificate issuance upon module completion — downloadable and shareable
+- HR dashboards with per-employee progress tracking, completion analytics, and audit trails
+- Multi-tenant isolation ensures each organization's data is completely separate
+
+---
+
+## Platform at a Glance
+
+| Metric | Value |
+|--------|-------|
+| **DynamoDB Tables** | 13 |
+| **Lambda Functions** | 5 (Python 3.12, 256 MB, 30s timeout) |
+| **API Endpoints** | 81 (counted from frontend API client) |
+| **CDK Stacks** | 8 CloudFormation stacks |
+| **Quiz Types** | 4 (Multiple Choice, Likert Scale, Open Text, Checklist) |
+| **Learning Modules** | 6 (Module 1 fully built, Modules 2-6 content pending) |
+| **Module 1 Lessons** | 15 (video, PDF, podcast, quiz) |
+| **Lesson Types** | 5 (video, quiz, pdf, podcast, resource) |
+| **User Roles** | 3 (Global Admin, HR Admin, Employee) |
+| **Git Commits** | 107+ |
+| **QA Test Cases** | 69 (98.6% pass rate) |
+| **Cross-Tenant Leaks Found** | 0 |
+| **External pip Dependencies** | 0 (pure boto3) |
+
+---
+
+## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     USERS (Browser)                      │
-│       https://main.d1vvfv8oltolcf.amplifyapp.com         │
-└────────────────────────┬────────────────────────────────┘
-                         │ HTTPS
-┌────────────────────────▼────────────────────────────────┐
-│          AWS Amplify — Next.js 15 App Router             │
-│     Auto-deploy: GitHub push → live in ~3 minutes        │
-└────────────────────────┬────────────────────────────────┘
-                         │ fetch() API calls
-┌────────────────────────▼────────────────────────────────┐
-│        Amazon API Gateway (HTTP API)                     │
-│                                                          │
-│   /api/auth/*      → endevo-uat-fn-auth                  │
-│   /api/admin/*     → endevo-uat-fn-admin                 │
-│   /api/hr/*        → endevo-uat-fn-hr                    │
-│   /api/employee/*  → endevo-uat-fn-employee              │
-│   /api/lms/*       → endevo-uat-fn-lms (content engine)  │
-└───────┬────────┬────────┬──────────┬──────────┬─────────┘
-        │        │        │          │          │
-    fn-auth  fn-admin   fn-hr   fn-employee  fn-lms
-        │        │        │          │          │
-┌───────▼────────▼────────▼──────────▼──────────▼─────────┐
-│               Amazon DynamoDB (8+ Tables)                 │
-│     endevo-uat-tenants    endevo-uat-users                │
-│     endevo-uat-training   endevo-uat-questions            │
-│     endevo-uat-responses  endevo-uat-certificates         │
-│     endevo-uat-video-progress  endevo-uat-audit           │
-├──────────────────────────────────────────────────────────┤
-│            Amazon Cognito User Pool                       │
-│     JWT tokens with custom:role + custom:tenantId         │
-├──────────────────────────────────────────────────────────┤
-│     Amazon S3 — Video & PDF content storage               │
-│     Amazon CloudFront — Content delivery                  │
-│     Amazon SES — Transactional email                      │
-└──────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────────────────┐
+│                         USERS (Browser)                              │
+│         https://main.d1vgn9nzfx4cxk.amplifyapp.com                  │
+│         https://uat.endevo.life (custom domain)                      │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │ HTTPS (TLS 1.2+)
+┌────────────────────────────▼─────────────────────────────────────────┐
+│                  AWS Amplify — Next.js 15 App Router                 │
+│          Git-push auto-deploy │ Built-in SSL │ CDN edge caching      │
+│          Build time: ~3 minutes │ Zero DevOps                        │
+└────────────────────────────┬─────────────────────────────────────────┘
+                             │ fetch() with Bearer JWT
+┌────────────────────────────▼─────────────────────────────────────────┐
+│              Amazon API Gateway (HTTP API)                            │
+│                                                                      │
+│   /api/auth/*      → endevo-uat-fn-auth      (7 routes)             │
+│   /api/admin/*     → endevo-uat-fn-admin     (24 routes)            │
+│   /api/hr/*        → endevo-uat-fn-hr        (10 routes)            │
+│   /api/employee/*  → endevo-uat-fn-employee  (8 routes)             │
+│   /api/lms/*       → endevo-uat-fn-lms       (32 routes)            │
+│                                                                      │
+│   WAF protection │ CORS restricted │ ~71% cheaper than REST API      │
+└───┬─────────┬─────────┬──────────┬──────────┬───────────────────────┘
+    │         │         │          │          │
+ fn-auth  fn-admin   fn-hr   fn-employee  fn-lms
+    │         │         │          │          │
+    │    Python 3.12 │ 256 MB │ 30s timeout │ Pure boto3 (0 deps)
+    │         │         │          │          │
+┌───▼─────────▼─────────▼──────────▼──────────▼───────────────────────┐
+│                  Amazon DynamoDB (13 Tables)                          │
+│                                                                      │
+│   endevo-uat-tenants            endevo-uat-users                     │
+│   endevo-uat-training           endevo-uat-questions                 │
+│   endevo-uat-responses          endevo-uat-certificates              │
+│   endevo-uat-video-progress     endevo-uat-audit                     │
+│   endevo-uat-config             endevo-uat-lms-modules               │
+│   endevo-uat-lms-lessons        endevo-uat-lms-lesson-progress       │
+│   endevo-uat-lms-user-modules                                        │
+│                                                                      │
+│   Server-side encryption │ On-demand capacity │ Per-tenant isolation  │
+├──────────────────────────────────────────────────────────────────────┤
+│                  Amazon Cognito User Pool                             │
+│   Pool: us-east-1_DVyEJqgFt │ JWT with custom:role + custom:tenantId │
+│   MFA support │ Email OTP for Global Admin │ Brute-force protection  │
+├──────────────────────────────────────────────────────────────────────┤
+│                  Amazon S3 — LMS Content Storage                     │
+│   Video lectures │ PDF documents │ Podcast audio │ Presigned URLs    │
+├──────────────────────────────────────────────────────────────────────┤
+│                  Amazon CloudFront — Content Delivery                 │
+│   Edge caching for video/PDF │ HTTPS-only │ Geographic distribution  │
+├──────────────────────────────────────────────────────────────────────┤
+│                  Amazon SES — Transactional Email                     │
+│   Employee invite emails │ Password resets │ Verified domain          │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+### Why Each Service Was Chosen
+
+| Service | Why This, Not That |
+|---------|-------------------|
+| **DynamoDB** over RDS/Aurora | Serverless, zero connection pooling overhead, auto-scales to zero, cheaper at low volume. Single-digit millisecond reads. Aurora planned for analytics workloads in Phase 6. |
+| **HTTP API Gateway** over REST API | 71% cost reduction for Lambda proxy routing. No need for request/response transformation, API keys, or usage plans at this stage. |
+| **Cognito** over Auth0/Firebase Auth | Native AWS integration, custom attributes in JWT (role + tenantId = zero extra DB lookups per request), HIPAA-eligible, no vendor lock-in outside AWS. |
+| **Amplify** over Vercel/Netlify | Same ecosystem, Git-push deploy, built-in SSL/CDN, no Docker, no Kubernetes. Zero DevOps for the frontend. |
+| **CloudFront** over direct S3 | Edge caching for video content, HTTPS enforcement, geographic distribution. S3 presigned URLs for zero-trust PDF access. |
+| **Lambda** over ECS/Fargate | Pure functions with no framework overhead. Single `main.py` per function — no pip dependencies, no Docker, sub-second cold starts. |
+| **SES** over SendGrid/Mailgun | Native AWS, cost-effective at scale, no additional vendor relationship. Moving out of sandbox before production launch. |
+| **CDK** over Terraform/CloudFormation YAML | TypeScript type safety, component reuse, IDE autocomplete. 8 stacks that compose cleanly. |
+
+---
+
+## Technology Stack (Deep Dive)
+
+| Layer | Technology | Version | Purpose | Why This Over Alternatives |
+|-------|-----------|---------|---------|---------------------------|
+| **Frontend Framework** | Next.js | 15 (App Router) | Server-rendered React with route groups per role | App Router enables per-role layouts via route groups; React Server Components reduce client JS bundle |
+| **Frontend Language** | TypeScript | 5.x | Type-safe frontend development | Catches interface mismatches at compile time — critical when 81 API endpoints exist |
+| **Styling** | Tailwind CSS | 3.x | Utility-first responsive design | Consistent design system without CSS-in-JS runtime cost; purges unused styles in production |
+| **Form Handling** | react-hook-form + Zod | Latest | Schema-validated forms | Zod schemas validate at both form and API boundary; zero re-renders during typing |
+| **Backend Runtime** | Python | 3.12 | Lambda function implementation | Team expertise, boto3 native support, fast iteration. No framework (Flask/Django) — raw Lambda handlers for minimal cold start |
+| **Backend Dependencies** | boto3 (built-in) | Lambda runtime | AWS SDK | Zero pip dependencies. Every Lambda is a single `main.py` file — no layers, no Docker, no zip complexity |
+| **Database** | Amazon DynamoDB | On-demand | All application data (13 tables) | Serverless NoSQL, auto-scales, per-tenant partition isolation via hash keys |
+| **Authentication** | Amazon Cognito | User Pool v1 | JWT-based auth with custom claims | `custom:role` + `custom:tenantId` embedded in JWT — zero database lookups for authorization |
+| **API Layer** | Amazon API Gateway | HTTP API | Single entry point, Lambda proxy | Routes to 5 Lambda functions by path prefix. 71% cheaper than REST API Gateway |
+| **Frontend Hosting** | AWS Amplify | Gen 1 | Git-push auto-deploy with SSL/CDN | GitHub webhook triggers build on push to `main`. Live in ~3 minutes |
+| **CDN** | Amazon CloudFront | Latest | Video and PDF content delivery | Edge caching for LMS media, HTTPS-only, geographic distribution |
+| **Object Storage** | Amazon S3 | Standard | LMS media files (video, PDF, podcast) | Presigned URLs for zero-trust access. Lifecycle policies for cost optimization |
+| **Email** | Amazon SES | v2 | Invite emails and password resets | Native AWS, no additional vendor. Sandbox mode for UAT |
+| **Infrastructure** | AWS CDK | 2.130+ | 8 CloudFormation stacks | TypeScript IaC with type safety, component reuse, and IDE support |
+| **Monorepo** | pnpm + Turborepo | 9+ / Latest | Workspace management | Shared configs, parallel builds, single lockfile |
+| **CI/CD** | GitHub Actions + Amplify | Latest | Automated deploys | Lambda: GitHub Actions zips and deploys. Frontend: Amplify auto-deploy on push |
+
+---
+
+## DynamoDB Schema Design
+
+All 13 tables with partition keys, sort keys, and access patterns:
+
+| # | Table | PK (Hash) | SK (Range) | Purpose | Primary Access Pattern |
+|---|-------|-----------|------------|---------|----------------------|
+| 1 | `endevo-uat-tenants` | `tenantId` | — | Organization accounts | Get tenant by ID; scan all tenants for admin |
+| 2 | `endevo-uat-users` | `userId` | — | All users across all tenants | Get user by ID; filter by tenantId for HR queries |
+| 3 | `endevo-uat-training` | `tenantId` | `videoId` | Legacy v1 courses (courseId = videoId) | Query courses by tenant; get specific course |
+| 4 | `endevo-uat-questions` | `tenantId` | `questionId` | Assessment + lesson quiz questions | Query questions by tenant; filter by type (assessment / lesson_quiz) |
+| 5 | `endevo-uat-responses` | `userId` | `submittedAt` | Assessment submissions | Query user's submission history (sorted by time) |
+| 6 | `endevo-uat-certificates` | `userId` | `issuedAt` | Earned certificates | Query user's certificates (sorted by issue date) |
+| 7 | `endevo-uat-video-progress` | `userId` | `videoId` | Legacy v1 video/course progress | Get progress for specific video; query all progress for user |
+| 8 | `endevo-uat-audit` | `tenantId` | `sk` (`{timestamp}#{uuid}`) | Security audit trail | Query audit logs by tenant (sorted by time); scan all for global admin |
+| 9 | `endevo-uat-config` | `section` | — | Platform configuration | Get config by section (subscription plans, feature flags) |
+| 10 | `endevo-uat-lms-modules` | `tenantId` | `moduleNum` | Module definitions (6 modules) | Query modules by tenant; SYSTEM tenant for shared templates |
+| 11 | `endevo-uat-lms-lessons` | `tenantId` | `moduleOrder` (`{module}#{lesson}`) | Ordered lesson sequences | Query lessons by tenant + module prefix; e.g., SK begins_with "1#" for Module 1 |
+| 12 | `endevo-uat-lms-lesson-progress` | `userId` | `lessonId` | Per-lesson completion tracking | Get progress for specific lesson; query all lesson progress for user |
+| 13 | `endevo-uat-lms-user-modules` | `userId` | `moduleNum` | Per-user module unlock/completion state | Query user's module states; check if specific module is unlocked |
+
+### Multi-Tenant Content Inheritance
+
+Content follows a fallback pattern: the LMS engine first queries for `tenantId`-specific content, then falls back to the `SYSTEM` tenant for shared templates. This enables organizations to receive the default curriculum while allowing tenant-specific customizations without data duplication.
+
+---
+
+## API Surface
+
+81 endpoints across 5 Lambda functions. Every endpoint requires a valid JWT Bearer token. Role enforcement happens per-request via Cognito `get_user()`.
+
+### Auth Service — `endevo-uat-fn-auth` (7 endpoints)
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| POST | `/api/auth/login` | Cognito `initiate_auth` — returns JWT access token |
+| POST | `/api/auth/verify-otp` | Email OTP verification (Global Admin only) |
+| POST | `/api/auth/signup` | Self-registration with invite validation |
+| GET | `/api/auth/me` | Current user profile from JWT claims |
+| POST | `/api/auth/forgot-password` | Cognito password reset code via email |
+| POST | `/api/auth/reset-password` | Confirm reset with code + new password |
+| POST | `/api/auth/change-password` | Authenticated password change |
+
+### Admin Service — `endevo-uat-fn-admin` (24 endpoints)
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/admin/dashboard` | Platform-wide stats (tenants, users, certs, locked accounts) |
+| GET | `/api/admin/tenants` | All tenants with user/HR/active counts |
+| POST | `/api/admin/tenants` | Create organization |
+| GET | `/api/admin/tenants/{id}` | Tenant detail with HR admins, employees, stats |
+| PUT | `/api/admin/tenants/{id}` | Update name, plan, status, maxSeats |
+| POST | `/api/admin/tenants/{id}/disable` | Soft-disable tenant |
+| POST | `/api/admin/tenants/{id}/enable` | Re-enable tenant |
+| POST | `/api/admin/invite` | Create user with email invite via SES |
+| POST | `/api/auth/change-password` | Admin password change |
+| GET | `/api/admin/users` | All users (optional `?tenantId=` filter) |
+| GET | `/api/admin/users/{id}` | Single user detail |
+| POST | `/api/admin/users` | Create user with role and tenant assignment |
+| PUT | `/api/admin/users/{id}` | Update user + sync role to Cognito |
+| POST | `/api/admin/users/{id}/deactivate` | Deactivate user |
+| POST | `/api/admin/users/{id}/reactivate` | Reactivate user |
+| POST | `/api/admin/users/{id}/lock` | Cognito `admin_disable_user` |
+| POST | `/api/admin/users/{id}/unlock` | Cognito `admin_enable_user` |
+| POST | `/api/admin/users/{id}/reset-password` | Generate temporary password |
+| GET | `/api/admin/audit` | Global audit log (all tenants, last 200) |
+| GET | `/api/admin/health` | Live probe: DynamoDB + Cognito status |
+| GET | `/api/admin/config` | Platform configuration |
+| PUT | `/api/admin/config` | Update configuration section |
+| GET | `/api/admin/certificates` | All certificates (optional tenant filter) |
+| GET | `/api/admin/training-enrollment` | Training enrollment stats |
+
+### HR Service — `endevo-uat-fn-hr` (10 endpoints)
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/hr/dashboard` | Tenant-scoped stats |
+| GET | `/api/hr/employees` | Employees in own tenant only |
+| POST | `/api/hr/invite` | Invite employee via SES email |
+| PUT | `/api/hr/employees/{id}` | Update employee name, department, job title |
+| DELETE | `/api/hr/employees/{id}` | Deactivate employee |
+| POST | `/api/hr/employees/{id}/reactivate` | Reactivate deactivated employee |
+| GET | `/api/hr/audit` | Tenant-scoped audit log |
+| GET | `/api/hr/tenant` | Own tenant details |
+| GET | `/api/hr/training` | Tenant training courses |
+| GET | `/api/hr/certificates` | Tenant certificate stats |
+
+### Employee Service — `endevo-uat-fn-employee` (8 endpoints)
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/employee/dashboard` | Progress stats (courses, certs, completion %) |
+| GET | `/api/employee/profile` | Own profile |
+| PUT | `/api/employee/profile` | Update own profile fields |
+| GET | `/api/employee/training` | Courses with per-course progress |
+| POST | `/api/employee/progress` | Save video/course progress |
+| GET | `/api/employee/assessment/{courseId}` | Assessment questions (answers hidden) |
+| POST | `/api/employee/assessment/{courseId}/submit` | Score assessment, issue certificate if passing |
+| GET | `/api/employee/certificates` | Own earned certificates |
+
+### LMS Service — `endevo-uat-fn-lms` (32 endpoints)
+
+| Group | Method | Route | Description |
+|-------|--------|-------|-------------|
+| **Assessment** | GET | `/api/lms/assessment/questions` | Readiness Assessment questions |
+| | POST | `/api/lms/assessment/submit` | Submit assessment answers |
+| | GET | `/api/lms/assessment/status` | Assessment completion status |
+| | GET | `/api/lms/assessment/history` | Past assessment attempts |
+| **Course** | GET | `/api/lms/course/modules` | All modules with status |
+| | GET | `/api/lms/course/modules/{num}` | Single module detail |
+| | GET | `/api/lms/course/video/{id}/url` | Presigned video URL |
+| | GET | `/api/lms/course/asset/{key}/url` | Presigned asset URL |
+| **Progress** | POST | `/api/lms/progress/video` | Update video watch progress |
+| | GET | `/api/lms/progress/video/{id}` | Get video progress (position, %) |
+| | POST | `/api/lms/progress/module/complete` | Mark module as completed |
+| **Quiz** | GET | `/api/lms/quiz/video/{id}` | Inline video quiz questions |
+| | POST | `/api/lms/quiz/answer` | Submit inline quiz answer |
+| **Admin** | GET | `/api/lms/admin/questions` | All LMS questions (optional type filter) |
+| | POST | `/api/lms/admin/questions` | Create question |
+| | PUT | `/api/lms/admin/questions/{id}` | Update question |
+| | DELETE | `/api/lms/admin/questions/{id}` | Delete question |
+| | GET | `/api/lms/admin/modules` | All modules (admin view) |
+| | POST | `/api/lms/admin/modules` | Create/update module |
+| | GET | `/api/lms/admin/users/progress` | All users' progress |
+| | GET | `/api/lms/admin/users/{id}/progress` | Specific user's progress |
+| | POST | `/api/lms/admin/users/{id}/unlock` | Unlock module for user |
+| | GET | `/api/lms/admin/modules/{num}/videos` | Module video list |
+| | POST | `/api/lms/admin/modules/{num}/videos` | Add video to module |
+| | DELETE | `/api/lms/admin/modules/{num}/videos/{id}` | Remove video |
+| | POST | `/api/lms/admin/modules/{num}/upload-url` | Get S3 presigned upload URL |
+| | POST | `/api/lms/admin/modules/{num}/pdf` | Update module PDF |
+| **Lessons** | GET | `/api/lms/lessons/module/{num}` | List lessons for module (with progress) |
+| | GET | `/api/lms/lessons/{id}` | Single lesson detail + presigned URLs |
+| | POST | `/api/lms/lessons/{id}/start` | Mark lesson as in_progress |
+| | POST | `/api/lms/lessons/{id}/progress` | Update lesson progress (video position) |
+| | POST | `/api/lms/lessons/{id}/complete` | Mark lesson as completed |
+| **Lesson Quiz** | GET | `/api/lms/lessons/{id}/quiz` | Get quiz questions for lesson |
+| | POST | `/api/lms/lessons/{id}/quiz/submit` | Submit quiz attempt |
+| | GET | `/api/lms/lessons/{id}/quiz/results` | Get past quiz results |
+
+---
+
+## LMS Engine — Technical Specification
+
+The Learning Management System is the core product. It delivers structured, multi-format educational content through a progressive module system with four distinct quiz engines and multi-tenant content inheritance.
+
+### Lesson Types
+
+| Type | Completion Criteria | Tracking |
+|------|-------------------|----------|
+| **video** | 95% watched (tracked by `lastPosition` / `percentWatched`) | Resume-from-where-you-left-off, inline quiz popups during playback |
+| **quiz** | Score >= `passThreshold` (multiple choice) or all questions answered (likert/checklist/open_text) | Per-question answer storage, attempt history |
+| **pdf** | Explicit user action (click "Mark Complete") | Access logged via presigned URL generation |
+| **podcast** | 95% listened | Same progress model as video |
+| **resource** | Explicit user action | Access tracked |
+
+### Quiz Engine — Four Modes with Distinct Scoring
+
+**1. Multiple Choice** (Knowledge Test)
+- Standard quiz with correct/incorrect answers
+- Scoring: `(correct / total) * 100`
+- Pass/fail threshold: configurable per quiz (default 70%)
+- Questions randomized per attempt
+- Use case: Module knowledge verification
+
+**2. Likert Scale** (Self-Assessment)
+- 1-5 rating per question (Strongly Disagree → Strongly Agree)
+- No right/wrong answers — completion = all questions answered
+- Score = average rating across all questions
+- Use case: Avoidance Quiz — measures psychological readiness for legacy planning
+
+**3. Open Text** (Reflective Exercise)
+- Free-form text input fields
+- No scoring, no pass/fail
+- Completion = all required fields answered
+- Responses stored securely, never exposed to other users
+- Use case: KLT Exercise — "Know, Like, Trust" self-reflection
+
+**4. Checklist** (Action Verification)
+- Binary per item: Check / Not Yet
+- No pass/fail — tracks what the employee has done vs. not yet
+- Completion = all items answered
+- Use case: Emergency Protocol — verifying real-world actions taken
+
+### Progress Tracking Model
+
+Progress is tracked at four levels:
+1. **Video position** — `lastPosition` (seconds) and `percentWatched` — enables resume
+2. **Lesson completion** — binary complete/incomplete per lesson
+3. **Module completion** — automatically triggered when ALL required lessons in the module are completed
+4. **Certificate issuance** — automatically generated upon module completion
+
+### Multi-Tenant Content Inheritance
+
+```
+Query: GET /api/lms/lessons/module/1
+  ↓
+1. Query endevo-uat-lms-lessons WHERE tenantId = {user's tenantId}
+  ↓
+2. If no results → fallback query WHERE tenantId = "SYSTEM"
+  ↓
+3. Merge with user's progress from endevo-uat-lms-lesson-progress
+  ↓
+4. Return lessons with per-lesson completion status
+```
+
+Organizations receive the shared SYSTEM curriculum by default. Tenant-specific content overrides are supported without duplicating the entire lesson library.
+
+### Module Auto-Completion Logic
+
+```
+For each lesson in module:
+  if lesson.type == "video" or "podcast":
+    complete = percentWatched >= 95
+  elif lesson.type == "quiz":
+    if quizMode == "multiple_choice":
+      complete = score >= passThreshold
+    else (likert, open_text, checklist):
+      complete = all_questions_answered
+  elif lesson.type == "pdf" or "resource":
+    complete = user_marked_complete
+
+Module complete = ALL required lessons complete
+→ Trigger: issue certificate, update user-modules table
 ```
 
 ---
 
-## Tech Stack
+## Security Architecture
 
-| Component | Technology | Purpose |
-|-----------|-----------|---------|
-| **Frontend** | Next.js 15 (App Router) | Server-rendered React with route groups per role |
-| **Language (FE)** | TypeScript | Type-safe frontend development |
-| **Styling** | Tailwind CSS | Utility-first responsive design |
-| **Forms** | react-hook-form + Zod | Schema-validated form handling |
-| **Backend** | Python 3.12 (Lambda) | 5 serverless functions, pure boto3 — no pip dependencies |
-| **Database** | Amazon DynamoDB | Serverless NoSQL with per-tenant isolation |
-| **Auth** | Amazon Cognito | JWT-based auth with MFA, custom role/tenant attributes |
-| **API** | Amazon API Gateway (HTTP) | Single entry point routing to Lambda functions |
-| **Hosting** | AWS Amplify | Git-push auto-deploy with built-in SSL and CDN |
-| **CDN** | Amazon CloudFront | Video and PDF content delivery |
-| **Storage** | Amazon S3 | LMS media files (video, PDF, podcast) |
-| **Email** | Amazon SES | Invite emails and password resets |
-| **Infrastructure** | AWS CDK (TypeScript) | 8 CloudFormation stacks, fully codified |
-| **Monorepo** | pnpm + Turborepo | Workspace management across apps and packages |
-| **CI/CD** | GitHub Actions + Amplify | Automated Lambda deploy + frontend auto-deploy |
+### Zero-Trust Authentication Model
 
----
+Every API request follows this validation chain:
 
-## LMS Engine (v2)
+```
+Request with Bearer token
+  → API Gateway passes to Lambda
+    → Lambda calls Cognito get_user(AccessToken)
+      → Cognito validates token signature + expiry
+        → Lambda extracts custom:role + custom:tenantId
+          → Role checked against route requirements
+            → tenantId injected into all database queries
+              → Audit log written with IP, user agent, severity
+```
 
-The Learning Management System is the heart of Endevo Life. It delivers structured, multi-format educational content through a progressive module system.
+No database lookup is required for authorization — role and tenant are embedded in the JWT itself.
 
-### How It Works
+### Security Controls
 
-1. **Readiness Assessment** — Every employee starts with a comprehensive assessment that evaluates their preparedness across Legal, Financial, Physical, and Digital domains. There is no pass/fail gate — completing the assessment unlocks all 6 modules simultaneously.
+| Control | Implementation | Status |
+|---------|---------------|--------|
+| **CORS Restrictions** | Restricted to specific allowed origins (no wildcards) | Active |
+| **WAF Protection** | Web Application Firewall on API Gateway | Active |
+| **Encryption at Rest** | DynamoDB server-side encryption (AWS-managed keys) | Active |
+| **Encryption in Transit** | TLS 1.2+ enforced on all endpoints | Active |
+| **Brute-Force Protection** | IP tracking + lockout mechanisms in auth Lambda | Active |
+| **Zero-Trust PDF Access** | S3 presigned URLs with expiration for document downloads | Active |
+| **Input Sanitization** | HTML tags stripped via regex, forbidden characters rejected at boundary | Active |
+| **Parameterized Queries** | DynamoDB operations use conditions objects, never string concatenation | Active |
+| **Email OTP** | Additional verification layer for Global Admin login | Active |
+| **MFA Support** | Cognito TOTP authenticator app support | Active |
+| **Audit Trail** | Every action logged: timestamp, IP address, user agent, severity, actor | Active |
+| **Soft Delete** | Tenants are disabled, not deleted — preserves audit history for compliance | Active |
 
-2. **Module Progression** — Each module contains multiple lessons in varied formats: video lectures, PDF documents, podcasts, and interactive quizzes. Employees work through lessons at their own pace.
+### Cognito Configuration
 
-3. **4 Quiz Types** — The engine supports four distinct quiz formats, each suited to different learning objectives:
-   - **Multiple Choice** — Standard knowledge checks with randomized question selection
-   - **Likert Scale** — Self-assessment surveys (e.g., Avoidance Quiz) measuring attitudes and readiness
-   - **Open Text** — Free-form written responses for reflective exercises (e.g., KLT exercise)
-   - **Checklist** — Action verification for practical tasks (e.g., Emergency Protocol completion)
-
-4. **Video Player** — Supports resume-from-where-you-left-off, inline quiz popups during playback, replay overlay, and next-lesson navigation.
-
-5. **Progress Tracking** — Real-time tracking at every level: per-video, per-lesson, per-module. The employee dashboard shows a Duolingo-style interface with completion percentages and visual progress indicators.
-
-6. **Auto-Complete** — Modules automatically mark as complete when all constituent lessons are finished. Certificates are issued upon module completion.
-
-### Content Architecture
-
-Content is multi-tenant aware. Organizations can receive shared template content (from the SYSTEM tenant) or have tenant-specific customizations. The LMS queries fall back to shared templates when no tenant-specific content exists.
-
----
-
-## Security & Compliance
-
-### Authentication & Authorization
-- **Cognito JWT tokens** with `custom:role` and `custom:tenantId` embedded — zero extra database lookups per request
-- **Per-request RBAC** — every Lambda call validates the token and checks role permissions
-- **Email OTP** for Global Admin login — additional verification layer
-- **MFA support** via Cognito (TOTP authenticator apps)
-- **Brute-force protection** — IP tracking and lockout mechanisms
-
-### Data Security
-- **Encryption at rest** — DynamoDB server-side encryption enabled
-- **Encryption in transit** — HTTPS enforced on all endpoints
-- **CORS restrictions** — restricted to specific allowed origins (no wildcards)
-- **WAF protection** — Web Application Firewall on API Gateway
-- **Zero-trust PDF access** — signed URLs with expiration for document downloads
-
-### Multi-Tenant Isolation
-- HR Admins can only access their own tenant's data (enforced by `tenantId` from JWT)
-- Employees can only access their own records (enforced by `userId` + `tenantId` from JWT)
-- Global Admins have full access but every action is recorded in the audit trail
-- QA verified: **0 cross-tenant data leaks** across 69 test cases
-
-### Input Validation
-- All user input sanitized — HTML tags stripped via regex, forbidden characters rejected at the boundary
-- Parameterized DynamoDB operations — no string concatenation in queries
-- Schema-based validation on frontend (Zod) and backend (Python)
-
-### Compliance Roadmap
-| Standard | Status |
-|----------|--------|
-| GDPR | Data minimization principles applied; right-to-delete planned |
-| SOC 2 Type II | CloudTrail enabled; Config rules planned |
-| HIPAA | PHI tagging architecture designed |
-| ISO 27001 | Security control matrix planned |
+| Setting | Value |
+|---------|-------|
+| User Pool ID | `us-east-1_DVyEJqgFt` |
+| Custom Attributes | `custom:role` (GLOBAL_ADMIN / HR_ADMIN / EMPLOYEE), `custom:tenantId` |
+| Auth Flows | `ALLOW_USER_PASSWORD_AUTH`, `ALLOW_REFRESH_TOKEN_AUTH` |
+| Password Policy | Minimum 8 characters, uppercase, lowercase, number, special character |
+| MFA | Optional TOTP (authenticator app) |
 
 ### US Data Residency
-All data stored in `us-east-1` (N. Virginia). No data leaves the United States.
+
+All data is stored and processed in `us-east-1` (N. Virginia). No data leaves the United States. All AWS services used are within a single region.
+
+### Compliance Roadmap
+
+| Standard | Current Status | Planned Controls |
+|----------|---------------|-----------------|
+| **GDPR** | Data minimization principles applied | Right-to-delete Lambda, consent logging |
+| **SOC 2 Type II** | CloudTrail enabled | Config rules, evidence export automation |
+| **HIPAA** | PHI tagging architecture designed | Macie scanning, BAA with AWS |
+| **ISO 27001** | Security control matrix planned | Auto-report generation |
 
 ---
 
-## Subscription Plans
+## Multi-Tenant Data Isolation
+
+### How tenantId Flows from JWT to Database
+
+```
+1. User logs in → Cognito returns JWT with custom:tenantId = "tenant-acme-001"
+
+2. User calls GET /api/hr/employees
+   → Lambda extracts token from Authorization header
+   → Lambda calls cognito.get_user(AccessToken=token)
+   → Cognito returns custom:tenantId = "tenant-acme-001"
+
+3. Lambda queries DynamoDB:
+   users_table.scan(FilterExpression=Attr('tenantId').eq('tenant-acme-001'))
+   → Returns ONLY Acme Corp employees
+
+4. A TechVision HR Admin calling the same endpoint:
+   → Gets custom:tenantId = "tenant-techvision-002"
+   → Sees ONLY TechVision employees
+   → Zero visibility into Acme Corp data
+```
+
+### Isolation Guarantees by Role
+
+| Role | Data Access | Enforcement |
+|------|------------|-------------|
+| **GLOBAL_ADMIN** | All tenants, all users | Full access, but every action audit-logged with IP and timestamp |
+| **HR_ADMIN** | Own tenant's employees only | `tenantId` from JWT injected into every query — cannot be overridden by request parameters |
+| **EMPLOYEE** | Own records only | `userId` + `tenantId` from JWT — cannot access other employees' progress, scores, or certificates |
+
+### QA Verification
+
+- **69 test cases** executed across auth, admin, HR, employee, security, input validation, multi-tenant isolation, and edge cases
+- **98.6% pass rate** (68/69)
+- **0 cross-tenant data leaks** across 4 dedicated isolation test cases
+- **97% API route coverage** (27 of 28 routes tested)
+
+---
+
+## Subscription & Billing Architecture
+
+### Current Plans
 
 | Feature | Basic — $299/yr | Premium — $499/yr |
 |---------|:---------------:|:-----------------:|
@@ -198,63 +491,299 @@ All data stored in `us-east-1` (N. Virginia). No data leaves the United States.
 | Certificates | Yes | Yes |
 | HR Admin Dashboard | Yes | Yes |
 | Priority Support | — | Yes |
-| AI-Powered Recommendations | — | Planned |
+| AI-Ready Recommendations | — | Planned (Phase 5) |
+
+### Current State (UAT)
+
+In the UAT environment, all modules are currently accessible to all users regardless of plan assignment. Plan enforcement gating will be activated when Stripe integration is completed in Phase 5.
+
+### Plan Enforcement Architecture (Designed)
+
+Plan tier is stored on the tenant record in `endevo-uat-tenants`. The LMS engine checks the tenant's plan before returning module content. Basic plan tenants will receive Modules 1-2 only; Premium tenants receive all 6 modules. This is a server-side enforcement — the frontend shows locked modules with upgrade prompts, but the actual gating happens at the Lambda level.
+
+### Stripe Integration (Phase 5)
+
+- Subscription management via Stripe Checkout
+- Webhook-driven plan updates (Stripe → Lambda → DynamoDB)
+- Seat-based billing with `maxSeats` enforcement
+- Annual billing cycle with auto-renewal
 
 ---
 
-## Module Structure
+## Infrastructure as Code
 
-| Module | Title | Lessons | Status |
-|--------|-------|---------|--------|
-| 1 | Project Worth Developing | 15 | Built |
-| 2 | Legal | TBD | Planned |
-| 3 | Financial | TBD | Planned (Aryan — AI integration) |
-| 4 | Physical | TBD | Planned |
-| 5 | Digital | TBD | Planned |
-| 6 | Communicate Your Wishes | TBD | Planned |
+8 AWS CDK stacks (TypeScript), each responsible for a distinct infrastructure concern:
 
-**Module 1** is fully built with 15 lessons covering the foundational concepts of legacy planning — why it matters, how to start, and what a "project worth developing" looks like. Lessons include video lectures, PDFs, podcasts, and all 4 quiz types.
+| Stack | File | Creates |
+|-------|------|---------|
+| **01 — Cognito** | `01-cognito-stack.ts` | User Pool, App Client, custom attributes (role, tenantId), password policy, MFA configuration |
+| **02 — DynamoDB** | `02-dynamo-stack.ts` | Table definitions (managed separately — stack skipped in deploy to avoid conflicts with existing tables) |
+| **03 — S3** | `03-s3-stack.ts` | Content storage buckets for video, PDF, podcast media files |
+| **04 — IAM** | `04-iam-stack.ts` | Lambda execution role (`endevo-uat-lambda-role`) with least-privilege policies for DynamoDB, Cognito, SES, CloudWatch |
+| **05 — API + Lambda** | `05-api-stack.ts` | API Gateway HTTP API, 5 Lambda function definitions, route integrations |
+| **06 — Amplify** | `06-amplify-stack.ts` | Amplify app connected to GitHub repo, auto-deploy on push to `main` |
+| **07 — CloudFront LMS** | `07-cloudfront-lms-stack.ts` | CloudFront distribution for LMS content delivery (video/PDF CDN) |
+| **08 — LMS Infra** | `08-lms-infra-stack.ts` | LMS-specific infrastructure (additional tables, S3 paths, permissions) |
+
+### IAM Policy Summary (Lambda Execution Role)
+
+```
+DynamoDB:  PutItem, GetItem, UpdateItem, DeleteItem, Scan, Query
+Cognito:   GetUser, AdminCreateUser, AdminSetUserPassword, AdminDeleteUser,
+           AdminDisableUser, AdminEnableUser, AdminUpdateUserAttributes,
+           AdminInitiateAuth, InitiateAuth, ForgotPassword,
+           ConfirmForgotPassword, DescribeUserPool, ListUsers
+SES:       SendEmail, SendRawEmail
+Logs:      CreateLogGroup, CreateLogStream, PutLogEvents
+```
 
 ---
 
-## RAID Log (Risks, Actions, Issues, Decisions)
+## CI/CD Pipeline
 
-Real engineering challenges encountered during development and how they were resolved.
+```
+┌──────────────┐     ┌───────────────────┐     ┌──────────────────┐
+│  Developer   │────▶│   GitHub (main)   │────▶│  AWS Amplify      │
+│  git push    │     │   endevo-life     │     │  Auto-build/deploy│
+└──────────────┘     └───────┬───────────┘     │  ~3 min to live  │
+                             │                 └──────────────────┘
+                             │
+                     ┌───────▼───────────┐
+                     │  GitHub Actions   │
+                     │  deploy-lambda.yml│
+                     │  Zip + deploy     │
+                     │  5 Lambda fns     │
+                     └───────────────────┘
+```
+
+| Component | Deploy Method | Trigger | Time to Live |
+|-----------|--------------|---------|--------------|
+| **Frontend** | AWS Amplify auto-deploy | Push to `main` branch | ~3 minutes |
+| **Lambda Functions** | GitHub Actions (zip + `aws lambda update-function-code`) | Push to `main` branch | ~1 minute per function |
+| **Infrastructure** | `npx cdk deploy --all` | Manual (intentional) | ~5-10 minutes |
+
+Infrastructure deploys are manual by design — CDK changes affect production resources and require review before execution.
+
+---
+
+## Scalability Analysis
+
+### Current Architecture Limits
+
+| Resource | Current Config | Scale Ceiling | Upgrade Path |
+|----------|---------------|---------------|-------------|
+| **DynamoDB** | On-demand capacity | Virtually unlimited (auto-scales) | Already serverless — no action needed |
+| **Lambda** | 256 MB / 30s timeout | 1,000 concurrent executions (default) | Request increase to 10K; provisioned concurrency for predictable loads |
+| **API Gateway** | HTTP API | 10,000 requests/second (default) | Request increase; add caching layer |
+| **Amplify/CloudFront** | Edge-cached | Global CDN, auto-scales | Already distributed — no action needed |
+| **Cognito** | Standard tier | 40 requests/second per operation | Request increase; add caching for `get_user` calls |
+
+### Projected Scale
+
+| Metric | Current (UAT) | 1,000 Users | 10,000 Users | 100,000 Users |
+|--------|--------------|-------------|--------------|---------------|
+| DynamoDB reads/month | ~5K | ~500K | ~5M | ~50M |
+| Lambda invocations/month | ~2K | ~200K | ~2M | ~20M |
+| S3 storage | ~1 GB | ~10 GB | ~50 GB | ~500 GB |
+| CloudFront bandwidth | ~5 GB | ~500 GB | ~5 TB | ~50 TB |
+
+### Design Decisions That Enable Scale
+
+- **Stateless Lambda functions** — horizontal scaling is automatic
+- **DynamoDB partition keys on tenantId** — each tenant's data is a natural partition
+- **No relational joins** — denormalized data model avoids N+1 query patterns
+- **CloudFront edge caching** — video content served from nearest edge location
+- **Zero pip dependencies** — cold start times measured in hundreds of milliseconds, not seconds
+
+---
+
+## Cost Analysis
+
+Estimates based on AWS pricing for `us-east-1`, on-demand pricing, no reserved instances.
+
+| Cost Component | 80 Users (UAT) | 1,000 Users | 10,000 Users | 100,000 Users |
+|---------------|----------------|-------------|--------------|---------------|
+| **DynamoDB** | ~$1/mo (free tier) | ~$5/mo | ~$50/mo | ~$500/mo |
+| **Lambda** | ~$0 (free tier) | ~$2/mo | ~$20/mo | ~$200/mo |
+| **API Gateway** | ~$0 (free tier) | ~$3/mo | ~$35/mo | ~$350/mo |
+| **S3 Storage** | ~$0.02/mo | ~$0.25/mo | ~$1.15/mo | ~$11.50/mo |
+| **CloudFront** | ~$0.50/mo | ~$42/mo | ~$425/mo | ~$4,250/mo |
+| **Amplify Hosting** | ~$0 (free tier) | ~$15/mo | ~$15/mo | ~$15/mo |
+| **Cognito** | ~$0 (free tier) | ~$0 (first 50K free) | ~$0 (first 50K free) | ~$2,750/mo |
+| **SES** | ~$0.10/mo | ~$1/mo | ~$10/mo | ~$100/mo |
+| **Total Estimated** | **~$2/mo** | **~$68/mo** | **~$556/mo** | **~$8,177/mo** |
+
+At $299-$499/yr per organization (not per user), a single 100-employee enterprise client at Basic tier covers annual infrastructure costs for 1,000+ users.
+
+---
+
+## RAID Log — Engineering Challenges
+
+Real issues encountered during development and how they were resolved. This section demonstrates battle-tested engineering — not theoretical architecture.
 
 ### Infrastructure Issues
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| **CDK cross-stack dependency failure** — IAM stack referenced DynamoDB/S3 stack outputs, creating circular imports | Blocked all CDK deploys | Switched IAM to wildcard ARNs instead of cross-stack references; later skipped DynamoDB stack entirely as tables were managed separately |
-| **Amplify app accidentally deleted** — new app created with different App ID, broke DNS and deploy pipeline | Frontend down | Created new Amplify app (`d1vvfv8oltolcf`), updated Route 53 records, reconfigured GitHub webhook |
-| **CDK version notices causing exit code 1** — `cdk deploy` printed version upgrade notices and returned non-zero exit | CI/CD pipeline falsely reported failures | Added `--no-notices` flag (or acknowledged notices) to prevent false exit codes |
-| **CloudFormation stuck in REVIEW_IN_PROGRESS** — partial deploy left stack in unrecoverable state | Blocked subsequent deploys | Manually deleted stuck stack via AWS CLI, redeployed cleanly |
+| CDK cross-stack dependency — IAM referenced DynamoDB/S3 outputs, creating circular imports | Blocked all CDK deploys | Switched IAM to wildcard ARNs; later decoupled DynamoDB management from CDK entirely |
+| Amplify app accidentally deleted — new app created with different App ID | Frontend down, DNS broken | Created new Amplify app (`d1vgn9nzfx4cxk`), updated Route 53 records, reconfigured GitHub webhook |
+| CDK version notices causing exit code 1 | CI/CD falsely reported failures | Added `--no-notices` flag to suppress non-error output |
+| CloudFormation stuck in REVIEW_IN_PROGRESS | Blocked subsequent deploys | Manually deleted stuck stack via AWS CLI, redeployed cleanly |
 
 ### Authentication & Tenant Issues
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| **LMS auth role mismatch** — frontend checked `super_admin` / `admin` but Cognito used `GLOBAL_ADMIN` / `HR_ADMIN` | LMS pages returned 403 for all users | Updated auth checks to use actual Cognito role values |
-| **Tenant ID mapping** — code queried with `endevo-global` but DynamoDB used `SYSTEM` as the global tenant ID | Global admin saw empty LMS content | Added tenant remapping: `endevo-global` → `SYSTEM` at query time |
-| **Cognito auth flows wiped by token update** — updating Cognito client token settings reset all enabled auth flows | Login broken for all users | Restored `ALLOW_USER_PASSWORD_AUTH` and `ALLOW_REFRESH_TOKEN_AUTH` flows |
-| **OTP applied to all roles** — email OTP gate was blocking HR Admin and Employee logins | Non-admin users could not log in | Restricted OTP requirement to `GLOBAL_ADMIN` only |
+| LMS auth role mismatch — frontend checked `super_admin` but Cognito used `GLOBAL_ADMIN` | 403 for all LMS users | Updated auth checks to match actual Cognito role values |
+| Tenant ID mapping — code queried `endevo-global` but DynamoDB used `SYSTEM` | Global admin saw empty LMS content | Added tenant remapping: `endevo-global` → `SYSTEM` at query time |
+| Cognito auth flows wiped by token update | Login broken for all users | Restored `ALLOW_USER_PASSWORD_AUTH` and `ALLOW_REFRESH_TOKEN_AUTH` |
+| OTP applied to all roles | HR and Employee users could not log in | Restricted OTP to `GLOBAL_ADMIN` only |
 
 ### LMS & Content Issues
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| **Video progress DynamoDB expression error** — `put_item` missing required `videoId` range key | Video progress silently not saving | Added `videoId = course_id` to all progress writes |
-| **14 frontend/backend field mismatches** — frontend interfaces did not match actual API response shapes | Multiple LMS pages showing empty data or crashing | Deep QA audit: fixed all field mappings across video, module, progress, and quiz interfaces |
-| **CORS wildcard vulnerability** — `Access-Control-Allow-Origin: *` on API responses | Security risk: any domain could call the API | Restricted CORS to specific allowed origins |
-| **Assessment showed "Pass Score: 90%"** — contradicted business rule (no pass/fail, all scores unlock modules) | Users confused about unlock mechanics | Changed to "Unlocks All: 6 Modules" messaging |
+| Video progress missing `videoId` range key | Progress not saving (silent failure) | Added `videoId = course_id` to all progress writes |
+| 14 frontend/backend field mismatches | LMS pages showing empty data or crashing | Deep QA audit: fixed all field mappings across video, module, progress, and quiz interfaces |
+| CORS wildcard vulnerability (`Access-Control-Allow-Origin: *`) | Any domain could call the API | Restricted CORS to specific allowed origins |
+| Assessment showed "Pass Score: 90%" | Contradicted business rule (no pass/fail gate) | Changed to "Unlocks All: 6 Modules" messaging |
 
 ### Build & Deploy Issues
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| **TypeScript `React.ElementType` import** — Next.js 15 JSX transform does not auto-import React namespace | Amplify build failures across 3 dashboard pages | Added explicit `import React` where `React.*` types were referenced |
-| **pnpm frozen lockfile on first build** — `--frozen-lockfile` fails without committed `pnpm-lock.yaml` | First Amplify build could never succeed | Changed to `--no-frozen-lockfile` for initial build |
-| **Amplify build path mismatch** — `amplify.yml` pointed to wrong repo directory after org transfer | Frontend deploys building wrong code | Updated `amplify.yml` base path to `endevo-life` |
+| TypeScript `React.ElementType` import — Next.js 15 JSX transform issue | Amplify build failures across 3 pages | Added explicit `import React` where `React.*` types were referenced |
+| `pnpm --frozen-lockfile` fails without committed lockfile | First Amplify build could never succeed | Changed to `--no-frozen-lockfile` for initial build |
+| Amplify build path mismatch after org transfer | Frontend building wrong code | Updated `amplify.yml` base path to `endevo-life` |
+
+---
+
+## Module Content Structure
+
+### Module 1: Project Worth Developing (Fully Built — 15 Lessons)
+
+Module 1 is the foundational module covering why legacy planning matters, how to start, and what a "project worth developing" looks like. It contains 15 lessons across all supported content types:
+
+| # | Lesson | Type | Quiz Mode | Description |
+|---|--------|------|-----------|-------------|
+| 1 | Introduction Video | video | — | Overview of the legacy planning journey |
+| 2 | Why Legacy Matters | video | — | The case for proactive planning |
+| 3 | Avoidance Quiz | quiz | likert_scale | Self-assessment: psychological barriers to planning |
+| 4 | Getting Started Guide | pdf | — | Printable action guide |
+| 5 | KLT Exercise | quiz | open_text | "Know, Like, Trust" reflective writing exercise |
+| 6 | Family Conversations | video | — | How to start the conversation |
+| 7 | Emergency Protocol | quiz | checklist | Action verification: what you've done vs. not yet |
+| 8 | Knowledge Check | quiz | multiple_choice | Module knowledge verification |
+| 9 | Estate Planning Basics | video | — | Core concepts overview |
+| 10 | Digital Assets Overview | video | — | What counts as a digital asset |
+| 11 | Planning Podcast | podcast | — | Expert interview on legacy planning |
+| 12 | Legal Foundations | pdf | — | Reference document |
+| 13 | Financial Readiness | video | — | Financial preparation overview |
+| 14 | Communication Strategies | video | — | How to communicate your wishes |
+| 15 | Module Summary | video | — | Recap and next steps |
+
+### Modules 2-6 (Content Planned)
+
+| Module | Title | Content Status |
+|--------|-------|---------------|
+| 2 | Legal | Content in development |
+| 3 | Financial | Content in development |
+| 4 | Physical | Content planned |
+| 5 | Digital | Content planned |
+| 6 | Communicate Your Wishes | Content planned |
+
+All 6 module definitions exist in `endevo-uat-lms-modules`. The LMS engine, quiz engine, progress tracking, and certificate issuance are fully built and module-agnostic — new module content slots into the existing infrastructure without code changes.
+
+---
+
+## Competitive Advantages
+
+### Why Estate Planning Needs a Specialized Platform
+
+| Dimension | Generic LMS (Coursera, LinkedIn Learning, TalentLMS) | Endevo Life |
+|-----------|------------------------------------------------------|-------------|
+| **Content Model** | Generic courses, one-size-fits-all | Purpose-built for estate/legacy planning with sensitivity-aware quiz formats |
+| **Quiz Types** | Multiple choice only | 4 types: Multiple Choice, Likert Scale (self-assessment), Open Text (reflective), Checklist (action verification) |
+| **HR Integration** | Separate dashboard, different vendor | Built-in HR dashboard with tenant-scoped analytics, invite flow, and audit trail |
+| **Multi-Tenant** | Course catalog is shared | Complete data isolation — each organization is a separate tenant with its own employees, progress, and certificates |
+| **Pricing** | Per-user monthly ($20-40/user/mo) | Per-organization annual ($299-499/yr) — dramatically lower cost for HR departments |
+| **Compliance** | General LMS compliance | Estate planning-specific: action verification checklists, reflective exercises, readiness scoring |
+| **Content Inheritance** | No tenant customization | SYSTEM templates with per-tenant overrides — organizations can customize without duplicating |
+| **Data Residency** | Multi-region, often unclear | US-only (us-east-1), single region, clear data residency |
+
+### Technical Moat
+
+1. **Zero-dependency Lambda architecture** — no framework overhead, sub-second cold starts, single-file deploys
+2. **Four quiz engines** — not just multiple choice; Likert, Open Text, and Checklist are essential for estate planning pedagogy
+3. **Multi-tenant content inheritance** — SYSTEM tenant fallback enables 1,000 organizations to share content with per-tenant overrides
+4. **JWT-embedded RBAC** — zero database lookups for authorization; role + tenant flow from Cognito through every Lambda to DynamoDB
+5. **13 purpose-built DynamoDB tables** — schema designed for estate planning workflows, not retrofitted from a generic LMS
+
+---
+
+## Roadmap
+
+| Phase | Scope | Status |
+|-------|-------|--------|
+| **Phase 0** | Infrastructure — CDK, Cognito, DynamoDB, API Gateway, Lambda, Amplify | Complete |
+| **Phase 1** | Auth + Role-Based Dashboards + QA (98.6% pass rate, 69 tests) | Complete |
+| **Phase 2** | LMS v2 Engine — Lessons, 4 Quiz Types, Video Player, Progress Tracking | Complete |
+| **Phase 3** | LMS Content — Module 1 (15 lessons), video upload pipeline, cert display | Complete |
+| **Phase 4** | UI Polish + Video Content Production + Certificate Templates | In Progress |
+| **Phase 5** | Stripe Billing — Subscription management, payment processing, plan enforcement | Planned |
+| **Phase 6** | AI-Ready — Amazon Bedrock content generation, Personalize learning paths, predictive analytics | Planned |
+| **Phase 7** | Analytics — QuickSight embedded dashboards, completion forecasting, ROI reporting | Planned |
+| **Phase 8** | Integrations — BambooHR, Slack, Teams, SSO (SAML/OIDC), DocuSign, Salesforce | Planned |
+| **Phase 9** | Mobile Apps — React Native (Android + iOS), offline-first, biometric auth | Planned |
+| **Phase 10** | Blockchain — NFT certificates, on-chain credential verification | Future |
+
+---
+
+## Team
+
+| Name | Role | Responsibilities |
+|------|------|------------------|
+| **Niki** | Product Owner | Business requirements, content strategy, stakeholder management, sales |
+| **Shahzad** | AWS Architect / QA Lead | Infrastructure, backend, security, quality assurance, DevOps |
+| **Nermeen** | Full Stack Developer | Frontend + backend development (joins at go-live) |
+| **Aryan** | AI Developer | AI-powered features in Phase 6 — Bedrock integration, personalized learning |
+| **Zara** | QA Engineer | Testing, bug reporting, user acceptance testing |
+
+---
+
+## Live Environment
+
+| Resource | URL / Value |
+|----------|------------|
+| **Web Application** | https://main.d1vgn9nzfx4cxk.amplifyapp.com |
+| **Custom Domain** | https://uat.endevo.life |
+| **API Gateway** | https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com |
+| **GitHub Repository** | https://github.com/shahzadms7/endevo-life |
+| **AWS Region** | us-east-1 (N. Virginia) |
+| **Cognito User Pool** | us-east-1_DVyEJqgFt |
+| **Amplify App ID** | d1vgn9nzfx4cxk |
+
+---
+
+## Due Diligence Quick Facts
+
+| Question | Answer |
+|----------|--------|
+| **What is the tech stack?** | Next.js 15 + Python 3.12 Lambda + DynamoDB + Cognito + CDK — 100% AWS serverless |
+| **How many engineers built this?** | 1 architect (Shahzad) built the entire platform. 4 additional team members for product, AI, QA, and dev. |
+| **How long has it been in development?** | Started 2026-03-18. 107+ commits in 2 weeks. Phases 0-3 complete. |
+| **Is it in production?** | UAT environment is live. Production launch planned after Phase 4 (UI polish + video content). |
+| **What are the external dependencies?** | Zero pip dependencies on backend. Frontend: Next.js, Tailwind, react-hook-form, Zod, js-cookie. No external SaaS dependencies except AWS. |
+| **How is data isolated between tenants?** | `tenantId` is embedded in the Cognito JWT. Every Lambda extracts it and injects it into every DynamoDB query. QA verified: 0 cross-tenant leaks across 69 test cases. |
+| **What is the cost to serve 10K users?** | Estimated ~$556/month on AWS (DynamoDB + Lambda + CloudFront + API Gateway). |
+| **What is the revenue model?** | B2B annual subscription: $299/yr (Basic, 2 modules) or $499/yr (Premium, 6 modules) per organization. |
+| **Is there vendor lock-in?** | AWS-only, but standard patterns (DynamoDB → any NoSQL, Lambda → any serverless, Cognito → any OIDC). Migration is straightforward. |
+| **What about AI?** | AI-Ready architecture. Phase 6 plans Amazon Bedrock for content generation and Personalize for learning paths. No AI features are live today — we do not overstate capability. |
+| **What compliance standards are planned?** | GDPR (data minimization applied), SOC 2 Type II (CloudTrail enabled), HIPAA (architecture designed), ISO 27001 (planned). |
+| **How is the codebase organized?** | pnpm monorepo: `apps/web/` (Next.js), `backend/functions/` (5 Python Lambdas), `infrastructure/` (8 CDK stacks). |
+| **What is the QA coverage?** | 69 test cases, 98.6% pass rate, covering auth, RBAC, tenant isolation, input validation, and edge cases. |
+| **What is the deployment model?** | Frontend: Git-push auto-deploy via Amplify (~3 min). Lambda: GitHub Actions auto-deploy. Infrastructure: CDK manual deploy. |
+| **Can it handle enterprise scale?** | DynamoDB auto-scales infinitely. Lambda scales to 1,000+ concurrent executions. CloudFront delivers content globally. No fixed servers to provision. |
 
 ---
 
@@ -269,12 +798,11 @@ Real engineering challenges encountered during development and how they were res
 | pnpm | 9+ | Package manager |
 | AWS CLI | v2 | Lambda deployment and AWS operations |
 | AWS CDK | 2.130+ | Infrastructure as code |
-| Git | latest | Version control |
 
 ### Clone & Install
 
 ```bash
-git clone https://github.com/endevo-saas/endevo-life.git
+git clone https://github.com/shahzadms7/endevo-life.git
 cd endevo-life
 pnpm install
 ```
@@ -287,62 +815,19 @@ Create `apps/web/.env.local`:
 NEXT_PUBLIC_API_URL=https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com
 ```
 
-For Lambda development, AWS credentials must be configured via `aws configure` or environment variables. Never commit credentials to the repository.
+AWS credentials must be configured via `aws configure` or environment variables. Never commit credentials to the repository.
 
 ### Local Development
 
 ```bash
-# Start the Next.js dev server
 cd apps/web
 pnpm dev
-
-# The app will be available at http://localhost:3000
+# Available at http://localhost:3000
 ```
 
-### Project Structure
-
-```
-endevo-life/
-├── apps/web/                  # Next.js 15 frontend (TypeScript)
-│   ├── app/
-│   │   ├── (auth)/            # Login, register, forgot-password
-│   │   ├── (global-admin)/    # Platform admin pages
-│   │   ├── (hr-admin)/        # HR admin pages (tenant-scoped)
-│   │   └── (employee)/        # Employee learning portal
-│   ├── components/            # Shared React components
-│   └── lib/                   # API client, utilities
-├── backend/functions/         # Python Lambda functions
-│   ├── auth/main.py           # Authentication flows
-│   ├── admin/main.py          # Global admin operations
-│   ├── hr/main.py             # HR admin operations
-│   ├── employee/main.py       # Employee operations
-│   └── lms/                   # LMS content engine
-├── infrastructure/lib/        # AWS CDK stacks (TypeScript)
-│   ├── 01-cognito-stack.ts    # User pool + app client
-│   ├── 02-dynamo-stack.ts     # All DynamoDB tables
-│   ├── 03-s3-stack.ts         # Content storage buckets
-│   ├── 04-iam-stack.ts        # Lambda execution role
-│   ├── 05-api-stack.ts        # API Gateway + Lambda
-│   ├── 06-amplify-stack.ts    # Frontend hosting
-│   ├── 07-cloudfront-lms-stack.ts  # CDN for LMS content
-│   └── 08-lms-infra-stack.ts  # LMS-specific infra
-├── scripts/                   # Seed data + utilities
-├── docs/                      # ARCHITECTURE.md, ERRORS-LOG.md
-└── .github/workflows/         # CI/CD pipelines
-```
-
----
-
-## Deployment
-
-### Frontend (Automatic)
-
-Push to `main` branch on GitHub. Amplify detects the push and builds + deploys automatically in approximately 3 minutes. No manual action required.
-
-### Lambda Functions (CLI)
+### Deploy Lambda Functions
 
 ```bash
-# Deploy a single Lambda function
 cd backend/functions/admin
 zip -r function.zip main.py
 aws lambda update-function-code \
@@ -350,85 +835,12 @@ aws lambda update-function-code \
   --zip-file fileb://function.zip
 ```
 
-Repeat for `auth`, `hr`, `employee`, and `lms` functions. GitHub Actions automates this on push to the `main` branch.
-
-### Infrastructure (CDK)
+### Deploy Infrastructure
 
 ```bash
 cd infrastructure
 npx cdk deploy --all
 ```
-
-CDK manages 8 CloudFormation stacks covering Cognito, DynamoDB, S3, IAM, API Gateway, Amplify, CloudFront, and LMS infrastructure.
-
----
-
-## AI Integration Points (for Aryan)
-
-Module 3 (Financial) is designated for AI-powered content. Key integration surfaces:
-
-| Integration Point | Where | How |
-|-------------------|-------|-----|
-| **AI Content Generation** | `backend/functions/lms/` | New routes for Bedrock-generated lesson content |
-| **Personalized Learning Paths** | `backend/functions/employee/` | Amazon Personalize recommendations based on assessment scores |
-| **AI Scorecard** | `apps/web/components/lms/ScorecardDisplay.tsx` | Assessment results already display domain scores — AI can enhance recommendations |
-| **Quiz Generation** | `backend/functions/lms/` | AI-generated quiz questions tailored to user's weak areas |
-| **LMS API Client** | `apps/web/lib/api.ts` | All API calls are centralized here — add new AI endpoints in one place |
-
-The LMS engine already supports the content types (video, PDF, quiz, podcast) that AI-generated lessons will use. The multi-tenant content architecture ensures AI content can be tenant-specific or shared globally.
-
----
-
-## Team
-
-| Name | Role | Responsibilities |
-|------|------|------------------|
-| **Shahzad** | AWS Architect / QA Lead | Infrastructure, backend, security, quality assurance |
-| **Niki** | Product Owner | Business requirements, content strategy, stakeholder management |
-| **Nermeen** | Full Stack Developer | Frontend + backend development (joins at go-live) |
-| **Aryan** | AI Developer | Module 3 (Financial) — AI content generation and personalization |
-| **Zara** | QA Engineer | Testing, bug reporting, user acceptance |
-
----
-
-## Project Timeline
-
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **Phase 0** | Infrastructure — CDK, Cognito, DynamoDB, API Gateway, Lambda, Amplify | Completed |
-| **Phase 1** | Auth + Role-Based Dashboards + QA (98.6% pass rate, 69 tests) | Completed |
-| **Phase 2** | LMS v2 Engine — Lessons, Quizzes, Video Player, Progress Tracking | Completed |
-| **Phase 3** | UI Polish + Video Content + Certificates | In Progress |
-| **Phase 4** | AI Integration — Bedrock, Personalize, AI Scorecard | Planned |
-| **Phase 5** | Stripe Billing — Subscription management, payment processing | Planned |
-| **Phase 6** | Analytics — QuickSight dashboards, completion forecasting | Planned |
-| **Phase 7** | Integrations — BambooHR, Slack, Teams, SSO | Planned |
-| **Phase 8** | Mobile Apps — React Native (Android + iOS) | Planned |
-| **Phase 9** | Blockchain — NFT certificates, on-chain digital will | Future |
-
----
-
-## Key Design Decisions
-
-| Decision | Why |
-|----------|-----|
-| **Pure boto3, no pip dependencies** | Single `main.py` per Lambda — no zip layers, faster cold starts, simpler deployments |
-| **DynamoDB over RDS** | Serverless, no connection pooling, auto-scales, cheaper at low volume |
-| **Cognito custom attributes for RBAC** | `custom:role` + `custom:tenantId` in JWT — zero extra DB lookups per request |
-| **HTTP API Gateway over REST** | ~71% cost reduction for simple Lambda proxy routing |
-| **Next.js 15 App Router** | Route groups provide clean per-role layouts; Suspense handles dynamic rendering |
-| **Soft delete for tenants** | Preserves audit history and data for billing/legal compliance |
-| **Amplify for hosting** | Zero DevOps — Git push to live site with built-in SSL/CDN |
-
----
-
-## Live URLs
-
-| | URL |
-|--|-----|
-| **Web App** | https://main.d1vvfv8oltolcf.amplifyapp.com |
-| **API** | https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com |
-| **GitHub** | https://github.com/endevo-saas/endevo-life |
 
 ---
 
