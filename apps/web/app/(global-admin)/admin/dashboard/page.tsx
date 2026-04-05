@@ -4,8 +4,9 @@ export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Building2, Users, Award, Activity, Loader2, RefreshCw,
-  TrendingUp, Shield, Zap, Globe, CreditCard, ArrowUpRight,
-  CheckCircle, AlertTriangle, Clock, Sparkles, BookOpen, ClipboardList
+  TrendingUp, Shield, Globe, CreditCard, ArrowUpRight,
+  CheckCircle, AlertTriangle, Sparkles, BookOpen, ClipboardList,
+  Clock
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
@@ -21,6 +22,16 @@ interface DashboardData {
   lms_assessments_taken?: number
   lms_modules_completed?: number
   lms_certificates_issued?: number
+  subscription_basic?: number
+  subscription_premium?: number
+  recent_audit?: AuditEntry[]
+}
+
+interface AuditEntry {
+  action: string
+  email?: string
+  timestamp: string
+  ip?: string
 }
 
 function PulseRing({ color = 'brand' }: { color?: string }) {
@@ -40,24 +51,19 @@ function PulseRing({ color = 'brand' }: { color?: string }) {
 }
 
 function StatCard({
-  icon: Icon, label, value, sub, color, href, gradient, trend
+  icon: Icon, label, value, sub, color, href, gradient
 }: {
   icon: React.ElementType; label: string; value: string | number; sub: string
-  color: string; href: string; gradient: string; trend?: string
+  color: string; href: string; gradient: string
 }) {
   return (
     <Link href={href} className={`group relative overflow-hidden rounded-2xl p-5 border transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl ${gradient}`}>
       <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-white/3" />
       <div className="relative">
         <div className="flex items-start justify-between mb-4">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center bg-white/10 border border-white/10`}>
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/10 border border-white/10">
             <Icon className={`w-5 h-5 ${color}`} />
           </div>
-          {trend && (
-            <span className="flex items-center gap-1 text-xs text-green-400 bg-green-500/10 border border-green-500/20 px-2 py-1 rounded-lg">
-              <TrendingUp className="w-3 h-3" />{trend}
-            </span>
-          )}
         </div>
         <div className="text-3xl font-black text-white tracking-tight mb-1">{value}</div>
         <div className="text-sm font-semibold text-white/80 mb-0.5">{label}</div>
@@ -122,7 +128,7 @@ export default function AdminDashboard() {
               </span>
             </div>
             <h1 className="text-3xl font-black text-white tracking-tight">
-              Mission Control <span className="text-brand-400">⚡</span>
+              Global Admin Dashboard
             </h1>
             <p className="text-slate-400 text-sm mt-0.5">
               Welcome back, <span className="text-white font-medium capitalize">{name}</span> · Last updated {lastRefresh.toLocaleTimeString()}
@@ -146,77 +152,93 @@ export default function AdminDashboard() {
           </div>
         )}
 
-        {/* Primary KPI cards */}
+        {/* Row 1: Primary KPIs (4 cards) */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {loading ? (
-            [1,2,3,4,5,6,7].map(i => <SkeletonCard key={i} />)
+            [1,2,3,4].map(i => <SkeletonCard key={i} />)
           ) : (
             <>
               <StatCard
                 icon={Building2} label="Total Tenants" value={data?.total_tenants ?? 0}
-                sub={`${data?.active_tenants ?? 0} active · ${activePct}% healthy`}
-                color="text-brand-400" href="/admin/tenants" trend="+2 this week"
+                sub={`${data?.active_tenants ?? 0} active · ${activePct}% active rate`}
+                color="text-brand-400" href="/admin/tenants"
                 gradient="bg-gradient-to-br from-brand-600/20 to-brand-800/10 border-brand-500/30"
               />
               <StatCard
                 icon={Users} label="Total Users" value={data?.total_users ?? 0}
                 sub={`${data?.active_users ?? 0} active accounts`}
-                color="text-green-400" href="/admin/users" trend="+12 this week"
+                color="text-green-400" href="/admin/users"
                 gradient="bg-gradient-to-br from-green-600/20 to-green-800/10 border-green-500/30"
               />
               <StatCard
-                icon={Award} label="Certificates" value={data?.total_certificates ?? 0}
-                sub="Issued across all tenants"
-                color="text-yellow-400" href="/admin/users"
-                gradient="bg-gradient-to-br from-yellow-600/20 to-yellow-800/10 border-yellow-500/30"
-              />
-              <StatCard
                 icon={Activity}
-                label="System Health"
-                value={healthy ? '100%' : 'Issues'}
-                sub={healthy ? 'All services running' : 'Check health page'}
-                color={healthy ? 'text-emerald-400' : 'text-red-400'}
-                href="/admin/health"
-                gradient={healthy
-                  ? "bg-gradient-to-br from-emerald-600/20 to-emerald-800/10 border-emerald-500/30"
-                  : "bg-gradient-to-br from-red-600/20 to-red-800/10 border-red-500/30"
-                }
+                label="Active Users"
+                value={data?.active_users ?? 0}
+                sub={`${data ? Math.round((data.active_users / Math.max(data.total_users, 1)) * 100) : 0}% of total users`}
+                color="text-cyan-400"
+                href="/admin/users"
+                gradient="bg-gradient-to-br from-cyan-600/20 to-cyan-800/10 border-cyan-500/30"
               />
               <StatCard
-                icon={BookOpen}
-                label="Assessments Taken"
-                value={data?.lms_assessments_taken ?? 0}
-                sub="readiness diagnostics completed"
-                color="text-teal-400"
-                href="/admin/lms/progress"
-                gradient="border-teal-500/20 bg-gradient-to-br from-teal-900/20 to-teal-800/10"
-              />
-              <StatCard
-                icon={TrendingUp}
-                label="Modules Completed"
-                value={data?.lms_modules_completed ?? 0}
-                sub="across all users"
-                color="text-indigo-400"
-                href="/admin/lms/modules"
-                gradient="border-indigo-500/20 bg-gradient-to-br from-indigo-900/20 to-indigo-800/10"
-              />
-              <StatCard
-                icon={Award}
-                label="LMS Certificates"
-                value={data?.lms_certificates_issued ?? 0}
-                sub="issued for module 6 completion"
-                color="text-amber-400"
-                href="/admin/certificates"
-                gradient="border-amber-500/20 bg-gradient-to-br from-amber-900/20 to-amber-800/10"
+                icon={Award} label="Total Certificates" value={data?.total_certificates ?? 0}
+                sub="Issued across all tenants"
+                color="text-yellow-400" href="/admin/certificates"
+                gradient="bg-gradient-to-br from-yellow-600/20 to-yellow-800/10 border-yellow-500/30"
               />
             </>
           )}
         </div>
 
-        {/* Middle row */}
+        {/* Row 2: LMS + Subscriptions (4 cards) */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+          {loading ? (
+            [1,2,3,4].map(i => <SkeletonCard key={i} />)
+          ) : (
+            <>
+              <StatCard
+                icon={BookOpen}
+                label="LMS Modules"
+                value={6}
+                sub="15 lessons in Module 1"
+                color="text-teal-400"
+                href="/admin/lms/modules"
+                gradient="bg-gradient-to-br from-teal-600/20 to-teal-800/10 border-teal-500/30"
+              />
+              <StatCard
+                icon={ClipboardList}
+                label="Assessments Taken"
+                value={data?.lms_assessments_taken ?? 0}
+                sub="Readiness diagnostics completed"
+                color="text-indigo-400"
+                href="/admin/lms/progress"
+                gradient="bg-gradient-to-br from-indigo-600/20 to-indigo-800/10 border-indigo-500/30"
+              />
+              <StatCard
+                icon={CreditCard}
+                label="Basic Plans"
+                value={data?.subscription_basic ?? 0}
+                sub="Active basic subscriptions"
+                color="text-purple-400"
+                href="/admin/subscriptions"
+                gradient="bg-gradient-to-br from-purple-600/20 to-purple-800/10 border-purple-500/30"
+              />
+              <StatCard
+                icon={CreditCard}
+                label="Premium Plans"
+                value={data?.subscription_premium ?? 0}
+                sub="Active premium subscriptions"
+                color="text-amber-400"
+                href="/admin/subscriptions"
+                gradient="bg-gradient-to-br from-amber-600/20 to-amber-800/10 border-amber-500/30"
+              />
+            </>
+          )}
+        </div>
+
+        {/* Middle row: Platform Overview + System Health */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
 
-          {/* System Overview */}
+          {/* Platform Overview */}
           <div className="lg:col-span-2 rounded-2xl border border-white/8 bg-white/3 p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-base font-bold text-white flex items-center gap-2">
@@ -234,7 +256,7 @@ export default function AdminDashboard() {
                 <div key={m.label} className="bg-white/3 rounded-xl p-4 border border-white/5">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-xs text-slate-400">{m.label}</span>
-                    <span className="text-sm font-bold text-white">{loading ? '—' : `${m.value}%`}</span>
+                    <span className="text-sm font-bold text-white">{loading ? '---' : `${m.value}%`}</span>
                   </div>
                   <div className="h-1.5 bg-white/5 rounded-full overflow-hidden">
                     <div
@@ -247,29 +269,43 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Quick Stats */}
+          {/* Recent Activity */}
           <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
             <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
-              <Zap className="w-4 h-4 text-yellow-400" /> Quick Stats
+              <Clock className="w-4 h-4 text-yellow-400" /> Recent Activity
             </h2>
-            <div className="space-y-3">
-              {[
-                { label: 'Tenants Online',    value: data?.active_tenants ?? '—', icon: Building2, color: 'text-brand-400' },
-                { label: 'Users Online',      value: data?.active_users ?? '—',   icon: Users,     color: 'text-green-400' },
-                { label: 'Certs Issued',      value: data?.total_certificates ?? '—', icon: Award, color: 'text-yellow-400' },
-                { label: 'Security Status',   value: 'Protected',                 icon: Shield,    color: 'text-emerald-400' },
-              ].map(s => {
-                const Icon = s.icon
-                return (
-                  <div key={s.label} className="flex items-center gap-3 p-3 bg-white/3 rounded-xl border border-white/5">
-                    <div className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center flex-shrink-0">
-                      <Icon className={`w-4 h-4 ${s.color}`} />
+            <div className="space-y-2">
+              {data?.recent_audit && data.recent_audit.length > 0 ? (
+                data.recent_audit.slice(0, 5).map((entry, i) => (
+                  <div key={i} className="flex items-start gap-3 p-3 bg-white/3 rounded-xl border border-white/5">
+                    <Activity className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm text-white truncate">{entry.action}</p>
+                      <p className="text-xs text-slate-500">
+                        {entry.email && <span>{entry.email} · </span>}
+                        {new Date(entry.timestamp).toLocaleString()}
+                      </p>
                     </div>
-                    <span className="text-sm text-slate-400 flex-1">{s.label}</span>
-                    <span className="text-sm font-bold text-white">{loading ? <Loader2 className="w-3 h-3 animate-spin text-slate-600" /> : s.value}</span>
                   </div>
-                )
-              })}
+                ))
+              ) : (
+                <div className="space-y-2">
+                  {[1,2,3,4,5].map(i => (
+                    <div key={i} className="flex items-center gap-3 p-3 bg-white/3 rounded-xl border border-white/5">
+                      <Activity className="w-4 h-4 text-slate-600 flex-shrink-0" />
+                      <div className="flex-1">
+                        <div className="h-3 w-3/4 bg-white/5 rounded" />
+                        <div className="h-2 w-1/2 bg-white/3 rounded mt-1.5" />
+                      </div>
+                    </div>
+                  ))}
+                  <p className="text-xs text-slate-600 text-center pt-1">
+                    <Link href="/admin/audit" className="hover:text-white transition-colors">
+                      View full audit log
+                    </Link>
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -277,7 +313,7 @@ export default function AdminDashboard() {
         {/* Quick Actions */}
         <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
           <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
-            <Sparkles className="w-4 h-4 text-brand-400" /> Command Centre
+            <Sparkles className="w-4 h-4 text-brand-400" /> Quick Actions
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             {[
@@ -306,14 +342,14 @@ export default function AdminDashboard() {
         </div>
 
         {/* LMS Management quick links */}
-        <div className="mt-8">
+        <div>
           <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">LMS Management</h2>
           <div className="grid grid-cols-3 gap-3">
             <Link href="/admin/lms/modules" className="flex items-center gap-3 p-4 rounded-xl border border-white/5 bg-white/3 hover:bg-white/5 transition-colors">
               <BookOpen className="w-5 h-5 text-teal-400" />
               <div>
                 <p className="text-sm font-semibold text-white">Manage Modules</p>
-                <p className="text-xs text-slate-500">Edit module content &amp; settings</p>
+                <p className="text-xs text-slate-500">6 modules, edit content &amp; settings</p>
               </div>
             </Link>
             <Link href="/admin/lms/questions" className="flex items-center gap-3 p-4 rounded-xl border border-white/5 bg-white/3 hover:bg-white/5 transition-colors">

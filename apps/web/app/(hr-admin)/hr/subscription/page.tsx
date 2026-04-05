@@ -4,7 +4,8 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import {
   CreditCard, Loader2, RefreshCw, AlertCircle, Users, Globe,
-  Mail, Building2, CheckCircle, Crown, Calendar, Shield, Star, Sparkles
+  Mail, Building2, CheckCircle, Crown, Calendar, Shield, Star, Sparkles,
+  Video, ArrowRight, Receipt
 } from 'lucide-react'
 import { api } from '@/lib/api'
 
@@ -321,6 +322,85 @@ export default function HrSubscriptionPage() {
                 )}
               </div>
             </div>
+
+            {/* ── Billing Information ── */}
+            <div className="glass p-6">
+              <div className="flex items-center gap-3 mb-5">
+                <Receipt className="w-5 h-5 text-slate-400"/>
+                <h2 className="text-base font-semibold text-white">Billing Information</h2>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Billing Cycle</span>
+                  </div>
+                  <p className="text-sm font-medium text-white">Yearly</p>
+                </div>
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Calendar className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Next Billing Date</span>
+                  </div>
+                  <p className="text-sm font-medium text-white">
+                    {new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  </p>
+                </div>
+                <div className="p-4 rounded-xl bg-white/[0.02] border border-white/5">
+                  <div className="flex items-center gap-2 mb-2">
+                    <CreditCard className="w-3.5 h-3.5 text-slate-500" />
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">Payment Method</span>
+                  </div>
+                  <p className="text-sm font-medium text-white">Stripe (coming soon)</p>
+                  <p className="text-[10px] text-slate-500 mt-0.5">Invoice-based billing available</p>
+                </div>
+              </div>
+              <div className="mt-4 p-3 rounded-xl bg-[#2BBFC5]/5 border border-[#2BBFC5]/15">
+                <p className="text-xs text-slate-400">
+                  <span className="font-medium text-[#2BBFC5]">Per-seat pricing:</span>{' '}
+                  ${(PLAN_META[activePlan]?.priceYearly ?? 299)} / seat / year × {tenant.user_count} seats = {' '}
+                  <span className="font-bold text-white">
+                    ${((PLAN_META[activePlan]?.priceYearly ?? 299) * tenant.user_count).toLocaleString()}/year
+                  </span>
+                </p>
+              </div>
+            </div>
+
+            {/* ── Premium Booking (if Premium plan) ── */}
+            {activePlan === 'premium' && (
+              <div className="rounded-2xl p-6"
+                style={{
+                  background: 'linear-gradient(135deg, rgba(232,97,42,0.12) 0%, rgba(232,97,42,0.04) 100%)',
+                  border: '1px solid rgba(232,97,42,0.3)',
+                }}>
+                <div className="flex items-start gap-4">
+                  <div className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0 bg-[#E8612A]/15 border border-[#E8612A]/25">
+                    <Video className="w-6 h-6 text-[#E8612A]" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="text-lg font-bold text-white">1-on-1 Sessions with Legacy Expert</h3>
+                    <p className="text-sm text-slate-400 mt-1">
+                      Included with your Premium subscription. Employees can book personalised sessions with certified estate planning experts.
+                    </p>
+                    <p className="text-xs text-slate-500 mt-2">
+                      Booking link: <a href="https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH" target="_blank" rel="noopener noreferrer" className="text-[#E8612A] hover:underline">link.endevo.life/widget/booking/...</a>
+                    </p>
+                  </div>
+                  <a
+                    href="https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"
+                    style={{
+                      background: 'linear-gradient(135deg, #E8612A, #d4541f)',
+                      boxShadow: '0 4px 16px rgba(232,97,42,0.3)',
+                    }}
+                  >
+                    Book Session <ArrowRight className="w-4 h-4" />
+                  </a>
+                </div>
+              </div>
+            )}
 
             {/* ── Upgrade CTA ── */}
             <div className="mt-4 pt-4 border-t border-white/5">

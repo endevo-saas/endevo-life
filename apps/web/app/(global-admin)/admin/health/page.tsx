@@ -28,26 +28,26 @@ const AWS_SERVICES = [
   {
     key: 'dynamodb',
     label: 'Amazon DynamoDB',
-    sub: '9 tables · PAY_PER_REQUEST · PITR enabled',
+    sub: '13 tables · PAY_PER_REQUEST · PITR enabled',
     icon: Database,
     group: 'Data',
-    detail: 'tenants(12) users(42) training(28) questions(140) certificates(3) audit(65) responses(4) video-progress(2) config(0)',
+    detail: 'tenants users training questions certificates audit responses video-progress config lms-modules lms-user-modules lms-lessons lms-lesson-progress',
   },
   {
     key: 'lambda',
     label: 'AWS Lambda',
-    sub: '4 functions · python3.12 · 256MB · 30s timeout',
+    sub: '5 functions · python3.12 · 256MB · 30s timeout',
     icon: Zap,
     group: 'Compute',
-    detail: 'fn-auth(9 routes) fn-admin(25 routes) fn-hr(10 routes) fn-employee(8 routes)',
+    detail: 'fn-auth(9 routes) fn-admin(25 routes) fn-hr(10 routes) fn-employee(8 routes) fn-lms(12+ routes)',
   },
   {
     key: 'api_gateway',
     label: 'API Gateway HTTP',
-    sub: 'endevo-uat-api · ID: 4jms6sdzk9 · 4 wildcard routes',
+    sub: 'endevo-uat-api · ID: 4jms6sdzk9 · 5 wildcard routes',
     icon: Globe,
     group: 'Networking',
-    detail: 'ANY /api/auth/{proxy+} · ANY /api/admin/{proxy+} · ANY /api/hr/{proxy+} · ANY /api/employee/{proxy+}',
+    detail: 'ANY /api/auth/{proxy+} · ANY /api/admin/{proxy+} · ANY /api/hr/{proxy+} · ANY /api/employee/{proxy+} · ANY /api/lms/{proxy+}',
   },
   {
     key: 'amplify',
@@ -64,6 +64,14 @@ const AWS_SERVICES = [
     icon: HardDrive,
     group: 'Storage',
     detail: 'Assets: 0 objects · Videos: 0 objects (LMS Phase 2 ready)',
+  },
+  {
+    key: 'cloudfront',
+    label: 'Amazon CloudFront',
+    sub: 'endevo-uat-lms CDN · OAI secured · us-east-1',
+    icon: Globe,
+    group: 'CDN',
+    detail: 'Serves videos + assets from S3 via OAI · endevo-uat-videos + endevo-uat-assets origins',
   },
   {
     key: 'ses',
@@ -94,6 +102,10 @@ const DB_TABLES = [
   { name: 'endevo-uat-responses',      pk: 'userId',     sk: 'submittedAt',items: 4,   purpose: 'Assessment submissions' },
   { name: 'endevo-uat-video-progress', pk: 'userId',     sk: 'videoId',    items: 2,   purpose: 'Video watch progress' },
   { name: 'endevo-uat-config',         pk: 'configKey',  sk: '—',          items: 0,   purpose: 'Platform configuration' },
+  { name: 'endevo-uat-lms-modules',    pk: 'tenantId',   sk: 'moduleNum',  items: 6,   purpose: 'LMS module definitions' },
+  { name: 'endevo-uat-lms-user-modules', pk: 'userId',   sk: 'moduleNum',  items: 0,   purpose: 'Per-user module unlock/completion' },
+  { name: 'endevo-uat-lms-lessons',    pk: 'tenantId',   sk: 'moduleOrder',items: 15,  purpose: 'Ordered lesson sequences' },
+  { name: 'endevo-uat-lms-lesson-progress', pk: 'userId', sk: 'lessonId', items: 0,   purpose: 'Per-lesson completion tracking' },
 ]
 
 // ── REAL LAMBDA FUNCTION DETAILS ───────────────────────────────────────────
@@ -136,6 +148,16 @@ const LAMBDAS = [
     timeout: 30,
     runtime: 'python3.12',
     endpoints: ['GET /dashboard', 'GET/PUT /profile', 'GET /training', 'POST /progress', 'GET /assessment/{courseId}', 'POST /assessment/{courseId}/submit', 'GET /certificates'],
+    updated: '2026-03-30',
+  },
+  {
+    name: 'endevo-uat-fn-lms',
+    short: 'lms',
+    routes: 12,
+    memory: 256,
+    timeout: 30,
+    runtime: 'python3.12',
+    endpoints: ['GET /modules', 'GET /modules/{num}', 'GET /modules/{num}/lessons', 'POST /modules/{num}/unlock', 'GET /progress', 'POST /quiz/submit', 'GET /admin/modules', 'POST /admin/modules', 'GET /admin/progress', 'POST /admin/lock', 'POST /admin/unlock', 'GET /certificates'],
     updated: '2026-03-30',
   },
 ]
@@ -287,7 +309,7 @@ export default function HealthPage() {
               <p className="text-2xl font-black text-white">{healthy ? 'All Systems Operational' : 'Partial Degradation'}</p>
               <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 {healthy
-                  ? '9 DynamoDB tables · 4 Lambda functions · Cognito · API Gateway · Amplify · SES · S3'
+                  ? '13 DynamoDB tables · 5 Lambda functions · Cognito · API Gateway · Amplify · CloudFront · SES · S3'
                   : 'Some services reporting errors — see below'}
               </p>
             </div>
@@ -296,7 +318,7 @@ export default function HealthPage() {
                 { label: 'Region',        value: 'us-east-1',                           icon: Globe },
                 { label: 'API Latency',   value: latency ? `${latency}ms` : '—',        icon: Clock },
                 { label: 'Total Routes',  value: `${totalRoutes}`,                       icon: Activity },
-                { label: 'DB Tables',     value: '9',                                    icon: Database },
+                { label: 'DB Tables',     value: '13',                                   icon: Database },
               ].map(s => {
                 const Icon = s.icon
                 return (
@@ -331,7 +353,7 @@ export default function HealthPage() {
           <h2 className="text-base font-black text-white flex items-center gap-2 mb-4">
             <Database className="w-4 h-4 text-blue-400" />
             DynamoDB Tables
-            <span className="ml-2 text-xs font-normal text-blue-400">9 tables · PAY_PER_REQUEST · PITR enabled</span>
+            <span className="ml-2 text-xs font-normal text-blue-400">13 tables · PAY_PER_REQUEST · PITR enabled</span>
           </h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -360,7 +382,7 @@ export default function HealthPage() {
             </table>
           </div>
           <div className="mt-3 pt-3 flex items-center gap-4 text-xs" style={{ borderTop: '1px solid var(--border-subtle)', color: 'var(--text-muted)' }}>
-            <span>Total records: <strong className="text-white">300+</strong></span>
+            <span>Total records: <strong className="text-white">300+ (9 core + 4 LMS tables)</strong></span>
             <span>GSIs: <strong className="text-white">users(email-index, tenantId-index, inviteToken-index) · responses(tenantId-index)</strong></span>
           </div>
         </div>
@@ -415,14 +437,15 @@ export default function HealthPage() {
           <h2 className="text-base font-black text-white flex items-center gap-2 mb-4">
             <Globe className="w-4 h-4 text-purple-400" />
             API Gateway
-            <span className="ml-2 text-xs font-mono font-normal text-purple-400">4jms6sdzk9 · HTTP API · us-east-1</span>
+            <span className="ml-2 text-xs font-mono font-normal text-purple-400">4jms6sdzk9 · HTTP API · 5 routes · us-east-1</span>
           </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 mb-4">
             {[
               { path: '/api/auth/{proxy+}',     color: 'text-blue-400',    bg: 'bg-blue-500/10 border-blue-500/20',    routes: 9,  lambda: 'fn-auth'     },
               { path: '/api/admin/{proxy+}',    color: 'text-brand-400',   bg: 'bg-brand-500/10 border-brand-500/20',  routes: 25, lambda: 'fn-admin'    },
               { path: '/api/hr/{proxy+}',       color: 'text-green-400',   bg: 'bg-green-500/10 border-green-500/20',  routes: 10, lambda: 'fn-hr'       },
               { path: '/api/employee/{proxy+}', color: 'text-purple-400',  bg: 'bg-purple-500/10 border-purple-500/20',routes: 8,  lambda: 'fn-employee' },
+              { path: '/api/lms/{proxy+}',      color: 'text-teal-400',    bg: 'bg-teal-500/10 border-teal-500/20',    routes: 12, lambda: 'fn-lms'      },
             ].map(r => (
               <div key={r.path} className={`p-4 rounded-xl border ${r.bg}`}>
                 <p className={`text-xs font-mono font-bold mb-1 ${r.color}`}>ANY {r.path}</p>

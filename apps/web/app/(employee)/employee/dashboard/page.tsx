@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   ArrowRight, Award, BookOpen, CheckCircle, ChevronRight,
-  Lock, Loader2, RefreshCw, Shield, User, Heart, Sparkles
+  Lock, Loader2, RefreshCw, Shield, User, Heart, Sparkles, Video, Crown
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import Link from 'next/link'
@@ -242,6 +242,7 @@ export default function EmployeeDashboard() {
   const [error, setError] = useState('')
   const [entered, setEntered] = useState(false)
   const [quoteIdx, setQuoteIdx] = useState(0)
+  const [userPlan, setUserPlan] = useState<string>('basic')
 
   const email = Cookies.get('user_email') || ''
   const firstName = email.split('@')[0]?.split('.')[0] || 'there'
@@ -259,6 +260,16 @@ export default function EmployeeDashboard() {
       if (dash.status === 'fulfilled') setDashData(dash.value as DashboardData)
       if (assess.status === 'fulfilled') setAssessment(assess.value as AssessmentStatus)
       if (lessons.status === 'fulfilled') setLessonsData(lessons.value as LessonsResponse)
+
+      // Detect plan from /api/auth/me or cookies
+      try {
+        const me = await api.me() as Record<string, unknown>
+        const p = (me?.plan || me?.tenant_plan || (me?.subscription as Record<string, unknown>)?.plan) as string | undefined
+        if (p) setUserPlan(p.toLowerCase())
+        else setUserPlan(Cookies.get('tenant_plan')?.toLowerCase() || 'basic')
+      } catch {
+        setUserPlan(Cookies.get('tenant_plan')?.toLowerCase() || 'basic')
+      }
 
       if (dash.status === 'rejected') {
         throw new Error(dash.reason instanceof Error ? dash.reason.message : 'Failed to load dashboard')
@@ -588,6 +599,67 @@ export default function EmployeeDashboard() {
             )
           })}
         </div>
+
+        {/* ── 4b. Premium Booking Card ──────────────────────────────── */}
+        {userPlan === 'premium' ? (
+          <div
+            className="rounded-2xl p-5 fade-slide-up fade-slide-up-4"
+            style={{
+              background: 'linear-gradient(135deg, rgba(232,97,42,0.12) 0%, rgba(232,97,42,0.04) 100%)',
+              border: '1px solid rgba(232,97,42,0.3)',
+            }}
+          >
+            <div className="flex items-center gap-4">
+              <div
+                className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
+                style={{ background: 'rgba(232,97,42,0.15)', border: '1px solid rgba(232,97,42,0.25)' }}
+              >
+                <Video className="w-6 h-6 text-[#E8612A]" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <h3 className="text-sm font-bold text-white">1-on-1 Session with Legacy Expert</h3>
+                <p className="text-xs mt-0.5" style={{ color: COLORS.textSecondary }}>
+                  Included with your Premium subscription
+                </p>
+              </div>
+              <a
+                href="https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"
+                style={{
+                  background: 'linear-gradient(135deg, #E8612A, #d4541f)',
+                  boxShadow: '0 4px 16px rgba(232,97,42,0.3)',
+                }}
+              >
+                Book Session <ArrowRight className="w-4 h-4" />
+              </a>
+            </div>
+          </div>
+        ) : (
+          <Link
+            href="/employee/subscription"
+            className="group rounded-2xl p-5 flex items-center gap-4 transition-all hover:scale-[1.01] fade-slide-up fade-slide-up-4"
+            style={{
+              background: 'linear-gradient(135deg, rgba(232,97,42,0.06) 0%, rgba(232,97,42,0.02) 100%)',
+              border: '1px solid rgba(232,97,42,0.15)',
+            }}
+          >
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+              style={{ background: 'rgba(232,97,42,0.1)' }}
+            >
+              <Crown className="w-5 h-5 text-[#E8612A]" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-bold text-white">Unlock Premium Features</p>
+              <p className="text-xs" style={{ color: COLORS.textMuted }}>
+                Get 1-on-1 expert sessions, priority support & more
+              </p>
+            </div>
+            <ChevronRight className="w-4 h-4 flex-shrink-0 opacity-50 group-hover:opacity-100 transition-all" style={{ color: '#E8612A' }} />
+          </Link>
+        )}
 
         {/* ── 5. Achievement Badges ─────────────────────────────────── */}
         <div className="fade-slide-up fade-slide-up-5">

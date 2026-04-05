@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   ClipboardList, Award, User, BarChart3, LogOut, Settings,
-  MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera, Zap, BookOpen
+  MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera, Zap, BookOpen, CreditCard
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
@@ -23,8 +23,9 @@ const navGroups = [
   {
     label: 'Account',
     items: [
-      { href: '/employee/profile',  icon: User,     label: 'My Profile' },
-      { href: '/employee/settings', icon: Settings, label: 'Settings' },
+      { href: '/employee/profile',      icon: User,       label: 'My Profile' },
+      { href: '/employee/subscription', icon: CreditCard, label: 'My Subscription' },
+      { href: '/employee/settings',     icon: Settings,   label: 'Settings' },
     ],
   },
 ]
