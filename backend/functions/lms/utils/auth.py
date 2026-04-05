@@ -1,10 +1,18 @@
-"""Cognito token validation and auth helpers for the LMS Lambda."""
+"""Cognito + WorkOS dual-homing token validation and auth helpers for the LMS Lambda.
+
+Supports both Cognito access tokens and WorkOS JWTs. WorkOS is checked first;
+if the token is not a WorkOS JWT (or WORKOS_CLIENT_ID is not set), falls back
+to the existing Cognito flow. This keeps Cognito fully functional while allowing
+gradual migration to WorkOS.
+"""
 import logging
 import os
 from typing import Optional
 
 import boto3
 from botocore.exceptions import ClientError
+
+from utils.workos_auth import is_workos_token, validate_workos_token
 
 logger = logging.getLogger(__name__)
 
@@ -15,8 +23,9 @@ _cognito = boto3.client("cognito-idp", region_name=REGION)
 def get_caller(
     event: dict,
 ) -> tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
-    """Extract (tenant_id, email, user_id, role) from a Cognito Bearer token.
+    """Extract (tenant_id, email, user_id, role) from a Bearer token.
 
+    Tries WorkOS first (if configured), then falls back to Cognito.
     Returns (None, None, None, None) on any auth failure — callers must guard.
     """
     auth_header: str = (event.get("headers") or {}).get("authorization", "")
@@ -26,6 +35,38 @@ def get_caller(
         logger.debug("No authorization header present")
         return None, None, None, None
 
+    # ── Try WorkOS first (new auth — dormant until WORKOS_CLIENT_ID is set) ──
+    if is_workos_token(token):
+        workos_user = validate_workos_token(token)
+        if workos_user:
+            email = workos_user["email"]
+            # Look up role/tenant from DynamoDB by email
+            try:
+                from utils.db import USERS_T
+
+                from boto3.dynamodb.conditions import Attr
+
+                resp = USERS_T.scan(
+                    FilterExpression=Attr("email").eq(email), Limit=1
+                )
+                items = resp.get("Items", [])
+                if items:
+                    user = items[0]
+                    return (
+                        user.get("tenantId", ""),
+                        email,
+                        user.get("userId", ""),
+                        user.get("role", "EMPLOYEE"),
+                    )
+            except Exception as exc:
+                logger.warning("WorkOS user DynamoDB lookup failed: %s", exc)
+            # WorkOS user not in DynamoDB yet — return partial info
+            return None, email, workos_user["sub"], None
+        # WorkOS token detected but validation failed
+        logger.warning("WorkOS token detected but validation failed")
+        return None, None, None, None
+
+    # ── Fall back to Cognito (existing auth) ─────────────────────────────────
     try:
         response = _cognito.get_user(AccessToken=token)
         attrs: dict[str, str] = {

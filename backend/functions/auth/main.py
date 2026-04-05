@@ -523,6 +523,51 @@ def handler(event, context):
         access_token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
         if not access_token:
             return err(401, "Not authenticated")
+
+        # ── Try WorkOS first (dormant until WORKOS_CLIENT_ID env var is set) ──
+        try:
+            from utils.workos_auth import is_workos_token, validate_workos_token
+            if is_workos_token(access_token):
+                workos_user = validate_workos_token(access_token)
+                if workos_user:
+                    email = workos_user["email"]
+                    # Look up full profile from DynamoDB
+                    try:
+                        result = USERS_T.scan(
+                            FilterExpression="email = :e",
+                            ExpressionAttributeValues={":e": email},
+                            Limit=1
+                        )
+                        items = result.get("Items", [])
+                        if items:
+                            u = items[0]
+                            return resp(200, {
+                                "email":       email,
+                                "first_name":  u.get("firstName", ""),
+                                "last_name":   u.get("lastName", ""),
+                                "role":        u.get("role", "EMPLOYEE"),
+                                "tenant_id":   u.get("tenantId", ""),
+                                "tenant_name": u.get("tenantName", ""),
+                                "provider":    "workos",
+                            })
+                    except Exception as db_err:
+                        print(f"WORKOS_ME_DB_ERROR: {db_err}")
+                    # WorkOS user not in DynamoDB — return basic info
+                    return resp(200, {
+                        "email":       email,
+                        "first_name":  "",
+                        "last_name":   "",
+                        "role":        None,
+                        "tenant_id":   None,
+                        "tenant_name": None,
+                        "provider":    "workos",
+                    })
+                else:
+                    return err(401, "Invalid or expired token")
+        except ImportError:
+            pass  # workos_auth not deployed yet — skip silently
+
+        # ── Fall back to Cognito (existing auth) ──
         try:
             user = cognito.get_user(AccessToken=access_token)
             attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
