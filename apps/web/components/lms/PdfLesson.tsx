@@ -31,10 +31,6 @@ export default function PdfLesson({ lessonId, title, description, downloadUrl, a
     }
   }
 
-  // Append #toolbar=0 to disable Chrome PDF viewer toolbar (download/print)
-  // Also disable right-click on the iframe container
-  const secureUrl = downloadUrl ? `${downloadUrl}#toolbar=0&navpanes=0` : ''
-
   return (
     <div className="space-y-4">
       <div>
@@ -55,29 +51,28 @@ export default function PdfLesson({ lessonId, title, description, downloadUrl, a
         </div>
       </div>
 
-      {/* Secure PDF viewer — no download, no print, no right-click */}
+      {/* PDF viewer — embedded with no toolbar */}
       <div
-        className="rounded-xl overflow-hidden border border-slate-800 bg-white relative"
+        className="rounded-xl overflow-hidden border border-slate-800 bg-slate-900 relative"
         style={{ height: '70vh' }}
         onContextMenu={(e) => e.preventDefault()}
       >
-        <iframe
-          src={secureUrl}
-          className="w-full h-full"
-          title={title}
-          sandbox="allow-same-origin allow-scripts"
-          style={{ pointerEvents: 'auto' }}
-        />
-        {/* Transparent overlay to block right-click save-as on the PDF content */}
-        <div
-          className="absolute top-0 right-0 w-12 h-12"
-          style={{ background: 'transparent' }}
-          onContextMenu={(e) => e.preventDefault()}
-        />
+        {downloadUrl ? (
+          <iframe
+            src={`${downloadUrl}#toolbar=0&navpanes=0&scrollbar=1&view=FitH`}
+            className="w-full h-full"
+            title={title}
+            style={{ pointerEvents: 'auto' }}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-500">
+            PDF not available
+          </div>
+        )}
       </div>
 
       <p className="text-xs text-slate-600 text-center">
-        This document is view-only for security. Use zoom controls within the viewer to adjust size.
+        This document is view-only. Use scroll to navigate pages.
       </p>
 
       {/* Mark as read */}
