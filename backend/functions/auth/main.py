@@ -21,9 +21,26 @@ POOL_ID   = os.environ.get("COGNITO_POOL_ID",   "us-east-1_DVyEJqgFt")
 CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID", "4sbv2j6cv7jpp1oi0d16njsej1")
 REGION    = os.environ.get("AWS_REGION",         "us-east-1")
 
-cognito = boto3.client("cognito-idp", region_name=REGION)
-ses     = boto3.client("ses",         region_name=REGION)
-dynamo  = boto3.resource("dynamodb",  region_name=REGION)
+cognito = boto3.client("cognito-idp",      region_name=REGION)
+ses     = boto3.client("ses",              region_name=REGION)
+dynamo  = boto3.resource("dynamodb",       region_name=REGION)
+
+# ── Secrets Manager (for WorkOS credentials) ─────────────────────────────────
+_secrets_client = boto3.client("secretsmanager", region_name=REGION)
+_secret_cache: dict[str, str] = {}
+
+
+def _get_secret(name: str) -> str:
+    """Retrieve a secret from AWS Secrets Manager (cached per Lambda container)."""
+    if name in _secret_cache:
+        return _secret_cache[name]
+    try:
+        secret_resp = _secrets_client.get_secret_value(SecretId=name)
+        _secret_cache[name] = secret_resp["SecretString"]
+        return _secret_cache[name]
+    except Exception as e:
+        print(f"SECRET_FETCH_ERROR: Failed to get secret {name}: {e}")
+        return ""
 
 USERS_T  = dynamo.Table("endevo-uat-users")
 AUDIT_T  = dynamo.Table("endevo-uat-audit")   # also stores OTP records + brute-force tracking
@@ -581,6 +598,107 @@ def handler(event, context):
             })
         except ClientError:
             return err(401, "Invalid or expired token")
+
+    # ── GET /api/auth/workos/login — Return AuthKit authorization URL ──
+    if path.endswith("/workos/login") and method == "GET":
+        import urllib.parse
+
+        redirect_uri = (event.get("queryStringParameters") or {}).get(
+            "redirect_uri",
+            "https://main.d1vvfv8oltolcf.amplifyapp.com/api/auth/callback",
+        )
+        client_id = _get_secret("endevo/workos/client-id")
+        if not client_id:
+            return err(500, "WorkOS configuration error")
+
+        auth_url = (
+            "https://api.workos.com/user_management/authorize?"
+            + urllib.parse.urlencode({
+                "client_id": client_id,
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "provider": "authkit",
+            })
+        )
+        return resp(200, {"url": auth_url})
+
+    # ── POST /api/auth/workos/callback — Exchange code for user + session ──
+    if path.endswith("/workos/callback") and method == "POST":
+        import urllib.request
+
+        code = (body.get("code") or "").strip()
+        if not code:
+            return err(400, "Authorization code required")
+
+        api_key = _get_secret("endevo/workos/api-key")
+        client_id = _get_secret("endevo/workos/client-id")
+        if not api_key or not client_id:
+            return err(500, "WorkOS configuration error")
+
+        try:
+            data = json.dumps({
+                "code": code,
+                "client_id": client_id,
+            }).encode()
+            req = urllib.request.Request(
+                "https://api.workos.com/user_management/authenticate",
+                data=data,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=10) as workos_resp:
+                workos_data = json.loads(workos_resp.read())
+        except Exception as e:
+            print(f"WORKOS_AUTH_ERROR: {e}")
+            security_audit("WORKOS_AUTH_FAILED", "", "AUTH", ip, device,
+                           f"WorkOS code exchange failed: {e}", "WARN")
+            return err(502, "Failed to authenticate with WorkOS")
+
+        user_email = (workos_data.get("user") or {}).get("email", "")
+        workos_user_id = (workos_data.get("user") or {}).get("id", "")
+        access_token = workos_data.get("access_token", "")
+
+        if not user_email:
+            return err(502, "WorkOS did not return a user email")
+
+        # Look up user in DynamoDB
+        role = "EMPLOYEE"
+        tenant_id = ""
+        tenant_name = ""
+        first_name = ""
+        last_name = ""
+        try:
+            result = USERS_T.scan(
+                FilterExpression="email = :e",
+                ExpressionAttributeValues={":e": user_email},
+                Limit=1,
+            )
+            items = result.get("Items", [])
+            if items:
+                u = items[0]
+                role = u.get("role", "EMPLOYEE")
+                tenant_id = u.get("tenantId", "")
+                tenant_name = u.get("tenantName", "")
+                first_name = u.get("firstName", "")
+                last_name = u.get("lastName", "")
+        except Exception as e:
+            print(f"WORKOS_DB_LOOKUP_ERROR: {e}")
+
+        security_audit("LOGIN_SUCCESS", user_email, tenant_id or "AUTH", ip, device,
+                       f"WorkOS SSO login from {ip} | workos_uid={workos_user_id}")
+
+        return resp(200, {
+            "access_token": access_token,
+            "role": role,
+            "tenant_id": tenant_id,
+            "tenant_name": tenant_name,
+            "email": user_email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "provider": "workos",
+        })
 
     return err(404, f"Route not found: {method} {path}")
 

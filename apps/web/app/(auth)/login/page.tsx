@@ -103,6 +103,18 @@ export default function LoginPage() {
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({ resolver: zodResolver(schema) })
 
+  // Enterprise SSO via WorkOS
+  const handleSSOLogin = async () => {
+    try {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/workos/login?redirect_uri=${encodeURIComponent(window.location.origin + '/api/auth/callback')}`)
+      const data = await res.json()
+      if (data.url) window.location.href = data.url
+      else setError('SSO login unavailable')
+    } catch {
+      setError('SSO login failed')
+    }
+  }
+
   // OTP digit input handling
   function handleOtpDigit(i: number, val: string) {
     const digit = val.replace(/\D/g, '').slice(-1)
@@ -305,6 +317,26 @@ export default function LoginPage() {
                   : <><Sparkles className="w-4 h-4" />Sign In</>
                 }
               </button>
+
+              {/* Enterprise SSO via WorkOS */}
+              {process.env.NEXT_PUBLIC_WORKOS_CLIENT_ID && (
+                <>
+                  <div className="flex items-center gap-3 my-4">
+                    <div className="flex-1 h-px bg-slate-700" />
+                    <span className="text-xs text-slate-500">or</span>
+                    <div className="flex-1 h-px bg-slate-700" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleSSOLogin}
+                    disabled={loading}
+                    className="w-full py-3 rounded-xl font-semibold text-sm transition-all disabled:opacity-50"
+                    style={{ background: 'rgba(43,191,197,0.15)', border: '1px solid rgba(43,191,197,0.3)', color: '#2BBFC5' }}
+                  >
+                    Sign in with Enterprise SSO
+                  </button>
+                </>
+              )}
             </form>
           )}
 
@@ -390,7 +422,7 @@ export default function LoginPage() {
 
         {/* Footer */}
         <p className="text-center text-xs mt-6" style={{ color: 'var(--text-muted)' }}>
-          Protected by AWS Cognito · TLS 1.3 · Email OTP · Math CAPTCHA
+          Protected by AWS Cognito · WorkOS SSO · TLS 1.3 · Email OTP · Math CAPTCHA
         </p>
       </div>
     </div>
