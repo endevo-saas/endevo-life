@@ -335,7 +335,7 @@ export default function AdminDashboard() {
 
         {/* Footer status */}
         <div className="flex items-center justify-between text-xs text-slate-600 pb-2">
-          <span>Endevo Life · Global Admin · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
+          <span>Global Admin · {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</span>
           <span className="flex items-center gap-1.5">
             <PulseRing color="green" />
             AWS us-east-1 · Cognito · DynamoDB · Lambda · Amplify

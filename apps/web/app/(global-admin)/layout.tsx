@@ -258,7 +258,17 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>{children}</main>
+      <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>
+        {children}
+        <footer className="px-6 py-4 text-center border-t" style={{ borderColor: 'var(--border-subtle)' }}>
+          <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
+            Legacy Readiness OS — Powered by <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Endevo.life</span>
+          </p>
+          <p className="text-[10px] mt-1" style={{ color: 'var(--text-muted)' }}>
+            &copy; {new Date().getFullYear()} Endevo Life Inc. All rights reserved. US Data Residency.
+          </p>
+        </footer>
+      </main>
     </div>
   )
 }
