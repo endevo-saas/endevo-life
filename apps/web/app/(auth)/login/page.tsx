@@ -146,6 +146,9 @@ export default function LoginPage() {
         Cookies.set('id_token',     res.id_token,     { expires: 1, sameSite: 'strict' })
         Cookies.set('user_role',    res.role,          { expires: 1, sameSite: 'strict' })
         Cookies.set('user_email',   res.email || '',   { expires: 1, sameSite: 'strict' })
+        if (res.tenant_name) Cookies.set('tenant_name', res.tenant_name, { expires: 1, sameSite: 'strict' })
+        if (res.first_name)  Cookies.set('first_name',  res.first_name,  { expires: 1, sameSite: 'strict' })
+        if (res.last_name)   Cookies.set('last_name',   res.last_name,   { expires: 1, sameSite: 'strict' })
       }
       routeByRole(res.role, router)
     } catch (e: unknown) {

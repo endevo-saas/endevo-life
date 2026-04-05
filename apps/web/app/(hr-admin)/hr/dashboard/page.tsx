@@ -16,6 +16,7 @@ interface HrDashData {
   active_users: number
   pending_invites: number
   total_employees: number
+  tenant_name?: string
 }
 
 function PulseRing({ color = 'green' }: { color?: string }) {
@@ -33,21 +34,42 @@ export default function HrDashboard() {
   const [employees, setEmployees] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const name = Cookies.get('user_email')?.split('@')[0] || 'HR Admin'
+  const [tenantName, setTenantName] = useState(Cookies.get('tenant_name') || '')
+  const firstName = Cookies.get('first_name') || ''
+  const displayName = firstName || Cookies.get('user_email')?.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || 'HR Admin'
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
     try {
-      const [dash, emp] = await Promise.all([
+      const requests: Promise<unknown>[] = [
         api.hrDashboard() as Promise<HrDashData>,
         api.hrEmployees(),
-      ])
-      setData(dash)
-      setEmployees(emp.employees || [])
+      ]
+      if (!tenantName) {
+        requests.push(api.hrTenant())
+      }
+      const results = await Promise.all(requests)
+      const dashData = results[0] as HrDashData
+      setData(dashData)
+      setEmployees(((results[1] as { employees?: User[] }).employees) || [])
+      // Pick up tenant_name from dashboard API or tenant API
+      if (!tenantName) {
+        const fromDash = dashData.tenant_name
+        if (fromDash) {
+          setTenantName(fromDash)
+          Cookies.set('tenant_name', fromDash, { expires: 1, sameSite: 'strict' })
+        } else if (results[2]) {
+          const t = results[2] as { name?: string }
+          if (t.name) {
+            setTenantName(t.name)
+            Cookies.set('tenant_name', t.name, { expires: 1, sameSite: 'strict' })
+          }
+        }
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally { setLoading(false) }
-  }, [])
+  }, [tenantName])
 
   useEffect(() => { load() }, [load])
 
@@ -71,10 +93,10 @@ export default function HrDashboard() {
               <span className="text-xs text-slate-500">Team portal live</span>
             </div>
             <h1 className="text-3xl font-black text-white tracking-tight">
-              Team Command <span className="text-green-400">⚡</span>
+              {tenantName || 'Team Command'} <span className="text-green-400 text-lg font-medium">(HR Admin)</span>
             </h1>
             <p className="text-slate-400 text-sm mt-0.5">
-              Welcome, <span className="text-white font-medium capitalize">{name}</span> · Manage your team
+              Welcome, <span className="text-white font-medium capitalize">{displayName}</span> · Manage your team
             </p>
           </div>
           <button onClick={load} disabled={loading}
@@ -238,7 +260,7 @@ export default function HrDashboard() {
         </div>
 
         <div className="flex items-center justify-between text-xs text-slate-600 pb-2">
-          <span>Endevo Life · HR Admin Portal</span>
+          <span>Endevo Life · {tenantName ? `${tenantName} HR Portal` : 'HR Admin Portal'}</span>
           <span className="flex items-center gap-1.5"><PulseRing color="green" /> Tenant-scoped · Secure</span>
         </div>
       </div>

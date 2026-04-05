@@ -135,6 +135,7 @@ function SessionPanel() {
 
 export default function HrLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname()
+  const tenantName = Cookies.get('tenant_name') || ''
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-base)' }}>
       <aside className="w-64 flex-shrink-0 flex flex-col"
@@ -145,10 +146,10 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
               <Users className="w-5 h-5 text-green-400" />
             </div>
             <div>
-              <div className="text-sm font-semibold text-white">Endevo Life</div>
+              <div className="text-sm font-semibold text-white">Legacy Readiness OS</div>
               <div className="text-xs text-green-400 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" />
-                HR Admin
+                {tenantName ? `${tenantName} · HR` : 'HR Admin'}
               </div>
             </div>
           </div>

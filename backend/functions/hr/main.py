@@ -193,11 +193,19 @@ def handler(event, context):
     # ── GET /api/hr/dashboard ─────────────────────────────────────────────
     if path.endswith("/dashboard") and method == "GET":
         base_filter = Attr("tenantId").eq(tenant_id)
+        # Fetch tenant name for display
+        t_name = ""
+        try:
+            t_item = dynamo.Table("endevo-uat-tenants").get_item(Key={"tenantId": tenant_id}).get("Item")
+            t_name = t_item.get("name", "") if t_item else ""
+        except Exception:
+            pass
         return resp(200, {
             "total_users":     count_items(USERS_T, base_filter),
             "active_users":    count_items(USERS_T, base_filter & Attr("status").eq("active")),
             "pending_invites": count_items(USERS_T, base_filter & Attr("status").eq("pending")),
             "total_employees": count_items(USERS_T, base_filter & Attr("role").eq("EMPLOYEE")),
+            "tenant_name":     t_name,
         })
 
     # ── GET /api/hr/employees ─────────────────────────────────────────────

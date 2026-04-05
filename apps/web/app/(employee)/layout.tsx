@@ -118,6 +118,7 @@ function SessionPanel() {
 
 export default function EmployeeLayout({ children }: { children: React.ReactNode }) {
   const path = usePathname()
+  const tenantName = Cookies.get('tenant_name') || ''
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-base)' }}>
       <aside className="w-64 flex-shrink-0 flex flex-col"
@@ -130,10 +131,10 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
               <Zap className="w-5 h-5 text-white" />
             </div>
             <div>
-              <div className="text-sm font-bold text-white">Endevo Life</div>
+              <div className="text-sm font-bold text-white">Legacy Readiness OS</div>
               <div className="text-xs flex items-center gap-1" style={{ color: 'var(--accent-1)' }}>
                 <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: 'var(--success)' }} />
-                Employee Portal
+                {tenantName ? `${tenantName} · Employee` : 'Employee Portal'}
               </div>
             </div>
           </div>

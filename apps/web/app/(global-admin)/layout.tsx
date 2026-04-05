@@ -223,7 +223,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               <Shield className="w-5 h-5 text-brand-400" />
             </div>
             <div>
-              <div className="text-sm font-semibold text-white">Endevo Life</div>
+              <div className="text-sm font-semibold text-white">Legacy Readiness OS</div>
               <div className="text-xs text-brand-400 flex items-center gap-1">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" />
                 Global Admin
