@@ -79,6 +79,7 @@ export class ApiStack extends cdk.Stack {
       corsPreflight: {
         allowOrigins: [
           'https://uat.endevo.life',
+          'https://uat.endevo.life',
           'https://main.d1vvfv8oltolcf.amplifyapp.com',
           'http://localhost:3000',
         ],

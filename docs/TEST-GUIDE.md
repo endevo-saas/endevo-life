@@ -7,10 +7,10 @@
 
 | Page | URL |
 |------|-----|
-| Login | https://main.d1vgn9nzfx4cxk.amplifyapp.com/login |
-| Admin Dashboard | https://main.d1vgn9nzfx4cxk.amplifyapp.com/admin/dashboard |
-| HR Dashboard | https://main.d1vgn9nzfx4cxk.amplifyapp.com/hr/dashboard |
-| Employee Dashboard | https://main.d1vgn9nzfx4cxk.amplifyapp.com/employee/dashboard |
+| Login | https://uat.endevo.life/login |
+| Admin Dashboard | https://uat.endevo.life/admin/dashboard |
+| HR Dashboard | https://uat.endevo.life/hr/dashboard |
+| Employee Dashboard | https://uat.endevo.life/employee/dashboard |
 | API Base | https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com |
 
 > **Credentials:** Stored privately in `_sessions/TEST-USERS.md` (local only, not in GitHub).

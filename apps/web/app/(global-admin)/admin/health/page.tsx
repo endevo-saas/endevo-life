@@ -52,7 +52,7 @@ const AWS_SERVICES = [
   {
     key: 'amplify',
     label: 'AWS Amplify',
-    sub: 'endevo-uat-frontend · WEB_COMPUTE · d1vgn9nzfx4cxk.amplifyapp.com',
+    sub: 'endevo-uat-frontend · WEB_COMPUTE · d1vvfv8oltolcf.amplifyapp.com',
     icon: Cloud,
     group: 'Hosting',
     detail: 'Next.js 15 · Auto-deploy on push to main · GitHub: shahzadms7/endevo-life',
@@ -511,7 +511,7 @@ export default function HealthPage() {
             {[
               { label: 'App Name',     value: 'endevo-uat-frontend' },
               { label: 'Platform',     value: 'WEB_COMPUTE' },
-              { label: 'App ID',       value: 'd1vgn9nzfx4cxk' },
+              { label: 'App ID',       value: 'd1vvfv8oltolcf' },
               { label: 'Created',      value: '2026-03-20' },
             ].map(s => (
               <div key={s.label} className="rounded-xl p-3" style={{ background: 'var(--bg-elevated)', border: '1px solid var(--border-subtle)' }}>
@@ -521,7 +521,7 @@ export default function HealthPage() {
             ))}
           </div>
           <div className="mt-3 p-3 rounded-xl text-xs space-y-1" style={{ background: 'var(--bg-elevated)' }}>
-            <p><strong className="text-white">Live URL:</strong> <span className="text-cyan-400">https://main.d1vgn9nzfx4cxk.amplifyapp.com</span></p>
+            <p><strong className="text-white">Live URL:</strong> <span className="text-cyan-400">https://uat.endevo.life</span></p>
             <p style={{ color: 'var(--text-muted)' }}><strong className="text-white">GitHub:</strong> shahzadms7/endevo-life · Branch: main · Auto-deploy: enabled</p>
             <p style={{ color: 'var(--text-muted)' }}><strong className="text-white">DNS Pending:</strong> uat.endevo.life → Amplify (GoDaddy cutover by Niki/Nermeen)</p>
           </div>

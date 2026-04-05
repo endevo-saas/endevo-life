@@ -405,7 +405,7 @@ def handler(event, context):
             print(f"HR_ADMIN_CREATE_ERROR: {ce}")
 
         if hr_created:
-            invite_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/login"
+            invite_url = f"https://uat.endevo.life/login"
             try:
                 ses.send_email(
                     Source="no-reply@endevo.life",
@@ -903,7 +903,7 @@ def handler(event, context):
                 pass
             return err(500, f"Failed to save user record: {str(e)}")
 
-        invite_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/register?token={invite_token}&email={email}"
+        invite_url = f"https://uat.endevo.life/register?token={invite_token}&email={email}"
         try:
             ses.send_email(
                 Source="no-reply@endevo.life",

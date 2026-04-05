@@ -2,7 +2,7 @@
 
 > The first purpose-built SaaS platform that transforms estate and legacy planning into a structured, measurable employee benefit — delivered through an enterprise LMS with multi-tenant isolation, serverless infrastructure, and zero-dependency Lambda functions.
 
-[![Live Platform](https://img.shields.io/badge/Live-Platform-brightgreen)](https://main.d1vgn9nzfx4cxk.amplifyapp.com)
+[![Live Platform](https://img.shields.io/badge/Live-Platform-brightgreen)](https://uat.endevo.life)
 [![AWS Serverless](https://img.shields.io/badge/Stack-AWS_Serverless-orange)](https://aws.amazon.com)
 [![Next.js 15](https://img.shields.io/badge/Frontend-Next.js_15-black)](https://nextjs.org)
 [![Python 3.12](https://img.shields.io/badge/Backend-Python_3.12-blue)](https://aws.amazon.com/lambda/)
@@ -56,7 +56,7 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 ```
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         USERS (Browser)                              │
-│         https://main.d1vgn9nzfx4cxk.amplifyapp.com                  │
+│         https://uat.endevo.life                  │
 │         https://uat.endevo.life (custom domain)                      │
 └────────────────────────────┬─────────────────────────────────────────┘
                              │ HTTPS (TLS 1.2+)
@@ -626,7 +626,7 @@ Real issues encountered during development and how they were resolved. This sect
 | Issue | Impact | Resolution |
 |-------|--------|------------|
 | CDK cross-stack dependency — IAM referenced DynamoDB/S3 outputs, creating circular imports | Blocked all CDK deploys | Switched IAM to wildcard ARNs; later decoupled DynamoDB management from CDK entirely |
-| Amplify app accidentally deleted — new app created with different App ID | Frontend down, DNS broken | Created new Amplify app (`d1vgn9nzfx4cxk`), updated Route 53 records, reconfigured GitHub webhook |
+| Amplify app accidentally deleted — new app created with different App ID | Frontend down, DNS broken | Created new Amplify app (`d1vvfv8oltolcf`), updated Route 53 records, reconfigured GitHub webhook |
 | CDK version notices causing exit code 1 | CI/CD falsely reported failures | Added `--no-notices` flag to suppress non-error output |
 | CloudFormation stuck in REVIEW_IN_PROGRESS | Blocked subsequent deploys | Manually deleted stuck stack via AWS CLI, redeployed cleanly |
 
@@ -755,13 +755,13 @@ All 6 module definitions exist in `endevo-uat-lms-modules`. The LMS engine, quiz
 
 | Resource | URL / Value |
 |----------|------------|
-| **Web Application** | https://main.d1vgn9nzfx4cxk.amplifyapp.com |
+| **Web Application** | https://uat.endevo.life |
 | **Custom Domain** | https://uat.endevo.life |
 | **API Gateway** | https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com |
 | **GitHub Repository** | https://github.com/shahzadms7/endevo-life |
 | **AWS Region** | us-east-1 (N. Virginia) |
 | **Cognito User Pool** | us-east-1_DVyEJqgFt |
-| **Amplify App ID** | d1vgn9nzfx4cxk |
+| **Amplify App ID** | d1vvfv8oltolcf |
 
 ---
 

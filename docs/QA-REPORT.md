@@ -1,6 +1,6 @@
 # Endevo Life — QA Report
 > **Date:** 2026-03-21 | **Engineer:** Shahzad + Claude AI (QA role)
-> **Frontend:** https://main.d1vgn9nzfx4cxk.amplifyapp.com
+> **Frontend:** https://uat.endevo.life
 > **API:** https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com
 
 ---

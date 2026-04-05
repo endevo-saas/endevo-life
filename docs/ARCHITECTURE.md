@@ -49,7 +49,7 @@
 | 9 | Blockchain: NFT certificates, on-chain digital will | 🔮 FUTURE |
 
 **GitHub:** https://github.com/shahzadms7/endevo-life
-**Frontend:** https://main.d1vgn9nzfx4cxk.amplifyapp.com
+**Frontend:** https://uat.endevo.life
 **API:** https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com
 
 ---
@@ -59,7 +59,7 @@
 ```
 ┌─────────────────────────────────────────────────────┐
 │                  USERS (Browser)                    │
-│   https://main.d1vgn9nzfx4cxk.amplifyapp.com       │
+│   https://uat.endevo.life       │
 └───────────────────────┬─────────────────────────────┘
                         │ HTTPS
 ┌───────────────────────▼─────────────────────────────┐
@@ -90,7 +90,7 @@
 
 | Service | Resource | Purpose |
 |---------|----------|---------|
-| Amplify | App ID: `d1vgn9nzfx4cxk` | Next.js hosting, CI/CD from GitHub |
+| Amplify | App ID: `d1vvfv8oltolcf` | Next.js hosting, CI/CD from GitHub |
 | API Gateway | HTTP API | Single entry — routes to 4 Lambdas |
 | Lambda | `endevo-uat-fn-auth` | Auth flows |
 | Lambda | `endevo-uat-fn-admin` | Global admin (all tenants/users) |

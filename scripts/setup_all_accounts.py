@@ -220,5 +220,5 @@ if __name__ == "__main__":
     check_ses()
     print("\n" + "=" * 65)
     print("  COMPLETE — all accounts ready, training seeded")
-    print("  Login URL: https://main.d1vgn9nzfx4cxk.amplifyapp.com/login")
+    print("  Login URL: https://uat.endevo.life/login")
     print("=" * 65)

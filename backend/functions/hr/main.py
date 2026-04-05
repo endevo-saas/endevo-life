@@ -309,7 +309,7 @@ def handler(event, context):
             "inviteToken": invite_token, "invitedBy": caller_email, "createdAt": now
         })
 
-        invite_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/register?token={invite_token}&email={email}"
+        invite_url = f"https://uat.endevo.life/register?token={invite_token}&email={email}"
 
         try:
             ses.send_email(

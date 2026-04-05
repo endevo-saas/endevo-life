@@ -179,8 +179,8 @@ def _issue_certificate_email(
     import boto3 as _boto3
     ses = _boto3.client("ses", region_name=os.environ.get("REGION", "us-east-1"))
 
-    verify_url = f"https://main.d1vgn9nzfx4cxk.amplifyapp.com/certificates/verify/{cert_id}"
-    download_url = "https://main.d1vgn9nzfx4cxk.amplifyapp.com/employee/certificates"
+    verify_url = f"https://uat.endevo.life/certificates/verify/{cert_id}"
+    download_url = "https://uat.endevo.life/employee/certificates"
 
     html_body = f"""
     <html>

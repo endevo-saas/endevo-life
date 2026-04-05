@@ -12,6 +12,7 @@ export class S3Stack extends cdk.Stack {
 
     const allowedOrigins = [
       'https://uat.endevo.life',
+      'https://uat.endevo.life',
       'https://main.d1vvfv8oltolcf.amplifyapp.com',
       'http://localhost:3000',
     ]
