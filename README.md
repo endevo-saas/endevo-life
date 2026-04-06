@@ -10,25 +10,123 @@
 
 ---
 
-## What We Built in 72 Hours (April 3–5, 2026)
+## Build Timeline — From Zero to Enterprise SaaS
 
-In three days of non-stop engineering, we executed a complete platform transformation — the kind of architectural shift that typically takes teams weeks. Here's what happened:
+### Day 1 — March 20, 2026: Foundation
+**Started from nothing.** Laid the entire AWS infrastructure foundation in a single day.
+- CDK stacks: S3, DynamoDB (9 tables), IAM, API Gateway, Amplify, Cognito
+- GitHub Actions CI/CD: auto-deploy Lambda functions + frontend on every push
+- Next.js 15 frontend scaffold with TypeScript
+- Python Lambda functions: auth, admin, HR, employee
+- First build errors, first fixes, first deployment — the repo was born
 
-**Day 1 — Enterprise Foundation.** We audited the entire AWS infrastructure and identified five critical blind spots that would block Fortune 500 adoption. We deployed active-active multi-region failover (us-east-1 + us-west-2), implemented CloudTrail with tamper-proof S3 Object Lock audit logs, created 32 CloudWatch alarms, and reduced API failover time from 150 seconds to 50 seconds. The platform went from "startup prototype" to "enterprise-grade infrastructure" in a single session.
+### Day 2 — March 21, 2026: Architecture & Documentation
+- Technical architecture document written (ARCHITECTURE.md)
+- Consolidated documentation to 4 clean markdown files
+- Admin Lambda path parsing bugs fixed
+- Foundation hardened for what comes next
 
-**Day 2 — Authentication Revolution.** We ripped out Amazon Cognito entirely and replaced it with WorkOS — a zero-cost, globally distributed auth provider with built-in enterprise SSO. This wasn't a simple swap: we rewrote 5 Lambda functions, removed 30+ Cognito API calls, built a custom email + SMS OTP login system, redesigned the registration flow, and deployed session-based authentication across every endpoint. We also cleaned 82 legacy test users, established permanent DNS (`uat.endevo.life` via dedicated CloudFront), and patched 10 security vulnerabilities found during a 10-agent parallel code review.
+### Days 3–4 — March 28–29, 2026: The Product Takes Shape
+**The platform became real.** In 48 hours, we went from scaffolding to a working multi-tenant SaaS.
+- IAM dashboard: captcha login, user CRUD, tenant management, sequential IDs
+- Settings pages for all 3 roles (Super Admin, HR Admin, Employee)
+- Gamified dashboards with real-time data
+- Pagination, search, validation across all APIs
+- Duolingo-style UI/UX overhaul with 4 selectable themes (Eclipse, Canvas, Neon, Pearl)
+- Health monitoring page with 100% real AWS data
+- Employee invite system with email delivery via SES
+- 10 seed tenants with HR admins and employees provisioned
 
-**Day 3 — User Experience Polish.** We unified the user creation workflow into a single "Add User" flow: admin enters details once, employee receives a one-click activation email, and logs in via OTP — no passwords anywhere in the system. Phone numbers became mandatory for SMS verification. Every invite email, registration page, and dashboard was updated to reflect the new passwordless security model.
+### Day 5 — March 31, 2026: CI/CD & Reliability
+- Transferred repo to `endevo-life` GitHub organization
+- End-to-end CI/CD test: push → build → deploy → verify
+- Live `/status` page proving system health with GitHub Actions proof
+- Amplify workflow: graceful skip if build already running
 
-**By the numbers:**
-- **12 commits** pushed in the final session alone
-- **50+ AI agents** deployed in parallel for code review, bug fixing, and documentation
-- **5 Lambda functions** rewritten and deployed
-- **0 passwords** stored anywhere in the system
-- **3 runtime crash bugs** caught and fixed before users could hit them
-- **99.99% uptime target** with active-active failover across two AWS regions
+### Days 6–7 — April 1–2, 2026: LMS Engine v1
+**The learning platform was born.** Built the entire LMS from scratch.
+- LMS v2 engine: Readiness Assessment (40 questions, 4 domains)
+- Module system with 6 modules, unlock logic, progress tracking
+- Admin sidebar + modules management page + LMS stats on dashboard
+- CDK cross-stack dependency fixes for clean infrastructure deploys
 
-The result: a production-ready, enterprise-grade SaaS platform that Fortune 500 HR departments can adopt with confidence — built by a 3-person team in 72 hours.
+### Days 8–9 — April 3–4, 2026: LMS v2 — Content & Polish
+**The product became usable.** Real content, real quiz types, real video delivery.
+- 4 quiz types: Multiple choice, Likert scale, Open text, Checklist
+- Real content from Niki's Typeform (Avoidance Quiz, KLT Exercise, Emergency Protocol)
+- Lesson engine: video, PDF, podcast, quiz support per lesson
+- 15 lessons for Module 1 with sidebar navigation
+- Video resume: saves exact second, resumes -5s on return
+- PDF viewer with zero-trust S3 security
+- Employee dashboard redesign: Duolingo-style with real data
+- Assessment scoring: domain breakdown bars, weakest area recommendations
+- 14 LMS frontend bugs fixed in deep QA audit
+- Subscription pricing: Basic $299/yr + Premium $499/yr
+- Dynamic company branding across all layouts
+- Investor-grade README: 851 lines, 22 sections
+
+### Days 10–11 — April 5–6, 2026: Enterprise Transformation
+**The biggest shift.** 72 hours of non-stop engineering that transformed the platform.
+
+**Infrastructure Hardening (Session 4):**
+- Complete AWS services inventory — every service documented with capacity and cost
+- Enterprise Architecture Review: 6 critical findings identified
+- Cognito limitation discovered: single-region only, blocks multi-region
+- Auth migration research: evaluated WorkOS, Keycloak, Auth0, Custom JWT
+- Decision: WorkOS (score 9.6/10) — $0 for 1M users, global distribution
+- Active-active multi-region failover deployed (us-east-1 + us-west-2)
+- Route 53 DNS failover: 10s health checks, 30s TTL, ~50s failover
+- CloudTrail + S3 Object Lock for tamper-proof audit logs
+- 32 CloudWatch alarms created
+- Enterprise Resilience Playbook + Debt Tracker documented
+
+**Cognito → WorkOS Migration (Session 5):**
+- Ripped out Cognito from ALL 5 Lambda functions (30+ API calls removed)
+- Built custom OTP login: email via SES + SMS via SNS, 5-minute timeout
+- Crypto-secure OTP generation (Python `secrets` module)
+- Session token authentication across all endpoints
+- Permanent DNS: `uat.endevo.life` → dedicated CloudFront → Amplify
+- 10-agent parallel code review: 10 security vulnerabilities patched
+- Plaintext passwords removed from 5 API responses
+- Bearer token parsing hardened (case-insensitive)
+- 3 runtime crash bugs caught and fixed (DynamoDB FilterExpression)
+- 82 legacy Cognito users cleaned, 33 dummy employees removed
+- Passwordless registration: one-click account activation
+- Unified "Add User" flow: enter details once → invite email → activate → OTP login
+- Phone number mandatory for SMS verification
+- All email templates updated for OTP (no password language)
+- README.md + ARCHITECTURE.md fully updated
+- **13 commits in final session, 50+ AI agents deployed**
+
+### By The Numbers
+
+| Metric | Value |
+|--------|-------|
+| Total commits | 120+ |
+| Calendar days | 17 (March 20 → April 6) |
+| Lambda functions | 5 (auth, admin, HR, employee, LMS) |
+| DynamoDB tables | 13 |
+| CloudWatch alarms | 32 |
+| Tenants provisioned | 15 |
+| LMS modules | 6 |
+| Assessment questions | 40 |
+| Quiz types | 4 (multiple choice, Likert, open text, checklist) |
+| AWS regions | 2 (active-active failover) |
+| Security vulnerabilities patched | 10 |
+| Passwords in the system | **0** |
+| Auth provider migrations | Cognito → WorkOS (complete) |
+| Uptime target | 99.99% |
+| Team size | 3 people |
+
+### Team
+
+| Name | Role | Focus |
+|------|------|-------|
+| **Shahzad** | AWS Architect + QA Lead | Infrastructure, security, deployment, quality |
+| **Niki** | Product Owner | Vision, content, UX decisions, business strategy |
+| **Nermeen** | Developer | Frontend implementation, features (joining at go-live) |
+| **Aryan** | AI Engineer | Module 3: AI-Powered Legacy Planning (upcoming) |
+| **Zara** | QA Tester | End-to-end testing, bug verification |
 
 ---
 
