@@ -51,7 +51,7 @@ export class AmplifyStack extends cdk.Stack {
       ].join('\n'),
       environmentVariables: [
         { name: 'NEXT_PUBLIC_API_URL', value: props.apiUrl },
-        { name: 'NEXT_PUBLIC_WORKOS_CLIENT_ID', value: 'PLACEHOLDER_WORKOS_CLIENT_ID' },
+        { name: 'NEXT_PUBLIC_WORKOS_CLIENT_ID', value: 'client_01KNFZCZQZYGTDRS91KW12TGXK' },
         { name: 'AMPLIFY_MONOREPO_APP_ROOT', value: 'apps/web' },
       ],
     })
