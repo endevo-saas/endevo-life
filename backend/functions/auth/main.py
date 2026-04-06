@@ -236,6 +236,8 @@ def handler(event, context):
     body = get_body(event)
 
     # ── POST /api/auth/login ──────────────────────────────────────
+    # DEPRECATED: Cognito-based login. Will be removed after full WorkOS migration.
+    # New clients should use /api/auth/workos/login + /api/auth/workos/callback instead.
     if path.endswith("/login") and method == "POST":
         import uuid as _uuid
         email    = (body.get("email") or "").lower().strip()
@@ -341,6 +343,7 @@ def handler(event, context):
         return resp(200, token_payload)
 
     # ── POST /api/auth/mfa ────────────────────────────────────────
+    # DEPRECATED: Cognito MFA flow. Will be removed after full WorkOS migration.
     if path.endswith("/mfa") and method == "POST":
         session  = body.get("session") or ""
         otp_code = body.get("code") or ""
@@ -370,6 +373,7 @@ def handler(event, context):
             return err(401, "Invalid MFA code")
 
     # ── POST /api/auth/register ───────────────────────────────────
+    # DEPRECATED: Cognito-based registration. Will be removed after full WorkOS migration.
     if path.endswith("/register") and method == "POST":
         token    = body.get("invite_token") or ""
         password = body.get("password") or ""
@@ -426,6 +430,7 @@ def handler(event, context):
             return err(400, str(e.response["Error"]["Message"]))
 
     # ── POST /api/auth/forgot-password ───────────────────────────
+    # DEPRECATED: Cognito password reset. Will be removed after full WorkOS migration.
     if path.endswith("/forgot-password") and method == "POST":
         email = (body.get("email") or "").lower().strip()
         try:
@@ -453,6 +458,7 @@ def handler(event, context):
             return err(400, str(e.response["Error"]["Message"]))
 
     # ── POST /api/auth/signup ────────────────────────────────────
+    # DEPRECATED: Cognito self-signup. Will be removed after full WorkOS migration.
     # Individual self-signup — no invite required, assigns to tenant-ind
     if path.endswith("/signup") and method == "POST":
         import uuid as _uuid
@@ -513,6 +519,7 @@ def handler(event, context):
         return resp(200, {"message": "Account created successfully"})
 
     # ── POST /api/auth/change-password ───────────────────────────
+    # DEPRECATED: Cognito password change. Will be removed after full WorkOS migration.
     if path.endswith("/change-password") and method == "POST":
         access_token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
         old_pass = body.get("old_password") or ""

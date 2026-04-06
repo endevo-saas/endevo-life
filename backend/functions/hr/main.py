@@ -64,9 +64,36 @@ def get_body(event):
         return {}
 
 def get_caller(event):
+    """Extract (tenantId, role, email) from Bearer token. WorkOS primary, Cognito fallback."""
     token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
     if not token:
         return None, None, None
+
+    # ── Try WorkOS first (primary auth path) ──
+    try:
+        from utils.workos_auth import is_workos_token, validate_workos_token
+        if is_workos_token(token):
+            workos_user = validate_workos_token(token)
+            if workos_user:
+                email = workos_user["email"]
+                # Look up tenantId + role from DynamoDB by email
+                try:
+                    result = USERS_T.scan(
+                        FilterExpression=Attr("email").eq(email), Limit=1
+                    )
+                    items = result.get("Items", [])
+                    if items:
+                        u = items[0]
+                        return u.get("tenantId"), u.get("role"), email
+                except Exception as e:
+                    print(f"WORKOS_HR_DB_ERROR: {e}")
+                return None, None, email  # WorkOS user not in DynamoDB yet
+            # WorkOS token detected but validation failed
+            return None, None, None
+    except ImportError:
+        pass  # workos_auth not deployed yet — skip silently
+
+    # ── Fall back to Cognito (deprecated — will be removed after full WorkOS migration) ──
     try:
         u = cognito.get_user(AccessToken=token)
         attrs = {a["Name"]: a["Value"] for a in u["UserAttributes"]}
