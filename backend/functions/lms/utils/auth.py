@@ -16,15 +16,34 @@ def get_caller(
     Returns (None, None, None, None) on any auth failure — callers must guard.
     """
     auth_header: str = (event.get("headers") or {}).get("authorization", "")
-    token: str = auth_header.replace("Bearer ", "").strip()
+    token: str = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header.strip()
 
     if not token:
         logger.debug("No authorization header present")
         return None, None, None, None
 
-    # ── Validate WorkOS token ──────────────────────────────────────────────────
+    # ── Session token (from OTP login) ──────────────────────────────────────────
+    if token.startswith("endevo_"):
+        try:
+            from utils.db import USERS_T
+            from boto3.dynamodb.conditions import Attr
+            resp = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(token))
+            items = resp.get("Items", [])
+            if items:
+                user = items[0]
+                return (
+                    user.get("tenantId", ""),
+                    user.get("email", ""),
+                    user.get("userId", ""),
+                    user.get("role", "EMPLOYEE"),
+                )
+        except Exception as exc:
+            logger.warning("Session lookup failed: %s", exc)
+        return None, None, None, None
+
+    # ── WorkOS JWT fallback ──────────────────────────────────────────────────
     if not is_workos_token(token):
-        logger.warning("Token is not a valid WorkOS JWT")
+        logger.warning("Token is not a valid session or WorkOS JWT")
         return None, None, None, None
 
     workos_user = validate_workos_token(token)
@@ -32,16 +51,11 @@ def get_caller(
         logger.warning("WorkOS token validation failed")
         return None, None, None, None
 
-    email = workos_user["email"]
-    # Look up role/tenant from DynamoDB by email
+    email = workos_user.get("email", "")
     try:
         from utils.db import USERS_T
-
         from boto3.dynamodb.conditions import Attr
-
-        resp = USERS_T.scan(
-            FilterExpression=Attr("email").eq(email), Limit=1
-        )
+        resp = USERS_T.scan(FilterExpression=Attr("email").eq(email))
         items = resp.get("Items", [])
         if items:
             user = items[0]
@@ -53,8 +67,7 @@ def get_caller(
             )
     except Exception as exc:
         logger.warning("WorkOS user DynamoDB lookup failed: %s", exc)
-    # WorkOS user not in DynamoDB yet — return partial info
-    return None, email, workos_user["sub"], None
+    return None, None, None, None
 
 
 def require_auth(

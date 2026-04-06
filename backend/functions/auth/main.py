@@ -325,52 +325,31 @@ def handler(event, context):
 
     # ── GET /api/auth/me ─────────────────────────────────────────
     if path.endswith("/me") and method == "GET":
-        access_token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
+        _auth_hdr = (event.get("headers") or {}).get("authorization", "")
+        access_token = _auth_hdr[7:].strip() if _auth_hdr.lower().startswith("bearer ") else _auth_hdr.strip()
         if not access_token:
             return err(401, "Not authenticated")
 
+        # Look up user by session token in DynamoDB
+        from boto3.dynamodb.conditions import Attr
         try:
-            from utils.workos_auth import is_workos_token, validate_workos_token
-            if not is_workos_token(access_token):
-                return err(401, "Invalid or expired token")
-            workos_user = validate_workos_token(access_token)
-            if not workos_user:
-                return err(401, "Invalid or expired token")
+            result = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(access_token))
+            items = result.get("Items", [])
+            if items:
+                u = items[0]
+                return resp(200, {
+                    "email":       u.get("email", ""),
+                    "first_name":  u.get("firstName", ""),
+                    "last_name":   u.get("lastName", ""),
+                    "role":        u.get("role", "EMPLOYEE"),
+                    "tenant_id":   u.get("tenantId", ""),
+                    "tenant_name": u.get("tenantName", ""),
+                    "provider":    "workos",
+                })
+        except Exception as e:
+            print(f"ME_LOOKUP_ERROR: {e}")
 
-            email = workos_user["email"]
-            # Look up full profile from DynamoDB
-            try:
-                result = USERS_T.scan(
-                    FilterExpression="email = :e",
-                    ExpressionAttributeValues={":e": email},
-                    Limit=1
-                )
-                items = result.get("Items", [])
-                if items:
-                    u = items[0]
-                    return resp(200, {
-                        "email":       email,
-                        "first_name":  u.get("firstName", ""),
-                        "last_name":   u.get("lastName", ""),
-                        "role":        u.get("role", "EMPLOYEE"),
-                        "tenant_id":   u.get("tenantId", ""),
-                        "tenant_name": u.get("tenantName", ""),
-                        "provider":    "workos",
-                    })
-            except Exception as db_err:
-                print(f"WORKOS_ME_DB_ERROR: {db_err}")
-            # WorkOS user not in DynamoDB — return basic info
-            return resp(200, {
-                "email":       email,
-                "first_name":  "",
-                "last_name":   "",
-                "role":        None,
-                "tenant_id":   None,
-                "tenant_name": None,
-                "provider":    "workos",
-            })
-        except ImportError:
-            return err(500, "Auth module not available")
+        return err(401, "Invalid or expired token")
 
     # ── GET /api/auth/workos/login — Return AuthKit authorization URL ──
     if path.endswith("/workos/login") and method == "GET":
@@ -570,12 +549,28 @@ def handler(event, context):
             except Exception:
                 pass
 
-        # Generate a simple session token (JWT via WorkOS or self-signed)
-        import hashlib, base64
-        session_data = f"{email}:{role}:{tenant_id}:{datetime.now(timezone.utc).isoformat()}"
-        access_token = base64.urlsafe_b64encode(
-            hashlib.sha256(session_data.encode()).digest()
+        # Generate session token and store in DynamoDB for validation by other Lambdas
+        import uuid as _uuid2, hashlib, base64
+        session_id = str(_uuid2.uuid4())
+        session_hash = base64.urlsafe_b64encode(
+            hashlib.sha256(f"{session_id}:{email}:{datetime.now(timezone.utc).isoformat()}".encode()).digest()
         ).decode().rstrip("=")
+        access_token = f"endevo_{session_hash}"
+        user_id = user_record.get("userId", "") if user_record else ""
+
+        # Store session in users table for lookup
+        try:
+            USERS_T.update_item(
+                Key={"userId": user_id},
+                UpdateExpression="SET sessionToken = :t, lastLoginAt = :ts, lastLoginIp = :ip",
+                ExpressionAttributeValues={
+                    ":t": access_token,
+                    ":ts": datetime.now(timezone.utc).isoformat(),
+                    ":ip": ip,
+                }
+            )
+        except Exception as e:
+            print(f"SESSION_STORE_ERROR: {e}")
 
         security_audit("LOGIN_SUCCESS", email, tenant_id or "AUTH", ip, device,
                        f"OTP verified. Login from {ip} | {device[:80]}")

@@ -134,29 +134,38 @@ def get_body(event):
         return {}
 
 def get_caller(event):
-    """Extract (role, email) from Bearer token via WorkOS JWT + DynamoDB lookup."""
-    token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
+    """Extract (role, email) from Bearer token via session token or WorkOS JWT."""
+    auth_header = (event.get("headers") or {}).get("authorization", "")
+    token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header.strip()
     if not token:
         return None, None
 
+    # Session token (from OTP login) — look up in DynamoDB
+    if token.startswith("endevo_"):
+        try:
+            result = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(token))
+            items = result.get("Items", [])
+            if items:
+                return items[0].get("role"), items[0].get("email")
+        except Exception as e:
+            print(f"SESSION_LOOKUP_ERROR: {e}")
+        return None, None
+
+    # WorkOS JWT — validate and look up in DynamoDB
     try:
         from utils.workos_auth import is_workos_token, validate_workos_token
         if is_workos_token(token):
             workos_user = validate_workos_token(token)
             if workos_user:
                 email = workos_user["email"]
-                # Look up role from DynamoDB by email
                 try:
-                    result = USERS_T.scan(
-                        FilterExpression=Attr("email").eq(email), Limit=1
-                    )
+                    result = USERS_T.scan(FilterExpression=Attr("email").eq(email))
                     items = result.get("Items", [])
                     if items:
                         return items[0].get("role"), email
                 except Exception as e:
                     print(f"WORKOS_ADMIN_DB_ERROR: {e}")
-                return None, email  # WorkOS user not in DynamoDB yet
-        # WorkOS token detected but validation failed
+                return None, email
         return None, None
     except ImportError:
         print("CRITICAL: workos_auth module not available")

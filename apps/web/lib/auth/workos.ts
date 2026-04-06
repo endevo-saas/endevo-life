@@ -1,6 +1,5 @@
 /**
- * WorkOS auth utility — runs parallel to Cognito.
- * When WorkOS is fully configured, this becomes the primary auth.
+ * WorkOS auth utility for SSO and AuthKit integration.
  *
  * Dormant until NEXT_PUBLIC_WORKOS_CLIENT_ID env var is set.
  */

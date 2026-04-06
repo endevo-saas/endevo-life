@@ -757,7 +757,7 @@ def handle(
     if admin_err:
         return admin_err
 
-    # GLOBAL_ADMIN users have tenantId="endevo-global" in Cognito but
+    # GLOBAL_ADMIN users have tenantId="endevo-global" in DynamoDB but
     # shared/template data lives under tenantId="SYSTEM" in DynamoDB.
     if role == "GLOBAL_ADMIN":
         tenant_id = "SYSTEM"

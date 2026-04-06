@@ -1,7 +1,7 @@
 """WorkOS token validation for dual-homing auth migration.
 
 Validates WorkOS JWTs using JWKS (JSON Web Key Set).
-Falls back to Cognito if token is not a WorkOS token.
+Validates WorkOS JWTs using JWKS (JSON Web Key Set).
 
 Environment variables:
   WORKOS_CLIENT_ID: WorkOS client ID

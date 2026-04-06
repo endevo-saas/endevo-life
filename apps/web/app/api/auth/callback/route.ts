@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
     const response = NextResponse.redirect(new URL(getRedirectPath(data.role), req.url))
 
     response.cookies.set('access_token', data.access_token, {
-      httpOnly: false, // For now — matches existing Cognito pattern
+      httpOnly: false, // Readable by client-side JS for role checks
       secure: true,
       sameSite: 'strict',
       maxAge: 3600, // 1 hour

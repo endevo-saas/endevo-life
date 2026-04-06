@@ -87,11 +87,27 @@ def get_body(event):
         return {}
 
 def get_caller(event):
-    """Extract (tenantId, role, email) from Bearer token via WorkOS."""
-    token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
+    """Extract (tenantId, role, email) from Bearer token via session or WorkOS JWT."""
+    auth_header = (event.get("headers") or {}).get("authorization", "")
+    token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header.strip()
     if not token:
         return None, None, None
 
+    # Session token (from OTP login)
+    if token.startswith("endevo_"):
+        try:
+            result = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(token))
+            items = result.get("Items", [])
+            if items:
+                u = items[0]
+                if u.get("status") == "inactive":
+                    return None, None, None
+                return u.get("tenantId"), u.get("role"), u.get("email")
+        except Exception as e:
+            print(f"SESSION_LOOKUP_ERROR: {e}")
+        return None, None, None
+
+    # WorkOS JWT fallback
     try:
         from utils.workos_auth import is_workos_token, validate_workos_token
         if not is_workos_token(token):
@@ -100,22 +116,18 @@ def get_caller(event):
         if not workos_user:
             return None, None, None
         email = workos_user["email"]
-        # Look up tenantId + role from DynamoDB by email
         try:
-            result = USERS_T.scan(
-                FilterExpression=Attr("email").eq(email), Limit=1
-            )
+            result = USERS_T.scan(FilterExpression=Attr("email").eq(email))
             items = result.get("Items", [])
             if items:
                 u = items[0]
                 if u.get("status") == "inactive":
-                    return None, None, None  # Deactivated users cannot authenticate
+                    return None, None, None
                 return u.get("tenantId"), u.get("role"), email
         except Exception as e:
             print(f"WORKOS_HR_DB_ERROR: {e}")
-        return None, None, email  # WorkOS user not in DynamoDB yet
+        return None, None, None
     except ImportError:
-        print("WORKOS_AUTH_ERROR: utils.workos_auth module not found")
         return None, None, None
 
 def sanitize(value, max_len=200):
