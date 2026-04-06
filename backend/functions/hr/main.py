@@ -302,7 +302,10 @@ def handler(event, context):
         last_name  = sanitize(body.get("last_name") or body.get("lastName") or "", 50)
         department = sanitize(body.get("department") or "General", 100)
         job_title  = sanitize(body.get("job_title") or body.get("jobTitle") or "", 100)
+        phone      = (body.get("phone") or "").strip()[:20]
 
+        if not phone:
+            return err(400, "Phone number is required for OTP login")
         if not email:
             return err(400, "Email required")
         if not validate_email(email):
@@ -353,7 +356,7 @@ def handler(event, context):
             "userId": user_id, "tenantId": tenant_id, "email": email,
             "firstName": first_name, "lastName": last_name,
             "role": "EMPLOYEE", "status": "pending",
-            "department": department, "jobTitle": job_title,
+            "department": department, "jobTitle": job_title, "phone": phone,
             "inviteToken": invite_token, "invitedBy": caller_email, "createdAt": now
         })
 
@@ -411,7 +414,7 @@ def handler(event, context):
         if not item or item.get("tenantId") != tenant_id:
             return err(404, "Employee not found in your organisation")
 
-        allowed = ["firstName", "lastName", "department", "jobTitle", "status"]
+        allowed = ["firstName", "lastName", "department", "jobTitle", "status", "phone"]
         updates = {}
         for k in allowed:
             if k in body:

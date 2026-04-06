@@ -2,146 +2,196 @@
 
 import { Suspense, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { Eye, EyeOff, Loader2, Shield, CheckCircle } from 'lucide-react'
+import { Loader2, Shield, CheckCircle, AlertCircle, User, Phone } from 'lucide-react'
 
-const schema = z.object({
-  firstName: z.string().min(1, 'First name required'),
-  lastName:  z.string().min(1, 'Last name required'),
-  password:  z.string().min(12, 'Password must be at least 12 characters')
-    .regex(/[A-Z]/, 'Must include uppercase')
-    .regex(/[a-z]/, 'Must include lowercase')
-    .regex(/[0-9]/, 'Must include a number')
-    .regex(/[^A-Za-z0-9]/, 'Must include a symbol'),
-  confirm: z.string(),
-}).refine(d => d.password === d.confirm, { message: 'Passwords do not match', path: ['confirm'] })
+const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 
-type FormData = z.infer<typeof schema>
-
-// Inner component — uses useSearchParams, MUST be inside <Suspense>
 function RegisterForm() {
-  const router      = useRouter()
-  const params      = useSearchParams()
-  const token       = params.get('token') || ''
-  const [loading, setLoading]   = useState(false)
-  const [error, setError]       = useState('')
-  const [success, setSuccess]   = useState(false)
-  const [showPwd, setShowPwd]   = useState(false)
+  const router = useRouter()
+  const params = useSearchParams()
+  const token = params.get('token') || ''
+  const emailParam = params.get('email') || ''
 
-  const { register, handleSubmit, watch, formState: { errors } } = useForm<FormData>({
-    resolver: zodResolver(schema),
-  })
+  const [firstName, setFirstName] = useState('')
+  const [lastName, setLastName] = useState('')
+  const [phone, setPhone] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState(false)
 
-  const pwd = watch('password', '')
-  const checks = [
-    { label: '12+ characters',   ok: pwd.length >= 12 },
-    { label: 'Uppercase letter', ok: /[A-Z]/.test(pwd) },
-    { label: 'Lowercase letter', ok: /[a-z]/.test(pwd) },
-    { label: 'Number',           ok: /[0-9]/.test(pwd) },
-    { label: 'Symbol',           ok: /[^A-Za-z0-9]/.test(pwd) },
-  ]
+  const canSubmit = firstName.trim() && lastName.trim() && phone.trim().length >= 10 && token
 
-  const onSubmit = async (data: FormData) => {
-    if (!token) return setError('Invalid invite link')
-    setLoading(true); setError('')
+  const onSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!canSubmit) return
+    setLoading(true)
+    setError('')
     try {
-      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/auth/register`, {
+      const res = await fetch(`${API_URL}/api/auth/register`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ invite_token: token, password: data.password, first_name: data.firstName, last_name: data.lastName }),
+        body: JSON.stringify({
+          invite_token: token,
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
+          phone: phone.trim(),
+        }),
       })
       const body = await res.json()
-      if (!res.ok) throw new Error(body.detail || 'Registration failed')
+      if (!res.ok) throw new Error(body.detail || body.error || 'Registration failed')
       setSuccess(true)
-      setTimeout(() => router.push('/login'), 2000)
+      setTimeout(() => router.push('/login'), 2500)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Registration failed')
-    } finally { setLoading(false) }
+    } finally {
+      setLoading(false)
+    }
   }
 
   if (success) return (
-    <div className="min-h-screen flex items-center justify-center">
-      <div className="glass p-10 text-center animate-slide-up">
-        <CheckCircle className="w-16 h-16 text-green-400 mx-auto mb-4" />
+    <div className="min-h-screen flex items-center justify-center" style={{ background: '#0D1825' }}>
+      <div className="p-10 text-center" style={{
+        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+        borderRadius: '20px', backdropFilter: 'blur(20px)',
+      }}>
+        <CheckCircle className="w-16 h-16 mx-auto mb-4" style={{ color: '#22c55e' }} />
         <h2 className="text-2xl font-bold text-white mb-2">Account Created!</h2>
-        <p className="text-slate-400">Redirecting to login...</p>
+        <p className="text-sm" style={{ color: 'rgba(255,255,255,0.5)' }}>
+          Redirecting to login... You&apos;ll receive an OTP via email &amp; SMS.
+        </p>
       </div>
     </div>
   )
 
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="fixed inset-0 overflow-hidden pointer-events-none">
-        <div className="absolute -top-40 -right-40 w-96 h-96 bg-purple-600/20 rounded-full blur-3xl animate-pulse-slow" />
-        <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-brand-600/20 rounded-full blur-3xl animate-pulse-slow" />
-      </div>
-      <div className="relative w-full max-w-md animate-slide-up">
+    <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden"
+      style={{ background: '#0D1825' }}>
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[800px] h-[400px] pointer-events-none"
+        style={{ background: 'radial-gradient(ellipse at center, rgba(43,191,197,0.08) 0%, transparent 70%)', filter: 'blur(60px)' }} />
+
+      <div className="relative w-full max-w-[440px]">
+        {/* Header */}
         <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-16 h-16 bg-brand-600/20 border border-brand-500/30 rounded-2xl mb-4">
-            <Shield className="w-8 h-8 text-brand-400" />
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-5"
+            style={{ background: 'linear-gradient(135deg, #2BBFC5, #1a8f94)', boxShadow: '0 8px 32px rgba(43,191,197,0.3)' }}>
+            <Shield className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-3xl font-bold text-white">Create Account</h1>
-          <p className="text-slate-400 mt-1 text-sm">Complete your invitation to Endevo Life</p>
+          <h1 className="text-2xl font-bold text-white tracking-tight mb-1">Complete Your Account</h1>
+          <p className="text-sm" style={{ color: 'rgba(255,255,255,0.45)' }}>
+            {emailParam ? `Invitation for ${emailParam}` : 'Complete your Endevo Life invitation'}
+          </p>
         </div>
-        <div className="glass p-8">
-          {!token && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm">Invalid or missing invite link.</div>}
-          {error  && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm animate-fade-in">{error}</div>}
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+
+        {/* Card */}
+        <div style={{
+          background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+          borderRadius: '20px', padding: '2rem', backdropFilter: 'blur(20px)',
+        }}>
+          {!token && (
+            <div className="mb-5 p-3 rounded-xl flex items-start gap-2.5 text-sm"
+              style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#ef4444' }} />
+              <span style={{ color: '#fca5a5' }}>Invalid or missing invite link.</span>
+            </div>
+          )}
+          {error && (
+            <div className="mb-5 p-3 rounded-xl flex items-start gap-2.5 text-sm"
+              style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.2)' }}>
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" style={{ color: '#ef4444' }} />
+              <span style={{ color: '#fca5a5' }}>{error}</span>
+            </div>
+          )}
+
+          <form onSubmit={onSubmit} className="space-y-4">
+            {/* Name fields */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">First Name</label>
-                <input {...register('firstName')} placeholder="John" className="input-field" />
-                {errors.firstName && <p className="mt-1 text-xs text-red-400">{errors.firstName.message}</p>}
+                <label className="block text-sm font-medium mb-1.5" style={{ color: 'rgba(255,255,255,0.6)' }}>First Name</label>
+                <div className="relative">
+                  <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'rgba(255,255,255,0.25)' }} />
+                  <input type="text" value={firstName}
+                    onChange={e => setFirstName(e.target.value)}
+                    placeholder="First name" autoFocus disabled={loading}
+                    className="w-full" style={{
+                      background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                      borderRadius: '12px', padding: '12px 14px 12px 42px', fontSize: '0.938rem',
+                      color: '#ffffff', outline: 'none',
+                    }} />
+                </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-300 mb-1.5">Last Name</label>
-                <input {...register('lastName')} placeholder="Smith" className="input-field" />
-                {errors.lastName && <p className="mt-1 text-xs text-red-400">{errors.lastName.message}</p>}
+                <label className="block text-sm font-medium mb-1.5" style={{ color: 'rgba(255,255,255,0.6)' }}>Last Name</label>
+                <input type="text" value={lastName}
+                  onChange={e => setLastName(e.target.value)}
+                  placeholder="Last name" disabled={loading}
+                  className="w-full" style={{
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '12px', padding: '12px 14px', fontSize: '0.938rem',
+                    color: '#ffffff', outline: 'none',
+                  }} />
               </div>
             </div>
+
+            {/* Phone */}
             <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">Password</label>
+              <label className="block text-sm font-medium mb-1.5" style={{ color: 'rgba(255,255,255,0.6)' }}>Phone Number</label>
               <div className="relative">
-                <input {...register('password')} type={showPwd ? 'text' : 'password'} placeholder="Min 12 characters" className="input-field pr-12" />
-                <button type="button" onClick={() => setShowPwd(!showPwd)} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-white">
-                  {showPwd ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                </button>
+                <Phone className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4" style={{ color: 'rgba(255,255,255,0.25)' }} />
+                <input type="tel" value={phone}
+                  onChange={e => setPhone(e.target.value)}
+                  placeholder="+1 (555) 123-4567" disabled={loading}
+                  className="w-full" style={{
+                    background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.1)',
+                    borderRadius: '12px', padding: '12px 14px 12px 42px', fontSize: '0.938rem',
+                    color: '#ffffff', outline: 'none',
+                  }} />
               </div>
-              <div className="mt-2 grid grid-cols-2 gap-1">
-                {checks.map(c => (
-                  <div key={c.label} className={`flex items-center gap-1.5 text-xs transition-colors ${c.ok ? 'text-green-400' : 'text-slate-500'}`}>
-                    <div className={`w-1.5 h-1.5 rounded-full ${c.ok ? 'bg-green-400' : 'bg-slate-600'}`} />
-                    {c.label}
-                  </div>
-                ))}
-              </div>
+              <p className="text-xs mt-1.5" style={{ color: 'rgba(255,255,255,0.3)' }}>
+                Required for SMS verification codes at login
+              </p>
             </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-300 mb-1.5">Confirm Password</label>
-              <input {...register('confirm')} type="password" placeholder="••••••••••••" className="input-field" />
-              {errors.confirm && <p className="mt-1 text-xs text-red-400">{errors.confirm.message}</p>}
+
+            {/* Info box */}
+            <div className="p-3 rounded-xl" style={{ background: 'rgba(43,191,197,0.06)', border: '1px solid rgba(43,191,197,0.12)' }}>
+              <p className="text-xs" style={{ color: 'rgba(255,255,255,0.5)' }}>
+                No password needed — you&apos;ll login with a secure OTP code sent to your email and phone.
+              </p>
             </div>
-            <button type="submit" disabled={loading || !token} className="btn-primary w-full flex items-center justify-center gap-2 ripple">
-              {loading ? <><Loader2 className="w-4 h-4 animate-spin" /> Creating account...</> : 'Create Account'}
+
+            {/* Submit */}
+            <button type="submit" disabled={loading || !canSubmit}
+              className="w-full flex items-center justify-center gap-2 font-semibold text-sm disabled:opacity-40 transition-all"
+              style={{
+                background: loading ? 'linear-gradient(135deg, #1a8f94, #178589)' : 'linear-gradient(135deg, #2BBFC5, #1a8f94)',
+                color: '#ffffff', borderRadius: '12px', padding: '13px 20px', border: 'none',
+                cursor: loading || !canSubmit ? 'not-allowed' : 'pointer',
+                boxShadow: canSubmit ? '0 4px 16px rgba(43,191,197,0.25)' : 'none',
+              }}>
+              {loading ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /> Creating account...</>
+              ) : (
+                'Create Account'
+              )}
             </button>
           </form>
+        </div>
+
+        {/* Footer */}
+        <div className="text-center mt-6">
+          <p className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
+            Protected by WorkOS &middot; TLS 1.3 &middot; Email + SMS OTP
+          </p>
         </div>
       </div>
     </div>
   )
 }
 
-// Outer page — wraps RegisterForm in Suspense (required by Next.js 15 for useSearchParams)
 export default function RegisterPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="glass p-8 text-center">
-          <Loader2 className="w-8 h-8 text-brand-400 animate-spin mx-auto mb-3" />
-          <p className="text-slate-400 text-sm">Loading...</p>
-        </div>
+      <div className="min-h-screen flex items-center justify-center" style={{ background: '#0D1825' }}>
+        <Loader2 className="w-8 h-8 animate-spin" style={{ color: '#2BBFC5' }} />
       </div>
     }>
       <RegisterForm />

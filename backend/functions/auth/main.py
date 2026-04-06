@@ -12,7 +12,7 @@ Routes:
   POST /api/auth/workos/send-otp   (WorkOS Magic Auth — send OTP)
   POST /api/auth/workos/verify-otp (WorkOS Magic Auth — verify OTP)
 """
-import json, os, random, string
+import json, os, random, string, urllib.error
 import boto3
 from datetime import datetime, timezone, timedelta
 
@@ -269,6 +269,7 @@ def handler(event, context):
         token = body.get("invite_token") or ""
         first = body.get("first_name") or ""
         last  = body.get("last_name") or ""
+        phone = (body.get("phone") or "").strip()[:20]
         if not all([token, first, last]):
             return err(400, "All fields required")
 
@@ -308,19 +309,45 @@ def handler(event, context):
                 })
             with urllib.request.urlopen(req, timeout=10) as wr:
                 workos_data = json.loads(wr.read())
+        except urllib.error.HTTPError as e:
+            error_body = e.read().decode() if hasattr(e, 'read') else str(e)
+            print(f"WORKOS_CREATE_USER_ERROR: {e.code} {error_body}")
+            # If user already exists in WorkOS, skip creation and continue
+            if e.code == 400 and "not available" in error_body.lower():
+                # Look up existing WorkOS user
+                try:
+                    search_req = urllib.request.Request(
+                        f"https://api.workos.com/user_management/users?email={email}",
+                        headers={"Authorization": f"Bearer {api_key}"})
+                    with urllib.request.urlopen(search_req, timeout=10) as sr:
+                        search_data = json.loads(sr.read())
+                        if search_data.get("data"):
+                            workos_data = search_data["data"][0]
+                        else:
+                            return err(500, "Failed to create account. Please try again.")
+                except Exception as se:
+                    print(f"WORKOS_SEARCH_ERROR: {se}")
+                    return err(500, "Failed to create account. Please try again.")
+            else:
+                return err(500, "Failed to create account. Please try again or contact support.")
         except Exception as e:
             print(f"WORKOS_CREATE_USER_ERROR: {e}")
             return err(500, "Failed to create account. Please try again or contact support.")
 
-        # Update DynamoDB record
+        # Update DynamoDB record (phone is optional — override invite value if provided)
+        update_expr = "SET #s = :active, firstName = :f, lastName = :l, workosId = :wid, authProvider = :ap"
+        expr_values = {
+            ":active": "active", ":f": first, ":l": last,
+            ":wid": workos_data.get("id", ""),
+            ":ap": "workos",
+        }
+        if phone:
+            update_expr += ", phone = :phone"
+            expr_values[":phone"] = phone
         USERS_T.update_item(
             Key={"userId": user_record["userId"]},
-            UpdateExpression="SET #s = :active, firstName = :f, lastName = :l, workosId = :wid, authProvider = :ap",
-            ExpressionAttributeValues={
-                ":active": "active", ":f": first, ":l": last,
-                ":wid": workos_data.get("id", ""),
-                ":ap": "workos",
-            },
+            UpdateExpression=update_expr,
+            ExpressionAttributeValues=expr_values,
             ExpressionAttributeNames={"#s": "status"}
         )
         security_audit("REGISTER_SUCCESS", email, tenant_id, ip, device,
