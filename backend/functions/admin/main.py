@@ -376,6 +376,7 @@ def handler(event, context):
         hr_email   = sanitize((body.get("hrEmail") or "").lower().strip(), 254)
         hr_first   = sanitize(body.get("hrFirstName") or hr_contact.split()[0] if hr_contact else "", 50)
         hr_last    = sanitize(body.get("hrLastName")  or (hr_contact.split()[1] if len(hr_contact.split()) > 1 else "Admin"), 50)
+        hr_phone   = (body.get("hrPhone") or "").strip()[:20]
 
         # Reject raw input containing HTML/script injection before sanitization
         raw_name = body.get("name") or ""
@@ -437,6 +438,7 @@ def handler(event, context):
             USERS_T.put_item(Item={
                 "userId": hr_user_id, "tenantId": tenant_id, "email": hr_email,
                 "firstName": hr_first or "HR", "lastName": hr_last or "Admin",
+                "phone": hr_phone,
                 "role": "HR_ADMIN", "status": "active", "inviteToken": invite_token,
                 "createdBy": caller_email, "createdAt": now
             })
@@ -648,10 +650,13 @@ def handler(event, context):
         tenant_id  = body.get("tenantId") or body.get("tenant_id") or ""
         department = sanitize(body.get("department") or "", 100)
         job_title  = sanitize(body.get("jobTitle") or body.get("job_title") or "", 100)
+        phone      = (body.get("phone") or "").strip()[:20]
         password   = body.get("password") or f"Endevo@{str(uuid.uuid4())[:8]}!"
 
         if not email:
             return err(400, "Email required")
+        if not phone:
+            return err(400, "Phone number is required")
         if not validate_email(email):
             return err(400, "Invalid email format")
         if user_role not in ("GLOBAL_ADMIN", "HR_ADMIN", "EMPLOYEE"):
@@ -701,6 +706,7 @@ def handler(event, context):
             USERS_T.put_item(Item={
                 "userId": user_id, "tenantId": tenant_id, "email": email,
                 "firstName": first, "lastName": last, "role": user_role,
+                "phone": phone,
                 "status": "active", "department": department, "jobTitle": job_title,
                 "workosUserId": workos_user_id,
                 "createdBy": caller_email, "createdAt": now
@@ -858,9 +864,12 @@ def handler(event, context):
         tenant_id = body.get("tenantId") or ""
         first     = sanitize(body.get("firstName") or "", 50)
         last      = sanitize(body.get("lastName") or "", 50)
+        phone     = (body.get("phone") or "").strip()[:20]
 
         if not email:
             return err(400, "Email required")
+        if not phone:
+            return err(400, "Phone number is required")
         if not validate_email(email):
             return err(400, "Invalid email format")
         if user_role not in ("GLOBAL_ADMIN", "HR_ADMIN", "EMPLOYEE"):
@@ -909,6 +918,7 @@ def handler(event, context):
             USERS_T.put_item(Item={
                 "userId": user_id, "tenantId": tenant_id, "email": email,
                 "firstName": first, "lastName": last, "role": user_role,
+                "phone": phone,
                 "status": "pending", "inviteToken": invite_token,
                 "workosUserId": workos_user_id,
                 "createdBy": caller_email, "createdAt": now

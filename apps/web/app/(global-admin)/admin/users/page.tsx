@@ -32,8 +32,8 @@ export default function AllUsersPage() {
   const [resetPw, setResetPw] = useState('')
   const [showPw, setShowPw] = useState(false)
 
-  const [form, setForm] = useState({ email:'', firstName:'', lastName:'', role:'EMPLOYEE', tenantId:'', department:'', jobTitle:'', password:'' })
-  const [inviteForm, setInviteForm] = useState({ email:'', role:'EMPLOYEE', tenantId:'', firstName:'', lastName:'' })
+  const [form, setForm] = useState({ email:'', firstName:'', lastName:'', role:'EMPLOYEE', tenantId:'', department:'', jobTitle:'', password:'', phone:'' })
+  const [inviteForm, setInviteForm] = useState({ email:'', role:'EMPLOYEE', tenantId:'', firstName:'', lastName:'', phone:'' })
 
   async function load() {
     setLoading(true); setError('')
@@ -56,10 +56,10 @@ export default function AllUsersPage() {
 
   const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
   const closeModal = () => { setModal(null); setSelected(null); setResetPw(''); setShowPw(false); setError('') }
-  const openCreate = () => { setForm({ email:'',firstName:'',lastName:'',role:'EMPLOYEE',tenantId:'',department:'',jobTitle:'',password:'' }); setModal('create') }
-  const openEdit = (u: UserType) => { setSelected(u); setForm({ email:u.email,firstName:u.firstName,lastName:u.lastName,role:u.role,tenantId:u.tenantId,department:u.department||'',jobTitle:u.jobTitle||'',password:'' }); setModal('edit') }
+  const openCreate = () => { setForm({ email:'',firstName:'',lastName:'',role:'EMPLOYEE',tenantId:'',department:'',jobTitle:'',password:'',phone:'' }); setModal('create') }
+  const openEdit = (u: UserType) => { setSelected(u); setForm({ email:u.email,firstName:u.firstName,lastName:u.lastName,role:u.role,tenantId:u.tenantId,department:u.department||'',jobTitle:u.jobTitle||'',password:'',phone:(u as UserType & {phone?:string}).phone||'' }); setModal('edit') }
   const openToggle = (u: UserType) => { setSelected(u); setModal('confirm-toggle') }
-  const openInvite = () => { setInviteForm({ email:'',role:'EMPLOYEE',tenantId:'',firstName:'',lastName:'' }); setModal('invite') }
+  const openInvite = () => { setInviteForm({ email:'',role:'EMPLOYEE',tenantId:'',firstName:'',lastName:'',phone:'' }); setModal('invite') }
 
   async function createUser() {
     setSaving(true); setError('')
@@ -205,6 +205,7 @@ export default function AllUsersPage() {
                 {error&&<Err msg={error}/>}
                 <div className="grid grid-cols-2 gap-3"><Fld label="First Name" v={form.firstName} set={v=>setForm(f=>({...f,firstName:v}))} ph="John"/><Fld label="Last Name" v={form.lastName} set={v=>setForm(f=>({...f,lastName:v}))} ph="Doe"/></div>
                 <Fld label="Email *" v={form.email} set={v=>setForm(f=>({...f,email:v}))} ph="john@company.com" t="email"/>
+                <Fld label="Phone" v={form.phone} set={v=>setForm(f=>({...f,phone:v}))} ph="+1..." t="tel"/>
                 <div className="grid grid-cols-2 gap-3">
                   <Sel label="Role *" v={form.role} set={v=>setForm(f=>({...f,role:v}))}>{ROLES.map(r=><option key={r} value={r}>{r.replace('_',' ')}</option>)}</Sel>
                   <Sel label="Tenant" v={form.tenantId} set={v=>setForm(f=>({...f,tenantId:v}))}><option value="">— Global Admin —</option>{tenants.map(t=><option key={t.tenantId} value={t.tenantId}>{t.name} ({t.tenantId})</option>)}</Sel>
@@ -270,6 +271,7 @@ export default function AllUsersPage() {
                 {error&&<Err msg={error}/>}
                 <p className="text-slate-400 text-xs">Works with Gmail, Hotmail, corporate, or any email provider.</p>
                 <Fld label="Email Address *" v={inviteForm.email} set={v=>setInviteForm(f=>({...f,email:v}))} ph="anyone@gmail.com" t="email"/>
+                <Fld label="Phone" v={inviteForm.phone} set={v=>setInviteForm(f=>({...f,phone:v}))} ph="+1..." t="tel"/>
                 <div className="grid grid-cols-2 gap-3"><Fld label="First Name" v={inviteForm.firstName} set={v=>setInviteForm(f=>({...f,firstName:v}))} ph="Optional"/><Fld label="Last Name" v={inviteForm.lastName} set={v=>setInviteForm(f=>({...f,lastName:v}))} ph="Optional"/></div>
                 <div className="grid grid-cols-2 gap-3">
                   <Sel label="Role *" v={inviteForm.role} set={v=>setInviteForm(f=>({...f,role:v}))}>{ROLES.map(r=><option key={r} value={r}>{r.replace('_',' ')}</option>)}</Sel>

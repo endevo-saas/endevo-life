@@ -9,6 +9,7 @@ import Link from 'next/link'
 export default function InvitePage() {
   const [form, setForm] = useState({
     email: '',
+    phone: '',
     first_name: '',
     last_name: '',
     department: '',
@@ -26,12 +27,13 @@ export default function InvitePage() {
   async function submit(e: React.FormEvent) {
     e.preventDefault()
     if (!form.email.trim()) { setError('Email is required'); return }
+    if (!form.phone.trim()) { setError('Phone number is required'); return }
     setSaving(true)
     setError('')
     try {
       const r = await api.hrInvite(form) as { invite_url: string; user_id: string; message: string }
       setResult(r)
-      setForm({ email: '', first_name: '', last_name: '', department: '', job_title: '' })
+      setForm({ email: '', phone: '', first_name: '', last_name: '', department: '', job_title: '' })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to send invite')
     } finally {
@@ -110,6 +112,18 @@ export default function InvitePage() {
                 value={form.email}
                 onChange={e => update('email', e.target.value)}
                 placeholder="employee@company.com"
+                className="input-field"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-300 mb-1.5">Phone Number *</label>
+              <input
+                type="tel"
+                value={form.phone}
+                onChange={e => update('phone', e.target.value)}
+                placeholder="+1 (555) 123-4567"
                 className="input-field"
                 required
               />
