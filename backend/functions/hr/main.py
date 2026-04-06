@@ -401,7 +401,7 @@ def handler(event, context):
         return resp(200, {
             "message": "Invitation sent", "user_id": user_id,
             "invite_url": invite_url, "email_sent": email_sent,
-            "temp_password": temp_password
+            "password_set": True
         })
 
     # ── PUT /api/hr/employees/{id} ────────────────────────────────────────
