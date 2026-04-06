@@ -137,8 +137,9 @@ def get_failed_count(ip):
         return 0  # fail open — don't block on DB errors
 
 def generate_otp():
-    """Generate a 6-digit numeric OTP."""
-    return ''.join(random.choices(string.digits, k=6))
+    """Generate a cryptographically secure 6-digit numeric OTP."""
+    import secrets
+    return ''.join(str(secrets.randbelow(10)) for _ in range(6))
 
 def store_otp(otp_ref, email, otp_code, tokens):
     """Store OTP + tokens in audit table. TTL auto-deletes after OTP_TTL_MIN minutes."""
@@ -290,11 +291,13 @@ def handler(event, context):
         # Create user in WorkOS
         import urllib.request
         api_key = _get_secret("endevo/workos/api-key")
+        if not api_key:
+            return err(500, "Authentication service configuration error")
         try:
             data = json.dumps({
                 "email": email,
-                "first_name": first,
-                "last_name": last,
+                "first_name": first[:100].strip(),
+                "last_name": last[:100].strip(),
                 "email_verified": True,
             }).encode()
             req = urllib.request.Request(
@@ -306,7 +309,8 @@ def handler(event, context):
             with urllib.request.urlopen(req, timeout=10) as wr:
                 workos_data = json.loads(wr.read())
         except Exception as e:
-            return err(500, f"Failed to create account: {e}")
+            print(f"WORKOS_CREATE_USER_ERROR: {e}")
+            return err(500, "Failed to create account. Please try again or contact support.")
 
         # Update DynamoDB record
         USERS_T.update_item(
