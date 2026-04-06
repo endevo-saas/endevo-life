@@ -682,6 +682,8 @@ def handler(event, context):
 
         invite_token = str(uuid.uuid4())
 
+        # Create user in WorkOS (or find existing)
+        workos_user_id = ""
         try:
             workos_user = _workos_api("POST", "/user_management/users", {
                 "email": email,
@@ -689,13 +691,16 @@ def handler(event, context):
                 "last_name": last,
                 "email_verified": True,
             })
+            workos_user_id = workos_user.get("id", "")
         except Exception as e:
-            msg = str(e)
-            if "already exists" in msg.lower() or "duplicate" in msg.lower():
-                return err(409, f"User {email} already exists")
-            return err(400, f"WorkOS user creation failed: {msg}")
-
-        workos_user_id = workos_user.get("id", "")
+            print(f"WORKOS_CREATE_USER: {e}")
+            # User may already exist in WorkOS — look them up
+            try:
+                search = _workos_api("GET", f"/user_management/users?email={email}")
+                if search.get("data"):
+                    workos_user_id = search["data"][0].get("id", "")
+            except Exception:
+                pass  # Continue without WorkOS ID — DynamoDB is source of truth
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         try:

@@ -264,23 +264,20 @@ def handler(event, context):
 
     body = get_body(event)
 
-    # ── POST /api/auth/register — Create account via WorkOS (invite-based) ──
-    if path.endswith("/register") and method == "POST":
-        token = body.get("invite_token") or ""
-        first = body.get("first_name") or ""
-        last  = body.get("last_name") or ""
-        phone = (body.get("phone") or "").strip()[:20]
-        if not all([token, first, last]):
-            return err(400, "All fields required")
+    # ── POST /api/auth/activate — Activate account from invite link ──────
+    # Also matches /register for backwards compatibility
+    if (path.endswith("/activate") or path.endswith("/register")) and method == "POST":
+        token = body.get("invite_token") or body.get("token") or ""
+        if not token:
+            return err(400, "Invite token required")
 
+        from boto3.dynamodb.conditions import Attr
         result = USERS_T.scan(
-            FilterExpression="inviteToken = :t AND #s = :pending",
-            ExpressionAttributeValues={":t": token, ":pending": "pending"},
-            ExpressionAttributeNames={"#s": "status"}
+            FilterExpression=Attr("inviteToken").eq(token) & Attr("status").eq("pending")
         )
         items = result.get("Items", [])
         if not items:
-            security_audit("REGISTER_INVALID_TOKEN", "unknown", "AUTH", ip, device,
+            security_audit("ACTIVATE_INVALID_TOKEN", "unknown", "AUTH", ip, device,
                            f"Invalid invite token attempt from {ip}", "WARN")
             return err(400, "Invalid or expired invite link")
 
@@ -288,71 +285,28 @@ def handler(event, context):
         email = user_record["email"]
         tenant_id = user_record.get("tenantId", "")
         role = user_record.get("role", "EMPLOYEE")
+        first = user_record.get("firstName", "")
+        last = user_record.get("lastName", "")
 
-        # Create user in WorkOS
-        import urllib.request
-        api_key = _get_secret("endevo/workos/api-key")
-        if not api_key:
-            return err(500, "Authentication service configuration error")
-        try:
-            data = json.dumps({
-                "email": email,
-                "first_name": first[:100].strip(),
-                "last_name": last[:100].strip(),
-                "email_verified": True,
-            }).encode()
-            req = urllib.request.Request(
-                "https://api.workos.com/user_management/users",
-                data=data, headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                })
-            with urllib.request.urlopen(req, timeout=10) as wr:
-                workos_data = json.loads(wr.read())
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode() if hasattr(e, 'read') else str(e)
-            print(f"WORKOS_CREATE_USER_ERROR: {e.code} {error_body}")
-            # If user already exists in WorkOS, skip creation and continue
-            if e.code == 400 and "not available" in error_body.lower():
-                # Look up existing WorkOS user
-                try:
-                    search_req = urllib.request.Request(
-                        f"https://api.workos.com/user_management/users?email={email}",
-                        headers={"Authorization": f"Bearer {api_key}"})
-                    with urllib.request.urlopen(search_req, timeout=10) as sr:
-                        search_data = json.loads(sr.read())
-                        if search_data.get("data"):
-                            workos_data = search_data["data"][0]
-                        else:
-                            return err(500, "Failed to create account. Please try again.")
-                except Exception as se:
-                    print(f"WORKOS_SEARCH_ERROR: {se}")
-                    return err(500, "Failed to create account. Please try again.")
-            else:
-                return err(500, "Failed to create account. Please try again or contact support.")
-        except Exception as e:
-            print(f"WORKOS_CREATE_USER_ERROR: {e}")
-            return err(500, "Failed to create account. Please try again or contact support.")
-
-        # Update DynamoDB record (phone is optional — override invite value if provided)
-        update_expr = "SET #s = :active, firstName = :f, lastName = :l, workosId = :wid, authProvider = :ap"
-        expr_values = {
-            ":active": "active", ":f": first, ":l": last,
-            ":wid": workos_data.get("id", ""),
-            ":ap": "workos",
-        }
-        if phone:
-            update_expr += ", phone = :phone"
-            expr_values[":phone"] = phone
+        # Activate: set status to active, clear invite token
         USERS_T.update_item(
             Key={"userId": user_record["userId"]},
-            UpdateExpression=update_expr,
-            ExpressionAttributeValues=expr_values,
+            UpdateExpression="SET #s = :active, authProvider = :ap, activatedAt = :ts REMOVE inviteToken",
+            ExpressionAttributeValues={
+                ":active": "active",
+                ":ap": "workos",
+                ":ts": datetime.now(timezone.utc).isoformat(),
+            },
             ExpressionAttributeNames={"#s": "status"}
         )
-        security_audit("REGISTER_SUCCESS", email, tenant_id, ip, device,
-                       f"Account created via invite (WorkOS). Role={role}")
-        return resp(200, {"message": "Account created successfully"})
+        security_audit("ACCOUNT_ACTIVATED", email, tenant_id, ip, device,
+                       f"Account activated via invite link. Role={role}")
+        return resp(200, {
+            "message": "Account activated successfully",
+            "email": email,
+            "first_name": first,
+            "redirect": "/login",
+        })
 
     # ── GET /api/auth/me ─────────────────────────────────────────
     if path.endswith("/me") and method == "GET":
