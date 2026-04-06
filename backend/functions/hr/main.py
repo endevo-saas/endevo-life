@@ -14,15 +14,38 @@ import json, os, uuid, base64, re
 import boto3
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Attr
-from botocore.exceptions import ClientError
 
-POOL_ID   = os.environ.get("COGNITO_POOL_ID", "us-east-1_DVyEJqgFt")
 REGION    = os.environ.get("AWS_REGION", "us-east-1")
 dynamo    = boto3.resource("dynamodb", region_name=REGION)
-cognito   = boto3.client("cognito-idp", region_name=REGION)
 ses       = boto3.client("ses", region_name=REGION)
+_secrets  = boto3.client("secretsmanager", region_name=REGION)
 USERS_T   = dynamo.Table("endevo-uat-users")
 AUDIT_T   = dynamo.Table("endevo-uat-audit")
+
+# ── Secrets & WorkOS ─────────────────────────────────────────────────────────
+
+_secret_cache = {}
+
+def _get_secret(name):
+    if name in _secret_cache:
+        return _secret_cache[name]
+    val = _secrets.get_secret_value(SecretId=name)["SecretString"]
+    _secret_cache[name] = val
+    return val
+
+def _workos_api(method, path, body=None):
+    import urllib.request
+    api_key = _get_secret("endevo/workos/api-key")
+    url = f"https://api.workos.com{path}"
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=10) as r:
+        if r.status == 204:
+            return {}
+        return json.loads(r.read())
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 
@@ -64,41 +87,35 @@ def get_body(event):
         return {}
 
 def get_caller(event):
-    """Extract (tenantId, role, email) from Bearer token. WorkOS primary, Cognito fallback."""
+    """Extract (tenantId, role, email) from Bearer token via WorkOS."""
     token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
     if not token:
         return None, None, None
 
-    # ── Try WorkOS first (primary auth path) ──
     try:
         from utils.workos_auth import is_workos_token, validate_workos_token
-        if is_workos_token(token):
-            workos_user = validate_workos_token(token)
-            if workos_user:
-                email = workos_user["email"]
-                # Look up tenantId + role from DynamoDB by email
-                try:
-                    result = USERS_T.scan(
-                        FilterExpression=Attr("email").eq(email), Limit=1
-                    )
-                    items = result.get("Items", [])
-                    if items:
-                        u = items[0]
-                        return u.get("tenantId"), u.get("role"), email
-                except Exception as e:
-                    print(f"WORKOS_HR_DB_ERROR: {e}")
-                return None, None, email  # WorkOS user not in DynamoDB yet
-            # WorkOS token detected but validation failed
+        if not is_workos_token(token):
             return None, None, None
+        workos_user = validate_workos_token(token)
+        if not workos_user:
+            return None, None, None
+        email = workos_user["email"]
+        # Look up tenantId + role from DynamoDB by email
+        try:
+            result = USERS_T.scan(
+                FilterExpression=Attr("email").eq(email), Limit=1
+            )
+            items = result.get("Items", [])
+            if items:
+                u = items[0]
+                if u.get("status") == "inactive":
+                    return None, None, None  # Deactivated users cannot authenticate
+                return u.get("tenantId"), u.get("role"), email
+        except Exception as e:
+            print(f"WORKOS_HR_DB_ERROR: {e}")
+        return None, None, email  # WorkOS user not in DynamoDB yet
     except ImportError:
-        pass  # workos_auth not deployed yet — skip silently
-
-    # ── Fall back to Cognito (deprecated — will be removed after full WorkOS migration) ──
-    try:
-        u = cognito.get_user(AccessToken=token)
-        attrs = {a["Name"]: a["Value"] for a in u["UserAttributes"]}
-        return attrs.get("custom:tenantId"), attrs.get("custom:role"), attrs.get("email")
-    except:
+        print("WORKOS_AUTH_ERROR: utils.workos_auth module not found")
         return None, None, None
 
 def sanitize(value, max_len=200):
@@ -289,7 +306,7 @@ def handler(event, context):
         user_id       = str(uuid.uuid4())
         now           = datetime.now(timezone.utc).isoformat()
 
-        # Look up tenant name for Cognito attribute
+        # Look up tenant name
         tenant_name = ""
         try:
             t = dynamo.Table("endevo-uat-tenants").get_item(Key={"tenantId": tenant_id}).get("Item")
@@ -304,29 +321,21 @@ def handler(event, context):
             existing_role = global_existing[0].get("role", "unknown")
             return err(409, f"{email} is already registered as {existing_role} in the system. One email can only hold one role.")
 
-        # Create Cognito user
+        # Create WorkOS user
         try:
-            cognito.admin_create_user(
-                UserPoolId=POOL_ID, Username=email,
-                TemporaryPassword=temp_password,
-                UserAttributes=[
-                    {"Name": "email",             "Value": email},
-                    {"Name": "email_verified",    "Value": "true"},
-                    {"Name": "given_name",        "Value": first_name},
-                    {"Name": "family_name",       "Value": last_name},
-                    {"Name": "custom:role",       "Value": "EMPLOYEE"},
-                    {"Name": "custom:tenantId",   "Value": tenant_id},
-                    {"Name": "custom:tenantName", "Value": tenant_name},
-                ],
-                MessageAction="SUPPRESS"
-            )
-            cognito.admin_set_user_password(UserPoolId=POOL_ID, Username=email,
-                Password=temp_password, Permanent=True)
-        except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code == "UsernameExistsException":
+            workos_user = _workos_api("POST", "/user_management/users", {
+                "email": email,
+                "password": temp_password,
+                "first_name": first_name,
+                "last_name": last_name,
+                "email_verified": True,
+            })
+        except Exception as e:
+            error_msg = str(e)
+            if "409" in error_msg or "already exists" in error_msg.lower():
                 return err(409, f"User {email} already exists in the system")
-            return err(400, str(e.response["Error"]["Message"]))
+            print(f"WORKOS_CREATE_USER_ERROR: {e}")
+            return err(400, f"Failed to create user account: {error_msg}")
 
         USERS_T.put_item(Item={
             "userId": user_id, "tenantId": tenant_id, "email": email,
@@ -416,12 +425,6 @@ def handler(event, context):
         if not item or item.get("tenantId") != tenant_id:
             return err(404, "Employee not found in your organisation")
         emp_email = item.get("email", "")
-        # Disable in Cognito so they can't login
-        try:
-            cognito.admin_disable_user(UserPoolId=POOL_ID, Username=emp_email)
-        except ClientError as e:
-            if e.response["Error"]["Code"] != "UserNotFoundException":
-                return err(400, f"Deactivation failed: {e.response['Error']['Message']}")
         now = datetime.now(timezone.utc).isoformat()
         USERS_T.update_item(Key={"userId": user_id},
             UpdateExpression="SET #s = :v, deactivatedAt = :at, deactivatedBy = :by",
@@ -438,11 +441,6 @@ def handler(event, context):
         if not item or item.get("tenantId") != tenant_id:
             return err(404, "Employee not found in your organisation")
         emp_email = item.get("email", "")
-        try:
-            cognito.admin_enable_user(UserPoolId=POOL_ID, Username=emp_email)
-        except ClientError as e:
-            if e.response["Error"]["Code"] != "UserNotFoundException":
-                return err(400, f"Reactivation failed: {e.response['Error']['Message']}")
         now = datetime.now(timezone.utc).isoformat()
         USERS_T.update_item(Key={"userId": user_id},
             UpdateExpression="SET #s = :v, reactivatedAt = :at",

@@ -3,7 +3,6 @@ import * as iam from 'aws-cdk-lib/aws-iam'
 import { Construct } from 'constructs'
 
 interface IamStackProps extends cdk.StackProps {
-  cognitoPoolArn: string
   // dynamoTableArns and s3BucketArns removed — IAM now uses wildcard patterns
   // to avoid cross-stack CloudFormation ResourceExistenceCheck failures when
   // new tables/buckets are added. Pattern endevo-uat-* covers all current and
@@ -64,20 +63,20 @@ export class IamStack extends cdk.Stack {
       resources: ['*'],
     }))
 
-    // Cognito — admin operations for register + invite
+    // Secrets Manager — WorkOS API key + client ID
     this.lambdaRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'CognitoAccess',
+      sid: 'SecretsManagerAccess',
       effect: iam.Effect.ALLOW,
-      actions: [
-        'cognito-idp:AdminCreateUser',
-        'cognito-idp:AdminSetUserPassword',
-        'cognito-idp:AdminGetUser',
-        'cognito-idp:AdminDeleteUser',
-        'cognito-idp:AdminUpdateUserAttributes',
-        'cognito-idp:InitiateAuth',
-        'cognito-idp:GetUser',
-      ],
-      resources: [props.cognitoPoolArn],
+      actions: ['secretsmanager:GetSecretValue'],
+      resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:endevo/workos/*`],
+    }))
+
+    // SNS — publish SMS/notifications
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'SnsPublish',
+      effect: iam.Effect.ALLOW,
+      actions: ['sns:Publish'],
+      resources: ['*'],  // SNS Publish to phone numbers requires * resource
     }))
 
     // CloudFront signed URLs — LMS video delivery

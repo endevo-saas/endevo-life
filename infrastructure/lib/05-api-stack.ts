@@ -8,8 +8,6 @@ import { Construct } from 'constructs'
 
 interface ApiStackProps extends cdk.StackProps {
   lambdaRole: iam.Role
-  userPoolId: string
-  userPoolClientId: string
 }
 
 export class ApiStack extends cdk.Stack {
@@ -19,8 +17,8 @@ export class ApiStack extends cdk.Stack {
     super(scope, id, props)
 
     const commonEnv = {
-      USER_POOL_ID: props.userPoolId,
-      USER_POOL_CLIENT_ID: props.userPoolClientId,
+      WORKOS_API_KEY_SECRET: 'endevo/workos/api-key',
+      WORKOS_CLIENT_ID_SECRET: 'endevo/workos/client-id',
       REGION: this.region,
       ENVIRONMENT: 'uat',
     }

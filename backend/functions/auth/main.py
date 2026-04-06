@@ -1,28 +1,25 @@
 """
-Endevo Life — Auth Lambda  v2.0 (2026-03-28)
+Endevo Life — Auth Lambda  v3.0 (2026-04-05)
 Zero Trust foundation: IP tracking, device fingerprint, brute-force protection, security audit.
+Auth provider: WorkOS (Cognito fully removed).
 
 Routes:
   GET  /api/auth/health             (Route 53 health check)
-  POST /api/auth/login
-  POST /api/auth/mfa
-  POST /api/auth/register
-  POST /api/auth/forgot-password
-  POST /api/auth/reset-password
-  POST /api/auth/change-password
-  GET  /api/auth/me
+  POST /api/auth/register           (invite-based account creation via WorkOS)
+  GET  /api/auth/me                 (current user profile — WorkOS tokens only)
+  GET  /api/auth/workos/login       (AuthKit authorization URL)
+  POST /api/auth/workos/callback    (exchange code for session)
+  POST /api/auth/workos/send-otp   (WorkOS Magic Auth — send OTP)
+  POST /api/auth/workos/verify-otp (WorkOS Magic Auth — verify OTP)
 """
-import json, os, re, random, string
+import json, os, random, string
 import boto3
 from datetime import datetime, timezone, timedelta
-from botocore.exceptions import ClientError
 
-POOL_ID   = os.environ.get("COGNITO_POOL_ID",   "us-east-1_DVyEJqgFt")
-CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID", "4sbv2j6cv7jpp1oi0d16njsej1")
 REGION    = os.environ.get("AWS_REGION",         "us-east-1")
 
-cognito = boto3.client("cognito-idp",      region_name=REGION)
 ses     = boto3.client("ses",              region_name=REGION)
+sns     = boto3.client("sns",              region_name=REGION)
 dynamo  = boto3.resource("dynamodb",       region_name=REGION)
 
 # ── Secrets Manager (for WorkOS credentials) ─────────────────────────────────
@@ -42,12 +39,13 @@ def _get_secret(name: str) -> str:
         print(f"SECRET_FETCH_ERROR: Failed to get secret {name}: {e}")
         return ""
 
-USERS_T  = dynamo.Table("endevo-uat-users")
-AUDIT_T  = dynamo.Table("endevo-uat-audit")   # also stores OTP records + brute-force tracking
+USERS_T   = dynamo.Table("endevo-uat-users")
+AUDIT_T   = dynamo.Table("endevo-uat-audit")   # also stores OTP records + brute-force tracking
+TENANTS_T = dynamo.Table("endevo-uat-tenants")
 
 MAX_FAILED  = 5    # lock out after 5 consecutive failures
 LOCKOUT_MIN = 15   # lockout window in minutes
-OTP_TTL_MIN = 10   # OTP expires after 10 minutes
+OTP_TTL_MIN = 5    # OTP expires after 5 minutes
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 
@@ -217,6 +215,36 @@ def send_otp_email(email, otp_code, first_name=""):
         print(f"OTP_EMAIL_ERROR: {e}")
         return False
 
+def send_otp_sms(phone, otp_code):
+    """Send OTP code to user's phone via SNS SMS."""
+    if not phone:
+        return False
+    try:
+        sns.publish(
+            PhoneNumber=phone,
+            Message=f"Endevo Life verification code: {otp_code} — expires in {OTP_TTL_MIN} minutes. Never share this code.",
+            MessageAttributes={
+                "AWS.SNS.SMS.SenderID": {"DataType": "String", "StringValue": "EndevoLife"},
+                "AWS.SNS.SMS.SMSType": {"DataType": "String", "StringValue": "Transactional"},
+            }
+        )
+        return True
+    except Exception as e:
+        print(f"OTP_SMS_ERROR: {e}")
+        return False
+
+def _lookup_user_by_email(email):
+    """Find a user in DynamoDB by email."""
+    try:
+        from boto3.dynamodb.conditions import Attr
+        result = USERS_T.scan(FilterExpression=Attr("email").eq(email))
+        items = result.get("Items", [])
+        return items[0] if items else None
+    except Exception as e:
+        print(f"USER_LOOKUP_ERROR: {e}")
+        return None
+
+
 def handler(event, context):
     global _current_event
     _current_event = event
@@ -234,84 +262,6 @@ def handler(event, context):
         return resp(200, {"status": "healthy", "region": REGION})
 
     body = get_body(event)
-
-    # ── POST /api/auth/login ──────────────────────────────────────
-    # DEPRECATED: Cognito-based login. Will be removed after full WorkOS migration.
-    # New clients should use /api/auth/workos/login + /api/auth/workos/callback instead.
-    if path.endswith("/login") and method == "POST":
-        import uuid as _uuid
-        email    = (body.get("email") or "").lower().strip()
-        password = body.get("password") or ""
-
-        if not email or not password:
-            return err(400, "Email and password required")
-
-        # Zero Trust: brute-force check before attempting Cognito
-        failed = get_failed_count(ip)
-        if failed >= MAX_FAILED:
-            security_audit("LOGIN_BLOCKED", email, "AUTH", ip, device,
-                           f"IP blocked after {failed} failed attempts", "WARN")
-            return err(429, f"Too many failed login attempts from your location. Try again in {LOCKOUT_MIN} minutes.")
-
-        try:
-            r = cognito.initiate_auth(
-                AuthFlow="USER_PASSWORD_AUTH",
-                AuthParameters={"USERNAME": email, "PASSWORD": password},
-                ClientId=CLIENT_ID
-            )
-            if r.get("ChallengeName") == "SOFTWARE_TOKEN_MFA":
-                security_audit("MFA_CHALLENGE", email, "AUTH", ip, device, "MFA required")
-                return resp(200, {
-                    "mfa_required": True,
-                    "session":   r["Session"],
-                    "challenge": r["ChallengeName"]
-                })
-            tokens = r["AuthenticationResult"]
-            user = cognito.get_user(AccessToken=tokens["AccessToken"])
-            attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
-            tenant_id  = attrs.get("custom:tenantId", "")
-            first_name = attrs.get("given_name", "")
-
-            role       = attrs.get("custom:role", "EMPLOYEE")
-            token_payload = {
-                "access_token":  tokens["AccessToken"],
-                "id_token":      tokens["IdToken"],
-                "refresh_token": tokens["RefreshToken"],
-                "role":          role,
-                "tenant_id":     tenant_id,
-                "tenant_name":   attrs.get("custom:tenantName", ""),
-                "email":         attrs.get("email", email),
-                "first_name":    first_name,
-                "last_name":     attrs.get("family_name", "")
-            }
-
-            # ── Email OTP only for GLOBAL_ADMIN ────────────────────
-            if role == "GLOBAL_ADMIN":
-                otp_code = generate_otp()
-                otp_ref  = str(_uuid.uuid4())
-                store_otp(otp_ref, email, otp_code, token_payload)
-                email_ok = send_otp_email(email, otp_code, first_name)
-                security_audit("OTP_SENT", email, tenant_id or "AUTH", ip, device,
-                               f"OTP sent for GLOBAL_ADMIN login from {ip} | email_sent={email_ok}")
-                return resp(200, {
-                    "otp_required": True,
-                    "otp_ref":      otp_ref,
-                    "email":        email,
-                    "message":      f"Verification code sent to {email}. Please check your inbox."
-                })
-
-            # HR_ADMIN and EMPLOYEE — direct login, no OTP
-            security_audit("LOGIN_SUCCESS", email, tenant_id or "AUTH", ip, device,
-                           f"Login from {ip} | {device[:80]}")
-            return resp(200, token_payload)
-
-        except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code in ("NotAuthorizedException", "UserNotFoundException"):
-                security_audit("LOGIN_FAILED", email, "AUTH", ip, device,
-                               f"Invalid credentials from {ip}", "WARN")
-                return err(401, "Invalid email or password")
-            return err(400, str(e.response["Error"]["Message"]))
 
     # ── POST /api/auth/verify-otp ─────────────────────────────────
     if path.endswith("/verify-otp") and method == "POST":
@@ -342,44 +292,12 @@ def handler(event, context):
                        f"OTP verified. Login complete from {ip} | {device[:80]}")
         return resp(200, token_payload)
 
-    # ── POST /api/auth/mfa ────────────────────────────────────────
-    # DEPRECATED: Cognito MFA flow. Will be removed after full WorkOS migration.
-    if path.endswith("/mfa") and method == "POST":
-        session  = body.get("session") or ""
-        otp_code = body.get("code") or ""
-        email    = (body.get("email") or "").lower().strip()
-        try:
-            r = cognito.respond_to_auth_challenge(
-                ClientId=CLIENT_ID,
-                ChallengeName="SOFTWARE_TOKEN_MFA",
-                Session=session,
-                ChallengeResponses={
-                    "USERNAME": email,
-                    "SOFTWARE_TOKEN_MFA_CODE": otp_code
-                }
-            )
-            tokens = r["AuthenticationResult"]
-            user = cognito.get_user(AccessToken=tokens["AccessToken"])
-            attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
-            security_audit("MFA_SUCCESS", email, attrs.get("custom:tenantId", "AUTH"), ip, device)
-            return resp(200, {
-                "access_token":  tokens["AccessToken"],
-                "id_token":      tokens["IdToken"],
-                "refresh_token": tokens["RefreshToken"],
-                "role":          attrs.get("custom:role", "EMPLOYEE")
-            })
-        except ClientError:
-            security_audit("MFA_FAILED", email, "AUTH", ip, device, "Invalid MFA code", "WARN")
-            return err(401, "Invalid MFA code")
-
-    # ── POST /api/auth/register ───────────────────────────────────
-    # DEPRECATED: Cognito-based registration. Will be removed after full WorkOS migration.
+    # ── POST /api/auth/register — Create account via WorkOS (invite-based) ──
     if path.endswith("/register") and method == "POST":
-        token    = body.get("invite_token") or ""
-        password = body.get("password") or ""
-        first    = body.get("first_name") or ""
-        last     = body.get("last_name") or ""
-        if not all([token, password, first, last]):
+        token = body.get("invite_token") or ""
+        first = body.get("first_name") or ""
+        last  = body.get("last_name") or ""
+        if not all([token, first, last]):
             return err(400, "All fields required")
 
         result = USERS_T.scan(
@@ -394,153 +312,45 @@ def handler(event, context):
             return err(400, "Invalid or expired invite link")
 
         user_record = items[0]
-        email       = user_record["email"]
-        tenant_id   = user_record.get("tenantId", "")
-        tenant_name = user_record.get("tenantName", "")
-        role        = user_record.get("role", "EMPLOYEE")
+        email = user_record["email"]
+        tenant_id = user_record.get("tenantId", "")
+        role = user_record.get("role", "EMPLOYEE")
 
+        # Create user in WorkOS
+        import urllib.request
+        api_key = _get_secret("endevo/workos/api-key")
         try:
-            cognito.admin_create_user(
-                UserPoolId=POOL_ID, Username=email,
-                TemporaryPassword=password,
-                UserAttributes=[
-                    {"Name": "email",             "Value": email},
-                    {"Name": "email_verified",    "Value": "true"},
-                    {"Name": "given_name",        "Value": first},
-                    {"Name": "family_name",       "Value": last},
-                    {"Name": "custom:role",       "Value": role},
-                    {"Name": "custom:tenantId",   "Value": tenant_id},
-                    {"Name": "custom:tenantName", "Value": tenant_name},
-                ],
-                MessageAction="SUPPRESS"
-            )
-            cognito.admin_set_user_password(
-                UserPoolId=POOL_ID, Username=email, Password=password, Permanent=True
-            )
-            USERS_T.update_item(
-                Key={"userId": user_record["userId"]},
-                UpdateExpression="SET #s = :active, firstName = :f, lastName = :l",
-                ExpressionAttributeValues={":active": "active", ":f": first, ":l": last},
-                ExpressionAttributeNames={"#s": "status"}
-            )
-            security_audit("REGISTER_SUCCESS", email, tenant_id, ip, device,
-                           f"Account created via invite. Role={role}")
-            return resp(200, {"message": "Account created successfully"})
-        except ClientError as e:
-            return err(400, str(e.response["Error"]["Message"]))
+            data = json.dumps({
+                "email": email,
+                "first_name": first,
+                "last_name": last,
+                "email_verified": True,
+            }).encode()
+            req = urllib.request.Request(
+                "https://api.workos.com/user_management/users",
+                data=data, headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                })
+            with urllib.request.urlopen(req, timeout=10) as wr:
+                workos_data = json.loads(wr.read())
+        except Exception as e:
+            return err(500, f"Failed to create account: {e}")
 
-    # ── POST /api/auth/forgot-password ───────────────────────────
-    # DEPRECATED: Cognito password reset. Will be removed after full WorkOS migration.
-    if path.endswith("/forgot-password") and method == "POST":
-        email = (body.get("email") or "").lower().strip()
-        try:
-            cognito.forgot_password(ClientId=CLIENT_ID, Username=email)
-            security_audit("FORGOT_PASSWORD_REQUEST", email, "AUTH", ip, device)
-        except:
-            pass  # Silent fail — don't reveal if email exists
-        return resp(200, {"message": "If this email exists, a reset code was sent"})
-
-    # ── POST /api/auth/reset-password ────────────────────────────
-    if path.endswith("/reset-password") and method == "POST":
-        email    = (body.get("email") or "").lower().strip()
-        code     = body.get("code") or ""
-        new_pass = body.get("new_password") or ""
-        if not all([email, code, new_pass]):
-            return err(400, "Email, code, and new password required")
-        try:
-            cognito.confirm_forgot_password(
-                ClientId=CLIENT_ID, Username=email,
-                ConfirmationCode=code, Password=new_pass
-            )
-            security_audit("PASSWORD_RESET", email, "AUTH", ip, device)
-            return resp(200, {"message": "Password reset successfully"})
-        except ClientError as e:
-            return err(400, str(e.response["Error"]["Message"]))
-
-    # ── POST /api/auth/signup ────────────────────────────────────
-    # DEPRECATED: Cognito self-signup. Will be removed after full WorkOS migration.
-    # Individual self-signup — no invite required, assigns to tenant-ind
-    if path.endswith("/signup") and method == "POST":
-        import uuid as _uuid
-        email    = (body.get("email") or "").lower().strip()
-        password = body.get("password") or ""
-        first    = (body.get("first_name") or "").strip()
-        last     = (body.get("last_name") or "").strip()
-        company  = (body.get("company") or "Individual").strip()[:100]
-        if not all([email, password, first, last]):
-            return err(400, "All fields are required")
-        # Basic email validation
-        if not re.match(r"^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$", email):
-            return err(400, "Invalid email address")
-        # Check if email already exists in Cognito
-        try:
-            cognito.admin_get_user(UserPoolId=POOL_ID, Username=email)
-            return err(409, "An account with this email already exists")
-        except ClientError as e:
-            if e.response["Error"]["Code"] != "UserNotFoundException":
-                return err(500, "Signup error — please try again")
-        # Create user in Cognito
-        try:
-            cognito.admin_create_user(
-                UserPoolId=POOL_ID, Username=email,
-                TemporaryPassword=password,
-                UserAttributes=[
-                    {"Name": "email",             "Value": email},
-                    {"Name": "email_verified",    "Value": "true"},
-                    {"Name": "given_name",        "Value": first},
-                    {"Name": "family_name",       "Value": last},
-                    {"Name": "custom:role",       "Value": "EMPLOYEE"},
-                    {"Name": "custom:tenantId",   "Value": "tenant-ind"},
-                    {"Name": "custom:tenantName", "Value": "Individual"},
-                ],
-                MessageAction="SUPPRESS"
-            )
-            cognito.admin_set_user_password(
-                UserPoolId=POOL_ID, Username=email, Password=password, Permanent=True
-            )
-        except ClientError as e:
-            return err(400, str(e.response["Error"]["Message"]))
-        # Create DynamoDB record
-        user_id = str(_uuid.uuid4())
-        USERS_T.put_item(Item={
-            "userId":    user_id,
-            "email":     email,
-            "firstName": first,
-            "lastName":  last,
-            "role":      "EMPLOYEE",
-            "tenantId":  "tenant-ind",
-            "company":   company,
-            "status":    "active",
-            "plan":      "individual",
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-        })
-        security_audit("SIGNUP_SUCCESS", email, "tenant-ind", ip, device,
-                       f"Self-signup: {first} {last} <{email}> company={company}")
+        # Update DynamoDB record
+        USERS_T.update_item(
+            Key={"userId": user_record["userId"]},
+            UpdateExpression="SET #s = :active, firstName = :f, lastName = :l, workosId = :wid, authProvider = :ap",
+            ExpressionAttributeValues={
+                ":active": "active", ":f": first, ":l": last,
+                ":wid": workos_data.get("id", ""),
+                ":ap": "workos",
+            },
+            ExpressionAttributeNames={"#s": "status"}
+        )
+        security_audit("REGISTER_SUCCESS", email, tenant_id, ip, device,
+                       f"Account created via invite (WorkOS). Role={role}")
         return resp(200, {"message": "Account created successfully"})
-
-    # ── POST /api/auth/change-password ───────────────────────────
-    # DEPRECATED: Cognito password change. Will be removed after full WorkOS migration.
-    if path.endswith("/change-password") and method == "POST":
-        access_token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
-        old_pass = body.get("old_password") or ""
-        new_pass = body.get("new_password") or ""
-        try:
-            cognito.change_password(
-                AccessToken=access_token,
-                PreviousPassword=old_pass, ProposedPassword=new_pass
-            )
-            # Get email for audit
-            try:
-                u = cognito.get_user(AccessToken=access_token)
-                attrs = {a["Name"]: a["Value"] for a in u["UserAttributes"]}
-                email = attrs.get("email", "unknown")
-                tid   = attrs.get("custom:tenantId", "AUTH")
-            except:
-                email, tid = "unknown", "AUTH"
-            security_audit("PASSWORD_CHANGED", email, tid, ip, device, "Password changed via settings")
-            return resp(200, {"message": "Password changed successfully"})
-        except ClientError as e:
-            return err(400, str(e.response["Error"]["Message"]))
 
     # ── GET /api/auth/me ─────────────────────────────────────────
     if path.endswith("/me") and method == "GET":
@@ -548,63 +358,48 @@ def handler(event, context):
         if not access_token:
             return err(401, "Not authenticated")
 
-        # ── Try WorkOS first (dormant until WORKOS_CLIENT_ID env var is set) ──
         try:
             from utils.workos_auth import is_workos_token, validate_workos_token
-            if is_workos_token(access_token):
-                workos_user = validate_workos_token(access_token)
-                if workos_user:
-                    email = workos_user["email"]
-                    # Look up full profile from DynamoDB
-                    try:
-                        result = USERS_T.scan(
-                            FilterExpression="email = :e",
-                            ExpressionAttributeValues={":e": email},
-                            Limit=1
-                        )
-                        items = result.get("Items", [])
-                        if items:
-                            u = items[0]
-                            return resp(200, {
-                                "email":       email,
-                                "first_name":  u.get("firstName", ""),
-                                "last_name":   u.get("lastName", ""),
-                                "role":        u.get("role", "EMPLOYEE"),
-                                "tenant_id":   u.get("tenantId", ""),
-                                "tenant_name": u.get("tenantName", ""),
-                                "provider":    "workos",
-                            })
-                    except Exception as db_err:
-                        print(f"WORKOS_ME_DB_ERROR: {db_err}")
-                    # WorkOS user not in DynamoDB — return basic info
+            if not is_workos_token(access_token):
+                return err(401, "Invalid or expired token")
+            workos_user = validate_workos_token(access_token)
+            if not workos_user:
+                return err(401, "Invalid or expired token")
+
+            email = workos_user["email"]
+            # Look up full profile from DynamoDB
+            try:
+                result = USERS_T.scan(
+                    FilterExpression="email = :e",
+                    ExpressionAttributeValues={":e": email},
+                    Limit=1
+                )
+                items = result.get("Items", [])
+                if items:
+                    u = items[0]
                     return resp(200, {
                         "email":       email,
-                        "first_name":  "",
-                        "last_name":   "",
-                        "role":        None,
-                        "tenant_id":   None,
-                        "tenant_name": None,
+                        "first_name":  u.get("firstName", ""),
+                        "last_name":   u.get("lastName", ""),
+                        "role":        u.get("role", "EMPLOYEE"),
+                        "tenant_id":   u.get("tenantId", ""),
+                        "tenant_name": u.get("tenantName", ""),
                         "provider":    "workos",
                     })
-                else:
-                    return err(401, "Invalid or expired token")
-        except ImportError:
-            pass  # workos_auth not deployed yet — skip silently
-
-        # ── Fall back to Cognito (existing auth) ──
-        try:
-            user = cognito.get_user(AccessToken=access_token)
-            attrs = {a["Name"]: a["Value"] for a in user["UserAttributes"]}
+            except Exception as db_err:
+                print(f"WORKOS_ME_DB_ERROR: {db_err}")
+            # WorkOS user not in DynamoDB — return basic info
             return resp(200, {
-                "email":       attrs.get("email"),
-                "first_name":  attrs.get("given_name"),
-                "last_name":   attrs.get("family_name"),
-                "role":        attrs.get("custom:role"),
-                "tenant_id":   attrs.get("custom:tenantId"),
-                "tenant_name": attrs.get("custom:tenantName")
+                "email":       email,
+                "first_name":  "",
+                "last_name":   "",
+                "role":        None,
+                "tenant_id":   None,
+                "tenant_name": None,
+                "provider":    "workos",
             })
-        except ClientError:
-            return err(401, "Invalid or expired token")
+        except ImportError:
+            return err(500, "Auth module not available")
 
     # ── GET /api/auth/workos/login — Return AuthKit authorization URL ──
     if path.endswith("/workos/login") and method == "GET":
@@ -702,6 +497,124 @@ def handler(event, context):
             "tenant_id": tenant_id,
             "tenant_name": tenant_name,
             "email": user_email,
+            "first_name": first_name,
+            "last_name": last_name,
+            "provider": "workos",
+        })
+
+    # ── POST /api/auth/send-otp — Send OTP via Email (SES) + SMS (SNS) ──────
+    if (path.endswith("/send-otp") or path.endswith("/workos/send-otp")) and method == "POST":
+        import uuid as _uuid
+        email = (body.get("email") or "").lower().strip()
+        if not email or "@" not in email:
+            return err(400, "Valid email address required")
+
+        # Zero Trust: brute-force check
+        failed = get_failed_count(ip)
+        if failed >= MAX_FAILED:
+            security_audit("LOGIN_BLOCKED", email, "AUTH", ip, device,
+                           f"IP blocked after {failed} failed attempts", "WARN")
+            return err(429, f"Too many failed attempts. Try again in {LOCKOUT_MIN} minutes.")
+
+        # Look up user in DynamoDB
+        user_record = _lookup_user_by_email(email)
+        if not user_record:
+            security_audit("LOGIN_UNKNOWN_EMAIL", email, "AUTH", ip, device,
+                           f"OTP requested for unknown email from {ip}", "WARN")
+            return err(404, "No account found with this email. Contact your HR administrator.")
+
+        # Check user is active
+        if user_record.get("status") == "inactive":
+            return err(403, "Your account has been deactivated. Contact your HR administrator.")
+
+        first_name = user_record.get("firstName", "")
+        phone = user_record.get("phone", "")
+
+        # Generate OTP and store
+        otp_code = generate_otp()
+        otp_ref = str(_uuid.uuid4())
+        store_otp(otp_ref, email, otp_code, {})  # tokens populated on verify
+
+        # Send via BOTH channels
+        email_ok = send_otp_email(email, otp_code, first_name)
+        sms_ok = send_otp_sms(phone, otp_code) if phone else False
+
+        channels = []
+        if email_ok:
+            channels.append("email")
+        if sms_ok:
+            channels.append("sms")
+
+        security_audit("OTP_SENT", email, user_record.get("tenantId", "AUTH"), ip, device,
+                       f"OTP sent via {','.join(channels)} from {ip}")
+
+        # Mask email/phone for response
+        masked_email = email[:3] + "***" + email[email.index("@"):]
+        masked_phone = f"***{phone[-4:]}" if phone and len(phone) >= 4 else ""
+
+        return resp(200, {
+            "message": "Verification code sent",
+            "otp_ref": otp_ref,
+            "email": masked_email,
+            "phone": masked_phone,
+            "channels": channels,
+            "expires_in": OTP_TTL_MIN * 60,
+        })
+
+    # ── POST /api/auth/verify-otp — Verify OTP and login ─────────────────
+    if (path.endswith("/verify-otp") or path.endswith("/workos/verify-otp")) and method == "POST":
+        email = (body.get("email") or "").lower().strip()
+        otp_ref = body.get("otp_ref") or ""
+        otp_code = body.get("code") or ""
+
+        if not all([email, otp_ref, otp_code]):
+            return err(400, "email, otp_ref, and code are required")
+
+        record = get_otp_record(otp_ref, email)
+        if not record:
+            security_audit("OTP_EXPIRED", email, "AUTH", ip, device,
+                           "OTP not found or expired", "WARN")
+            return err(401, "Verification code has expired. Please request a new one.")
+
+        if record.get("otp_code") != otp_code:
+            security_audit("OTP_FAILED", email, "AUTH", ip, device,
+                           f"Wrong OTP attempt from {ip}", "WARN")
+            return err(401, "Incorrect verification code. Please check and try again.")
+
+        # OTP valid — consume it
+        delete_otp_record(otp_ref, email)
+
+        # Look up full user profile
+        user_record = _lookup_user_by_email(email)
+        role = user_record.get("role", "EMPLOYEE") if user_record else "EMPLOYEE"
+        tenant_id = user_record.get("tenantId", "") if user_record else ""
+        tenant_name = ""
+        first_name = user_record.get("firstName", "") if user_record else ""
+        last_name = user_record.get("lastName", "") if user_record else ""
+
+        if tenant_id and tenant_id != "SYSTEM":
+            try:
+                t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item", {})
+                tenant_name = t.get("name", "")
+            except Exception:
+                pass
+
+        # Generate a simple session token (JWT via WorkOS or self-signed)
+        import hashlib, base64
+        session_data = f"{email}:{role}:{tenant_id}:{datetime.now(timezone.utc).isoformat()}"
+        access_token = base64.urlsafe_b64encode(
+            hashlib.sha256(session_data.encode()).digest()
+        ).decode().rstrip("=")
+
+        security_audit("LOGIN_SUCCESS", email, tenant_id or "AUTH", ip, device,
+                       f"OTP verified. Login from {ip} | {device[:80]}")
+
+        return resp(200, {
+            "access_token": access_token,
+            "role": role,
+            "tenant_id": tenant_id,
+            "tenant_name": tenant_name,
+            "email": email,
             "first_name": first_name,
             "last_name": last_name,
             "provider": "workos",

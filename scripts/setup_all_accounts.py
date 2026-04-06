@@ -1,25 +1,23 @@
 """
 Endevo Life — Full Setup Automation Script
-Creates Cognito accounts for ALL seed users + seeds training + questions for all tenants.
+Creates WorkOS accounts for ALL seed users + seeds training + questions for all tenants.
 Run: C:/Python314/python.exe setup_all_accounts.py
-Password for all test accounts: Endevo@Test2026!
 """
-import boto3, uuid, sys, io
+import boto3, json, sys, io, urllib.request, urllib.error
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
 
-REGION   = "us-east-1"
-POOL_ID  = "us-east-1_DVyEJqgFt"
-PASSWORD = "Endevo@Test2026!"
+REGION = "us-east-1"
 
-cognito  = boto3.client("cognito-idp", region_name=REGION)
-dynamo   = boto3.resource("dynamodb", region_name=REGION)
-USERS_T  = dynamo.Table("endevo-uat-users")
-TRAIN_T  = dynamo.Table("endevo-uat-training")
-QUEST_T  = dynamo.Table("endevo-uat-questions")
-NOW      = datetime.now(timezone.utc).isoformat()
+dynamo  = boto3.resource("dynamodb", region_name=REGION)
+USERS_T = dynamo.Table("endevo-uat-users")
+TRAIN_T = dynamo.Table("endevo-uat-training")
+QUEST_T = dynamo.Table("endevo-uat-questions")
+NOW     = datetime.now(timezone.utc).isoformat()
+
+WORKOS_API_BASE = "https://api.workos.com"
 
 # ── All seed tenants ───────────────────────────────────────────────────────────
 TENANTS = {
@@ -35,64 +33,111 @@ TENANTS = {
     "tenant-00010": "Meridian Education Group",
 }
 
-# ── Step 1: Create Cognito account for every user in DynamoDB ─────────────────
-def create_all_cognito_accounts():
-    print("\n[1] Creating Cognito accounts for all seed users...")
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _get_workos_api_key() -> str:
+    """Retrieve WorkOS API key from AWS Secrets Manager."""
+    sm = boto3.client("secretsmanager", region_name=REGION)
+    resp = sm.get_secret_value(SecretId="endevo-uat-workos-api-key")
+    secret = resp.get("SecretString", "")
+    # Support both plain string and JSON {"api_key": "..."} formats
+    try:
+        parsed = json.loads(secret)
+        return parsed.get("api_key", parsed.get("apiKey", secret))
+    except (json.JSONDecodeError, TypeError):
+        return secret
+
+
+def _workos_create_user(
+    api_key: str,
+    email: str,
+    first_name: str,
+    last_name: str,
+) -> dict:
+    """Create a user via WorkOS User Management API. Returns the created user dict."""
+    url = f"{WORKOS_API_BASE}/user_management/users"
+    payload = json.dumps({
+        "email": email,
+        "first_name": first_name,
+        "last_name": last_name,
+        "email_verified": True,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        },
+    )
+
+    with urllib.request.urlopen(req) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+# ── Step 1: Create WorkOS account for every user in DynamoDB ─────────────────
+
+def create_all_workos_accounts() -> None:
+    print("\n[1] Creating WorkOS accounts for all seed users...")
+
+    api_key = _get_workos_api_key()
+    if not api_key:
+        print("  ERROR: Could not retrieve WorkOS API key from Secrets Manager")
+        return
+
     result = USERS_T.scan()
     users = result.get("Items", [])
     created = skipped = failed = 0
 
     for u in users:
-        email  = u.get("email", "")
-        role   = u.get("role", "EMPLOYEE")
-        tid    = u.get("tenantId", "")
-        tname  = TENANTS.get(tid, tid)
-        first  = u.get("firstName", "User")
-        last   = u.get("lastName", "")
+        email = u.get("email", "")
+        role  = u.get("role", "EMPLOYEE")
+        tid   = u.get("tenantId", "")
+        tname = TENANTS.get(tid, tid)
+        first = u.get("firstName", "User")
+        last  = u.get("lastName", "")
 
         if not email or role == "GLOBAL_ADMIN":
             skipped += 1
             continue
 
-        # Check if already in Cognito
-        try:
-            cognito.admin_get_user(UserPoolId=POOL_ID, Username=email)
-            print(f"  SKIP (exists): {email}")
+        # Skip users that already have a WorkOS ID
+        if u.get("workosId"):
+            print(f"  SKIP (workosId exists): {email}")
             skipped += 1
             continue
-        except ClientError as e:
-            if e.response["Error"]["Code"] != "UserNotFoundException":
-                print(f"  ERROR checking {email}: {e}")
-                failed += 1
-                continue
 
-        # Create in Cognito
         try:
-            cognito.admin_create_user(
-                UserPoolId=POOL_ID,
-                Username=email,
-                TemporaryPassword=PASSWORD,
-                UserAttributes=[
-                    {"Name": "email",             "Value": email},
-                    {"Name": "email_verified",    "Value": "true"},
-                    {"Name": "given_name",        "Value": first},
-                    {"Name": "family_name",       "Value": last},
-                    {"Name": "custom:role",       "Value": role},
-                    {"Name": "custom:tenantId",   "Value": tid},
-                    {"Name": "custom:tenantName", "Value": tname},
-                ],
-                MessageAction="SUPPRESS"
+            workos_user = _workos_create_user(api_key, email, first, last)
+            workos_id = workos_user.get("id", "")
+
+            # Update DynamoDB record with WorkOS ID and auth provider
+            USERS_T.update_item(
+                Key={"tenantId": tid, "email": email},
+                UpdateExpression="SET workosId = :wid, authProvider = :ap",
+                ExpressionAttributeValues={
+                    ":wid": workos_id,
+                    ":ap": "workos",
+                },
             )
-            cognito.admin_set_user_password(
-                UserPoolId=POOL_ID,
-                Username=email,
-                Password=PASSWORD,
-                Permanent=True
-            )
-            print(f"  OK [{role}]: {email} | {tname}")
+
+            print(f"  OK [{role}]: {email} | {tname} | workosId={workos_id}")
             created += 1
-        except ClientError as e:
-            print(f"  FAIL: {email} — {e.response['Error']['Message']}")
+
+        except urllib.error.HTTPError as e:
+            body = e.read().decode("utf-8", errors="replace")
+            # 409 = user already exists in WorkOS
+            if e.code == 409:
+                print(f"  SKIP (exists in WorkOS): {email}")
+                skipped += 1
+            else:
+                print(f"  FAIL: {email} — HTTP {e.code}: {body}")
+                failed += 1
+
+        except Exception as e:
+            print(f"  FAIL: {email} — {e}")
             failed += 1
 
     print(f"  Done: {created} created, {skipped} skipped, {failed} failed")
@@ -212,10 +257,9 @@ def check_ses():
 # ── Run all ────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print("=" * 65)
-    print("  Endevo Life — Full Account & Data Setup")
-    print("  Password for all test accounts: Endevo@Test2026!")
+    print("  Endevo Life — Full Account & Data Setup (WorkOS)")
     print("=" * 65)
-    create_all_cognito_accounts()
+    create_all_workos_accounts()
     seed_training_data()
     check_ses()
     print("\n" + "=" * 65)

@@ -25,14 +25,11 @@ import json, os, uuid, base64, re
 import boto3
 from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Attr, Key
-from botocore.exceptions import ClientError
 
-POOL_ID   = os.environ.get("COGNITO_POOL_ID", "us-east-1_DVyEJqgFt")
-CLIENT_ID = os.environ.get("COGNITO_CLIENT_ID", "4sbv2j6cv7jpp1oi0d16njsej1")
 REGION    = os.environ.get("AWS_REGION", "us-east-1")
 dynamo    = boto3.resource("dynamodb", region_name=REGION)
-cognito   = boto3.client("cognito-idp", region_name=REGION)
 ses       = boto3.client("ses", region_name=REGION)
+_secrets  = boto3.client("secretsmanager", region_name=REGION)
 USERS_T          = dynamo.Table("endevo-uat-users")
 TENANTS_T        = dynamo.Table("endevo-uat-tenants")
 AUDIT_T          = dynamo.Table("endevo-uat-audit")
@@ -70,6 +67,32 @@ CONFIG_DEFAULTS = {
         "welcome_email_enabled": True
     }
 }
+
+# ── Secrets & WorkOS ─────────────────────────────────────────────────────────
+
+_secret_cache = {}
+
+def _get_secret(name):
+    if name in _secret_cache:
+        return _secret_cache[name]
+    val = _secrets.get_secret_value(SecretId=name)["SecretString"]
+    _secret_cache[name] = val
+    return val
+
+def _workos_api(method, path, body=None):
+    """Call WorkOS User Management API."""
+    import urllib.request
+    api_key = _get_secret("endevo/workos/api-key")
+    url = f"https://api.workos.com{path}"
+    data = json.dumps(body).encode() if body else None
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    })
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        if resp.status == 204:
+            return {}
+        return json.loads(resp.read())
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 
@@ -111,12 +134,11 @@ def get_body(event):
         return {}
 
 def get_caller(event):
-    """Extract (role, email) from Bearer token. WorkOS primary, Cognito fallback."""
+    """Extract (role, email) from Bearer token via WorkOS JWT + DynamoDB lookup."""
     token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
     if not token:
         return None, None
 
-    # ── Try WorkOS first (primary auth path) ──
     try:
         from utils.workos_auth import is_workos_token, validate_workos_token
         if is_workos_token(token):
@@ -134,17 +156,10 @@ def get_caller(event):
                 except Exception as e:
                     print(f"WORKOS_ADMIN_DB_ERROR: {e}")
                 return None, email  # WorkOS user not in DynamoDB yet
-            # WorkOS token detected but validation failed
-            return None, None
+        # WorkOS token detected but validation failed
+        return None, None
     except ImportError:
-        pass  # workos_auth not deployed yet — skip silently
-
-    # ── Fall back to Cognito (deprecated — will be removed after full WorkOS migration) ──
-    try:
-        u = cognito.get_user(AccessToken=token)
-        attrs = {a["Name"]: a["Value"] for a in u["UserAttributes"]}
-        return attrs.get("custom:role"), attrs.get("email")
-    except:
+        print("CRITICAL: workos_auth module not available")
         return None, None
 
 def sanitize(value, max_len=200):
@@ -403,22 +418,13 @@ def handler(event, context):
         email_sent    = False
 
         try:
-            cognito.admin_create_user(
-                UserPoolId=POOL_ID, Username=hr_email,
-                TemporaryPassword=temp_password,
-                UserAttributes=[
-                    {"Name": "email",             "Value": hr_email},
-                    {"Name": "email_verified",    "Value": "true"},
-                    {"Name": "given_name",        "Value": hr_first or "HR"},
-                    {"Name": "family_name",       "Value": hr_last  or "Admin"},
-                    {"Name": "custom:role",       "Value": "HR_ADMIN"},
-                    {"Name": "custom:tenantId",   "Value": tenant_id},
-                    {"Name": "custom:tenantName", "Value": name},
-                ],
-                MessageAction="SUPPRESS"
-            )
-            cognito.admin_set_user_password(UserPoolId=POOL_ID, Username=hr_email,
-                Password=temp_password, Permanent=True)
+            _workos_api("POST", "/user_management/users", {
+                "email": hr_email,
+                "password": temp_password,
+                "first_name": hr_first or "HR",
+                "last_name": hr_last or "Admin",
+                "email_verified": True,
+            })
             USERS_T.put_item(Item={
                 "userId": hr_user_id, "tenantId": tenant_id, "email": hr_email,
                 "firstName": hr_first or "HR", "lastName": hr_last or "Admin",
@@ -426,7 +432,7 @@ def handler(event, context):
                 "createdBy": caller_email, "createdAt": now
             })
             hr_created = True
-        except ClientError as ce:
+        except Exception as ce:
             # HR admin creation failed — don't fail the tenant, but note it
             print(f"HR_ADMIN_CREATE_ERROR: {ce}")
 
@@ -540,11 +546,10 @@ def handler(event, context):
             UpdateExpression="SET #s = :v, disabledAt = :at, disabledBy = :by",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={":v": "disabled", ":at": now, ":by": caller_email})
-        # Disable all users in this tenant in Cognito
+        # Deactivate all users in this tenant (DynamoDB status controls login)
         all_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("status").eq("active"))
         for u in all_users:
             try:
-                cognito.admin_disable_user(UserPoolId=POOL_ID, Username=u["email"])
                 USERS_T.update_item(Key={"userId": u["userId"]},
                     UpdateExpression="SET #s = :v",
                     ExpressionAttributeNames={"#s": "status"},
@@ -569,12 +574,11 @@ def handler(event, context):
             UpdateExpression="SET #s = :v, reactivatedAt = :at, reactivatedBy = :by",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
-        # Re-enable all users in Cognito
+        # Re-activate all users in DynamoDB (status controls login)
         all_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id))
         reactivated = 0
         for u in all_users:
             try:
-                cognito.admin_enable_user(UserPoolId=POOL_ID, Username=u["email"])
                 USERS_T.update_item(Key={"userId": u["userId"]},
                     UpdateExpression="SET #s = :v",
                     ExpressionAttributeNames={"#s": "status"},
@@ -666,29 +670,22 @@ def handler(event, context):
             tenant_name = t.get("name", "")
 
         try:
-            cognito.admin_create_user(
-                UserPoolId=POOL_ID, Username=email,
-                TemporaryPassword=password,
-                UserAttributes=[
-                    {"Name": "email",             "Value": email},
-                    {"Name": "email_verified",    "Value": "true"},
-                    {"Name": "given_name",        "Value": first},
-                    {"Name": "family_name",       "Value": last},
-                    {"Name": "custom:role",       "Value": user_role},
-                    {"Name": "custom:tenantId",   "Value": tenant_id},
-                    {"Name": "custom:tenantName", "Value": tenant_name},
-                ],
-                MessageAction="SUPPRESS"
-            )
-            cognito.admin_set_user_password(UserPoolId=POOL_ID, Username=email, Password=password, Permanent=True)
-        except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code == "UsernameExistsException":
+            workos_user = _workos_api("POST", "/user_management/users", {
+                "email": email,
+                "password": password,
+                "first_name": first,
+                "last_name": last,
+                "email_verified": True,
+            })
+        except Exception as e:
+            msg = str(e)
+            if "already exists" in msg.lower() or "duplicate" in msg.lower():
                 return err(409, f"User {email} already exists")
-            if code == "InvalidPasswordException":
-                return err(400, "Password does not meet Cognito policy requirements")
-            return err(400, str(e.response["Error"]["Message"]))
+            if "password" in msg.lower():
+                return err(400, "Password does not meet policy requirements")
+            return err(400, f"WorkOS user creation failed: {msg}")
 
+        workos_user_id = workos_user.get("id", "")
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         try:
@@ -696,11 +693,13 @@ def handler(event, context):
                 "userId": user_id, "tenantId": tenant_id, "email": email,
                 "firstName": first, "lastName": last, "role": user_role,
                 "status": "active", "department": department, "jobTitle": job_title,
+                "workosUserId": workos_user_id,
                 "createdBy": caller_email, "createdAt": now
             })
         except Exception as e:
+            # DynamoDB write failed — clean up WorkOS user to avoid orphan
             try:
-                cognito.admin_delete_user(UserPoolId=POOL_ID, Username=email)
+                _workos_api("DELETE", f"/user_management/users/{workos_user_id}")
             except Exception:
                 pass
             return err(500, f"Failed to save user record: {str(e)}")
@@ -741,12 +740,6 @@ def handler(event, context):
         vals  = {f":{k}": v for k, v in updates.items()}
         USERS_T.update_item(Key={"userId": user_id}, UpdateExpression=expr,
             ExpressionAttributeNames=names, ExpressionAttributeValues=vals)
-        if "role" in updates:
-            try:
-                cognito.admin_update_user_attributes(UserPoolId=POOL_ID, Username=item["email"],
-                    UserAttributes=[{"Name": "custom:role", "Value": updates["role"]}])
-            except:
-                pass
         audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_UPDATED",
               f"Updated user: {item['email']} fields: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "User updated"})
@@ -764,10 +757,6 @@ def handler(event, context):
         if item.get("status") == "inactive":
             return err(400, "User is already inactive")
         email = item.get("email", "")
-        try:
-            cognito.admin_disable_user(UserPoolId=POOL_ID, Username=email)
-        except ClientError as e:
-            return err(400, f"Deactivation failed: {e.response['Error']['Message']}")
         now = datetime.now(timezone.utc).isoformat()
         USERS_T.update_item(Key={"userId": user_id},
             UpdateExpression="SET #s = :v, deactivatedAt = :at, deactivatedBy = :by",
@@ -786,10 +775,6 @@ def handler(event, context):
         if item.get("status") == "active":
             return err(400, "User is already active")
         email = item.get("email", "")
-        try:
-            cognito.admin_enable_user(UserPoolId=POOL_ID, Username=email)
-        except ClientError as e:
-            return err(400, f"Reactivation failed: {e.response['Error']['Message']}")
         now = datetime.now(timezone.utc).isoformat()
         USERS_T.update_item(Key={"userId": user_id},
             UpdateExpression="SET #s = :v, reactivatedAt = :at, reactivatedBy = :by",
@@ -806,10 +791,6 @@ def handler(event, context):
         if not item:
             return err(404, "User not found")
         email = item.get("email", "")
-        try:
-            cognito.admin_disable_user(UserPoolId=POOL_ID, Username=email)
-        except ClientError as e:
-            return err(400, f"Lock failed: {e.response['Error']['Message']}")
         USERS_T.update_item(Key={"userId": user_id},
             UpdateExpression="SET #s = :v",
             ExpressionAttributeNames={"#s": "status"},
@@ -824,10 +805,6 @@ def handler(event, context):
         if not item:
             return err(404, "User not found")
         email = item.get("email", "")
-        try:
-            cognito.admin_enable_user(UserPoolId=POOL_ID, Username=email)
-        except ClientError as e:
-            return err(400, f"Unlock failed: {e.response['Error']['Message']}")
         USERS_T.update_item(Key={"userId": user_id},
             UpdateExpression="SET #s = :v",
             ExpressionAttributeNames={"#s": "status"},
@@ -843,11 +820,24 @@ def handler(event, context):
             return err(404, "User not found")
         email = item.get("email", "")
         new_password = body.get("password") or f"Reset@{str(uuid.uuid4())[:8]}!"
+        # Find the WorkOS user by email to get workos user id
+        workos_uid = item.get("workosUserId", "")
+        if not workos_uid:
+            try:
+                search_resp = _workos_api("GET", f"/user_management/users?email={email}")
+                wk_users = search_resp.get("data", [])
+                if wk_users:
+                    workos_uid = wk_users[0].get("id", "")
+            except Exception:
+                pass
+        if not workos_uid:
+            return err(400, f"Cannot reset password: WorkOS user not found for {email}")
         try:
-            cognito.admin_set_user_password(UserPoolId=POOL_ID, Username=email,
-                Password=new_password, Permanent=True)
-        except ClientError as e:
-            return err(400, f"Password reset failed: {e.response['Error']['Message']}")
+            _workos_api("PUT", f"/user_management/users/{workos_uid}", {
+                "password": new_password,
+            })
+        except Exception as e:
+            return err(400, f"Password reset failed: {str(e)}")
         audit(item.get("tenantId", "SYSTEM"), caller_email, "PASSWORD_RESET",
               f"Reset password for: {email}", ip=ip, device=device)
         return resp(200, {"message": f"Password reset for {email}", "new_password": new_password})
@@ -890,28 +880,20 @@ def handler(event, context):
         temp_password = f"Invite@{str(uuid.uuid4())[:8]}!"
 
         try:
-            cognito.admin_create_user(
-                UserPoolId=POOL_ID, Username=email,
-                TemporaryPassword=temp_password,
-                UserAttributes=[
-                    {"Name": "email",             "Value": email},
-                    {"Name": "email_verified",    "Value": "true"},
-                    {"Name": "given_name",        "Value": first},
-                    {"Name": "family_name",       "Value": last},
-                    {"Name": "custom:role",       "Value": user_role},
-                    {"Name": "custom:tenantId",   "Value": tenant_id},
-                    {"Name": "custom:tenantName", "Value": tenant_name},
-                ],
-                MessageAction="SUPPRESS"
-            )
-            cognito.admin_set_user_password(UserPoolId=POOL_ID, Username=email,
-                Password=temp_password, Permanent=True)
-        except ClientError as e:
-            code = e.response["Error"]["Code"]
-            if code == "UsernameExistsException":
-                return err(409, f"User {email} already exists in Cognito")
-            return err(400, str(e.response["Error"]["Message"]))
+            workos_user = _workos_api("POST", "/user_management/users", {
+                "email": email,
+                "password": temp_password,
+                "first_name": first,
+                "last_name": last,
+                "email_verified": True,
+            })
+        except Exception as e:
+            msg = str(e)
+            if "already exists" in msg.lower() or "duplicate" in msg.lower():
+                return err(409, f"User {email} already exists")
+            return err(400, f"WorkOS user creation failed: {msg}")
 
+        workos_user_id = workos_user.get("id", "")
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         try:
@@ -919,12 +901,13 @@ def handler(event, context):
                 "userId": user_id, "tenantId": tenant_id, "email": email,
                 "firstName": first, "lastName": last, "role": user_role,
                 "status": "pending", "inviteToken": invite_token,
+                "workosUserId": workos_user_id,
                 "createdBy": caller_email, "createdAt": now
             })
         except Exception as e:
-            # DynamoDB write failed — clean up Cognito user to avoid orphan
+            # DynamoDB write failed — clean up WorkOS user to avoid orphan
             try:
-                cognito.admin_delete_user(UserPoolId=POOL_ID, Username=email)
+                _workos_api("DELETE", f"/user_management/users/{workos_user_id}")
             except Exception:
                 pass
             return err(500, f"Failed to save user record: {str(e)}")
@@ -996,27 +979,27 @@ def handler(event, context):
     # ── GET /api/admin/health ─────────────────────────────────────────────
     if path.endswith("/health") and method == "GET":
         dynamo_ok  = "ok"
-        cognito_ok = "ok"
+        workos_ok  = "ok"
         ses_ok     = "ok"
         try:
             USERS_T.scan(Limit=1, Select="COUNT")
         except:
             dynamo_ok = "error"
         try:
-            cognito.describe_user_pool(UserPoolId=POOL_ID)
+            _workos_api("GET", "/user_management/users?limit=1")
         except:
-            cognito_ok = "error"
+            workos_ok = "error"
         try:
             ses.get_send_quota()
         except:
             ses_ok = "error"
-        overall = "healthy" if dynamo_ok == "ok" and cognito_ok == "ok" else "degraded"
+        overall = "healthy" if dynamo_ok == "ok" and workos_ok == "ok" else "degraded"
         return resp(200, {
             "status": overall,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "services": {
                 "dynamodb": dynamo_ok,
-                "cognito":  cognito_ok,
+                "workos":   workos_ok,
                 "ses":      ses_ok,
                 "lambda":   "ok",
                 "api_gateway": "ok"

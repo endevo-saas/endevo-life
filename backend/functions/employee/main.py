@@ -6,10 +6,8 @@ import json, os, uuid, boto3
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
 
-POOL_ID  = os.environ.get("COGNITO_POOL_ID", "us-east-1_DVyEJqgFt")
 REGION   = os.environ.get("AWS_REGION", "us-east-1")
 dynamo   = boto3.resource("dynamodb", region_name=REGION)
-cognito  = boto3.client("cognito-idp", region_name=REGION)
 USERS_T  = dynamo.Table("endevo-uat-users")
 TRAIN_T  = dynamo.Table("endevo-uat-training")
 PROG_T   = dynamo.Table("endevo-uat-video-progress")
@@ -40,7 +38,7 @@ def get_body(event):
     except: return {}
 
 def get_caller(event):
-    """Extract (tenantId, email, userId) from Bearer token. WorkOS primary, Cognito fallback."""
+    """Extract (tenantId, email, userId) from Bearer token via WorkOS."""
     token = (event.get("headers") or {}).get("authorization", "").replace("Bearer ", "")
     if not token:
         return None, None, None
@@ -70,13 +68,8 @@ def get_caller(event):
     except ImportError:
         pass  # workos_auth not deployed yet — skip silently
 
-    # ── Fall back to Cognito (deprecated — will be removed after full WorkOS migration) ──
-    try:
-        u = cognito.get_user(AccessToken=token)
-        attrs = {a["Name"]: a["Value"] for a in u["UserAttributes"]}
-        return attrs.get("custom:tenantId"), attrs.get("email"), attrs.get("sub", "")
-    except:
-        return None, None, None
+    # No valid auth path succeeded
+    return None, None, None
 
 def handler(event, context):
     global _current_event
