@@ -164,17 +164,19 @@ def handler(event, context):
 
     # GET /api/employee/assessment/{courseId}
     if "/assessment/" in path and method == "GET":
+        from boto3.dynamodb.conditions import Attr as _Attr
         course_id = path.split("/")[-1]
-        questions = QUEST_T.scan(FilterExpression="tenantId = :t AND courseId = :c", ExpressionAttributeValues={":t": tenant_id, ":c": course_id})
+        questions = QUEST_T.scan(FilterExpression=_Attr("tenantId").eq(tenant_id) & _Attr("courseId").eq(course_id))
         qs = [{k: v for k, v in q.items() if k != "correctAnswer"} for q in questions.get("Items", [])]
         return resp(200, {"questions": qs, "count": len(qs)})
 
     # POST /api/employee/assessment/{courseId}/submit
     if "/assessment/" in path and path.endswith("/submit") and method == "POST":
+        from boto3.dynamodb.conditions import Attr as _Attr
         parts = path.split("/")
         course_id = parts[-2]
         answers = body.get("answers", {})
-        questions = QUEST_T.scan(FilterExpression="tenantId = :t AND courseId = :c", ExpressionAttributeValues={":t": tenant_id, ":c": course_id})
+        questions = QUEST_T.scan(FilterExpression=_Attr("tenantId").eq(tenant_id) & _Attr("courseId").eq(course_id))
         qs = questions.get("Items", [])
         if not qs: return err(404, "Assessment not found")
         correct = sum(1 for q in qs if answers.get(q["questionId"]) == q.get("correctAnswer"))
@@ -199,7 +201,8 @@ def handler(event, context):
 
     # GET /api/employee/certificates
     if path.endswith("/certificates") and method == "GET":
-        certs = CERT_T.scan(FilterExpression="userId = :u AND tenantId = :t", ExpressionAttributeValues={":u": user_sub, ":t": tenant_id})
+        from boto3.dynamodb.conditions import Attr as _Attr
+        certs = CERT_T.scan(FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id))
         return resp(200, {"certificates": certs.get("Items", []), "count": len(certs.get("Items", []))})
 
     return err(404, f"Route not found: {method} {path}")

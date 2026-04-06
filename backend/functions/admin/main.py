@@ -696,9 +696,9 @@ def handler(event, context):
             print(f"WORKOS_CREATE_USER: {e}")
             # User may already exist in WorkOS — look them up
             try:
-                search = _workos_api("GET", f"/user_management/users?email={email}")
-                if search.get("data"):
-                    workos_user_id = search["data"][0].get("id", "")
+                workos_lookup = _workos_api("GET", f"/user_management/users?email={email}")
+                if workos_lookup.get("data"):
+                    workos_user_id = workos_lookup["data"][0].get("id", "")
             except Exception:
                 pass  # Continue without WorkOS ID — DynamoDB is source of truth
         user_id = str(uuid.uuid4())

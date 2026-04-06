@@ -1,6 +1,6 @@
 # Endevo Life — Master Documentation
 > Single source of truth: product vision, architecture, QA results, build status, decisions.
-> **Last Updated:** 2026-03-21 | **Status:** Phase 1 Complete — Paused
+> **Last Updated:** 2026-04-05 | **Status:** Phase 1 Complete — Paused
 
 ---
 
@@ -37,7 +37,7 @@
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| 0 | CDK infra: Cognito, DynamoDB, API Gateway, Lambda, SES, Amplify | ✅ COMPLETE |
+| 0 | CDK infra: WorkOS, DynamoDB, API Gateway, Lambda, SES, Amplify | ✅ COMPLETE |
 | 1 | Auth + all 3 role dashboards + QA | ✅ COMPLETE |
 | 2 | Admin Tenant Detail page + enhanced Users management | 🔴 PAUSED |
 | 3 | Subscription/plan management UI | 🔴 PENDING |
@@ -80,9 +80,10 @@
 ┌──────▼──────────▼──────────▼────────────▼──────────┐
 │              Amazon DynamoDB (8 Tables)             │
 ├────────────────────────────────────────────────────┤
-│          Amazon Cognito User Pool                  │
-│          (us-east-1_DVyEJqgFt)                     │
-│          Client: 4sbv2j6cv7jpp1oi0d16njsej1        │
+│          WorkOS (Auth Provider)                     │
+│          Login: Email → OTP (email + SMS)           │
+│          User Mgmt: WorkOS API + DynamoDB           │
+│          Sessions: DynamoDB (sessionToken field)    │
 └────────────────────────────────────────────────────┘
 ```
 
@@ -96,7 +97,7 @@
 | Lambda | `endevo-uat-fn-admin` | Global admin (all tenants/users) |
 | Lambda | `endevo-uat-fn-hr` | HR admin (own tenant only) |
 | Lambda | `endevo-uat-fn-employee` | Employee (own data only) |
-| Cognito | Pool: `us-east-1_DVyEJqgFt` | Auth, JWT, custom role/tenant attributes |
+| WorkOS | User Management API | Auth (OTP only, no passwords), session tokens stored in DynamoDB |
 | DynamoDB | 8 tables | All application data |
 | SES | Verified domain | Invite emails (sandbox — may go to spam) |
 | IAM | `endevo-uat-lambda-role` | Lambda execution permissions |
@@ -104,13 +105,10 @@
 ### IAM Policy on `endevo-uat-lambda-role`
 ```
 DynamoDB: PutItem, GetItem, UpdateItem, DeleteItem, Scan, Query
-Cognito:  GetUser, AdminCreateUser, AdminSetUserPassword, AdminDeleteUser,
-          AdminDisableUser, AdminEnableUser, AdminUpdateUserAttributes,
-          AdminInitiateAuth, InitiateAuth, ForgotPassword,
-          ConfirmForgotPassword, DescribeUserPool, ListUsers
 SES:      SendEmail, SendRawEmail
 Logs:     CreateLogGroup, CreateLogStream, PutLogEvents
 ```
+> **Note:** Cognito IAM permissions removed. Auth is now handled by WorkOS API (external, not AWS-managed).
 
 ---
 
@@ -144,13 +142,11 @@ Logs:     CreateLogGroup, CreateLogStream, PutLogEvents
 ### `endevo-uat-fn-auth`
 | Method | Route | Description |
 |--------|-------|-------------|
-| POST | `/api/auth/login` | Cognito `initiate_auth` → returns JWT |
-| POST | `/api/auth/register` | Validate invite token → create account |
-| GET | `/api/auth/me` | Returns caller profile from JWT |
-| POST | `/api/auth/forgot-password` | Send Cognito reset code |
-| POST | `/api/auth/reset-password` | Confirm reset with code + new password |
-| POST | `/api/auth/change-password` | Logged-in user changes own password |
-| POST | `/api/auth/mfa` | MFA challenge verification |
+| POST | `/api/auth/login` | Email → WorkOS OTP (email + SMS) → session token |
+| POST | `/api/auth/verify-otp` | Verify OTP code → returns session token |
+| POST | `/api/auth/register` | Validate invite token → create account via WorkOS |
+| GET | `/api/auth/me` | Returns caller profile from session token |
+| POST | `/api/auth/logout` | Invalidate session token in DynamoDB |
 
 ### `endevo-uat-fn-admin` (GLOBAL_ADMIN only)
 | Method | Route | Description |
@@ -164,13 +160,12 @@ Logs:     CreateLogGroup, CreateLogStream, PutLogEvents
 | GET | `/api/admin/users` | All users; optional `?tenantId=` filter |
 | POST | `/api/admin/users` | Create GLOBAL_ADMIN / HR_ADMIN / EMPLOYEE |
 | GET | `/api/admin/users/{id}` | Single user detail |
-| PUT | `/api/admin/users/{id}` | Update user + sync role to Cognito |
-| DELETE | `/api/admin/users/{id}` | Hard delete from Cognito + DynamoDB |
-| POST | `/api/admin/users/{id}/lock` | `admin_disable_user` → status=locked |
-| POST | `/api/admin/users/{id}/unlock` | `admin_enable_user` → status=active |
-| POST | `/api/admin/users/{id}/reset-password` | Generate + set new temp password |
+| PUT | `/api/admin/users/{id}` | Update user in WorkOS + DynamoDB |
+| DELETE | `/api/admin/users/{id}` | Hard delete from WorkOS + DynamoDB |
+| POST | `/api/admin/users/{id}/lock` | Disable user in WorkOS → status=locked |
+| POST | `/api/admin/users/{id}/unlock` | Enable user in WorkOS → status=active |
 | GET | `/api/admin/audit` | Global audit log (all tenants, last 200) |
-| GET | `/api/admin/health` | Live probe: DynamoDB + Cognito status |
+| GET | `/api/admin/health` | Live probe: DynamoDB + WorkOS status |
 
 ### `endevo-uat-fn-hr` (HR_ADMIN — own tenant only)
 | Method | Route | Description |
@@ -205,7 +200,7 @@ Logs:     CreateLogGroup, CreateLogStream, PutLogEvents
 | Language | TypeScript |
 | Styling | Tailwind CSS |
 | Forms | react-hook-form + Zod |
-| Auth state | js-cookie (`access_token`, `user_role`) |
+| Auth state | js-cookie (`session_token`, `user_role`) |
 | API client | `apps/web/lib/api.ts` (shared, typed) |
 | Package mgr | pnpm (monorepo + Turborepo) |
 | Hosting | AWS Amplify (GitHub push → auto-deploy) |
@@ -225,7 +220,7 @@ apps/web/app/
 │       ├── tenants/[id]/   ← 🔴 PENDING: drill-down with employees + plan
 │       ├── users/          ← all users across tenants
 │       ├── audit/          ← global audit log with search
-│       └── health/         ← DynamoDB + Cognito + Lambda status
+│       └── health/         ← DynamoDB + WorkOS + Lambda status
 ├── (hr-admin)/
 │   ├── layout.tsx          ← sidebar: Dashboard, Employees, Invite, Audit
 │   └── hr/
@@ -248,21 +243,26 @@ apps/web/app/
 
 ## 7. Authentication & RBAC
 
-### Login Flow
+### Login Flow (OTP — No Passwords)
 ```
-POST /api/auth/login → Cognito initiate_auth()
-→ Returns JWT (AccessToken)
-→ Lambda decodes: custom:role, custom:tenantId, email
-→ Frontend stores: js-cookie (access_token, user_role)
+POST /api/auth/login { email }
+→ WorkOS sends OTP via email + SMS
+→ User submits OTP code
+POST /api/auth/verify-otp { email, code }
+→ WorkOS verifies OTP
+→ Lambda creates session token, stores in DynamoDB (sessionToken field)
+→ Returns session token + user profile (role, tenantId)
+→ Frontend stores: js-cookie (session_token, user_role)
 → Redirect: GLOBAL_ADMIN→/admin/dashboard, HR_ADMIN→/hr/dashboard, EMPLOYEE→/employee/dashboard
 ```
 
 ### Per-Request RBAC (every Lambda)
-1. Extract `Authorization: Bearer <token>` header
-2. Call `cognito.get_user(AccessToken=token)` — validates token, gets attributes
-3. Check `custom:role` matches required role
-4. 401 if no token, 403 if wrong role
-5. Extract `custom:tenantId` for data isolation
+1. Extract `Authorization: Bearer <sessionToken>` header
+2. Look up session token in DynamoDB `endevo-uat-users` table (`sessionToken` field)
+3. Validate session is active and not expired
+4. Check `role` matches required role
+5. 401 if no token or expired session, 403 if wrong role
+6. Extract `tenantId` for data isolation
 
 ### Multi-Tenant Isolation
 - HR_ADMIN: all queries filtered by `tenantId` from JWT
@@ -310,12 +310,14 @@ POST /api/auth/login → Cognito initiate_auth()
 
 ## 9. Test Credentials (UAT Only)
 
-| Role | Email | Password |
-|------|-------|----------|
-| GLOBAL_ADMIN | admin@endevo.com | Admin@2026! |
-| HR_ADMIN (Acme) | hr@acme.com | HRAdmin@2026! |
-| HR_ADMIN (TechVision) | hr@techvision.com | HRAdmin@2026! |
-| EMPLOYEE (Acme) | ava.anderson@acme.com | Employee@2026! |
+| Role | Email | Auth Method |
+|------|-------|-------------|
+| GLOBAL_ADMIN | admin@endevo.com | OTP (email + SMS) |
+| HR_ADMIN (Acme) | hr@acme.com | OTP (email + SMS) |
+| HR_ADMIN (TechVision) | hr@techvision.com | OTP (email + SMS) |
+| EMPLOYEE (Acme) | ava.anderson@acme.com | OTP (email + SMS) |
+
+> **No passwords.** All accounts authenticate via WorkOS OTP only.
 
 ---
 
@@ -366,7 +368,7 @@ Full tenant drill-down, subscription billing, employee progress analytics, HR bu
 | Stripe | Subscription billing ($10k setup + $10/seat/month) |
 | BambooHR / Workday | Employee sync |
 | Slack / Microsoft Teams | Bot notifications + course reminders |
-| Google Workspace / Azure AD | SSO via Cognito OIDC/SAML |
+| Google Workspace / Azure AD | SSO via WorkOS OIDC/SAML |
 | Salesforce | CRM deal → auto-provision tenant |
 | DocuSign | Digital will / legacy document signing |
 | LinkedIn | Certificate share + profile update |
@@ -400,10 +402,10 @@ Full tenant drill-down, subscription billing, employee progress analytics, HR bu
 |----------|-----------|
 | **Pure boto3 (no pip)** | Single `main.py` file per Lambda — no zip layers, faster iteration, simpler deployments |
 | **DynamoDB over RDS** | Serverless, no connection pooling, auto-scales, cheaper at low volume; can add Aurora later for analytics |
-| **Cognito custom attributes** | `custom:role` + `custom:tenantId` in JWT — zero extra DB lookup per request; RBAC enforced at the token level |
+| **WorkOS OTP auth (no passwords)** | OTP via email + SMS — no password management, no credential resets; session tokens in DynamoDB for stateless Lambda validation |
 | **HTTP API Gateway** | Cheaper and faster than REST API Gateway for simple Lambda proxy routing (~71% cost reduction) |
 | **Next.js 15 App Router** | Route groups give clean per-role layouts; Suspense boundaries handle CSR bailout for `useSearchParams` |
-| **js-cookie for tokens** | Acceptable for UAT phase; switch to httpOnly cookies before production for XSS protection |
+| **js-cookie for session tokens** | Acceptable for UAT phase; switch to httpOnly cookies before production for XSS protection |
 | **Amplify for hosting** | Zero DevOps — GitHub push → live site, built-in SSL/CDN, no Docker needed |
 | **Soft delete on tenants** | Set `status=deleted` instead of hard delete — preserves audit history and data for billing/legal |
 | **Audit composite key** | `tenantId` (hash) + `sk = timestamp#uuid` (range) — enables efficient per-tenant queries AND global scans |

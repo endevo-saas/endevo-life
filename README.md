@@ -95,9 +95,15 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 │                                                                      │
 │   Server-side encryption │ On-demand capacity │ Per-tenant isolation  │
 ├──────────────────────────────────────────────────────────────────────┤
-│                  Amazon Cognito User Pool                             │
-│   Pool: us-east-1_DVyEJqgFt │ JWT with custom:role + custom:tenantId │
-│   MFA support │ Email OTP for Global Admin │ Brute-force protection  │
+│                  WorkOS — Authentication & SSO                        │
+│   Email + SMS OTP │ JWT with custom:role + custom:tenantId            │
+│   Enterprise SSO ready │ Brute-force protection                      │
+├──────────────────────────────────────────────────────────────────────┤
+│                  Amazon SES — Email OTP Delivery                      │
+│   OTP codes via email │ Transactional emails │ Verified domain        │
+├──────────────────────────────────────────────────────────────────────┤
+│                  Amazon SNS — SMS OTP Delivery                        │
+│   OTP codes via SMS │ Multi-region delivery │ Opt-out management      │
 ├──────────────────────────────────────────────────────────────────────┤
 │                  Amazon S3 — LMS Content Storage                     │
 │   Video lectures │ PDF documents │ Podcast audio │ Presigned URLs    │
@@ -106,7 +112,7 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 │   Edge caching for video/PDF │ HTTPS-only │ Geographic distribution  │
 ├──────────────────────────────────────────────────────────────────────┤
 │                  Amazon SES — Transactional Email                     │
-│   Employee invite emails │ Password resets │ Verified domain          │
+│   Employee invite emails │ Email OTP delivery │ Verified domain       │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -116,11 +122,12 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 |---------|-------------------|
 | **DynamoDB** over RDS/Aurora | Serverless, zero connection pooling overhead, auto-scales to zero, cheaper at low volume. Single-digit millisecond reads. Aurora planned for analytics workloads in Phase 6. |
 | **HTTP API Gateway** over REST API | 71% cost reduction for Lambda proxy routing. No need for request/response transformation, API keys, or usage plans at this stage. |
-| **Cognito** over Auth0/Firebase Auth | Native AWS integration, custom attributes in JWT (role + tenantId = zero extra DB lookups per request), HIPAA-eligible, no vendor lock-in outside AWS. |
+| **WorkOS** over Cognito/Auth0/Firebase Auth | Enterprise SSO ready, Email + SMS OTP passwordless auth, custom claims in JWT (role + tenantId = zero extra DB lookups per request), no Cognito rate-limit ceiling, scales beyond 40 req/s. |
 | **Amplify** over Vercel/Netlify | Same ecosystem, Git-push deploy, built-in SSL/CDN, no Docker, no Kubernetes. Zero DevOps for the frontend. |
 | **CloudFront** over direct S3 | Edge caching for video content, HTTPS enforcement, geographic distribution. S3 presigned URLs for zero-trust PDF access. |
 | **Lambda** over ECS/Fargate | Pure functions with no framework overhead. Single `main.py` per function — no pip dependencies, no Docker, sub-second cold starts. |
-| **SES** over SendGrid/Mailgun | Native AWS, cost-effective at scale, no additional vendor relationship. Moving out of sandbox before production launch. |
+| **SES** over SendGrid/Mailgun | Native AWS, cost-effective at scale, delivers Email OTP codes and invite emails. Moving out of sandbox before production launch. |
+| **SNS** over Twilio | Native AWS, delivers SMS OTP codes, no additional vendor for passwordless auth. |
 | **CDK** over Terraform/CloudFormation YAML | TypeScript type safety, component reuse, IDE autocomplete. 8 stacks that compose cleanly. |
 
 ---
@@ -136,12 +143,13 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 | **Backend Runtime** | Python | 3.12 | Lambda function implementation | Team expertise, boto3 native support, fast iteration. No framework (Flask/Django) — raw Lambda handlers for minimal cold start |
 | **Backend Dependencies** | boto3 (built-in) | Lambda runtime | AWS SDK | Zero pip dependencies. Every Lambda is a single `main.py` file — no layers, no Docker, no zip complexity |
 | **Database** | Amazon DynamoDB | On-demand | All application data (13 tables) | Serverless NoSQL, auto-scales, per-tenant partition isolation via hash keys |
-| **Authentication** | Amazon Cognito | User Pool v1 | JWT-based auth with custom claims | `custom:role` + `custom:tenantId` embedded in JWT — zero database lookups for authorization |
+| **Authentication** | WorkOS | Latest | Email + SMS OTP passwordless auth with custom claims | `custom:role` + `custom:tenantId` embedded in JWT — zero database lookups for authorization |
 | **API Layer** | Amazon API Gateway | HTTP API | Single entry point, Lambda proxy | Routes to 5 Lambda functions by path prefix. 71% cheaper than REST API Gateway |
 | **Frontend Hosting** | AWS Amplify | Gen 1 | Git-push auto-deploy with SSL/CDN | GitHub webhook triggers build on push to `main`. Live in ~3 minutes |
 | **CDN** | Amazon CloudFront | Latest | Video and PDF content delivery | Edge caching for LMS media, HTTPS-only, geographic distribution |
 | **Object Storage** | Amazon S3 | Standard | LMS media files (video, PDF, podcast) | Presigned URLs for zero-trust access. Lifecycle policies for cost optimization |
-| **Email** | Amazon SES | v2 | Invite emails and password resets | Native AWS, no additional vendor. Sandbox mode for UAT |
+| **Email** | Amazon SES | v2 | Invite emails and Email OTP delivery | Native AWS, no additional vendor. Sandbox mode for UAT |
+| **SMS** | Amazon SNS | Latest | SMS OTP delivery for passwordless auth | Native AWS, multi-region delivery |
 | **Infrastructure** | AWS CDK | 2.130+ | 8 CloudFormation stacks | TypeScript IaC with type safety, component reuse, and IDE support |
 | **Monorepo** | pnpm + Turborepo | 9+ / Latest | Workspace management | Shared configs, parallel builds, single lockfile |
 | **CI/CD** | GitHub Actions + Amplify | Latest | Automated deploys | Lambda: GitHub Actions zips and deploys. Frontend: Amplify auto-deploy on push |
@@ -176,19 +184,19 @@ Content follows a fallback pattern: the LMS engine first queries for `tenantId`-
 
 ## API Surface
 
-81 endpoints across 5 Lambda functions. Every endpoint requires a valid JWT Bearer token. Role enforcement happens per-request via Cognito `get_user()`.
+81 endpoints across 5 Lambda functions. Every endpoint requires a valid JWT Bearer token. Role enforcement happens per-request via WorkOS JWT validation.
 
 ### Auth Service — `endevo-uat-fn-auth` (7 endpoints)
 
 | Method | Route | Description |
 |--------|-------|-------------|
-| POST | `/api/auth/login` | Cognito `initiate_auth` — returns JWT access token |
-| POST | `/api/auth/verify-otp` | Email OTP verification (Global Admin only) |
+| POST | `/api/auth/login` | Send Email + SMS OTP code via WorkOS — passwordless login |
+| POST | `/api/auth/verify-otp` | Verify OTP code, returns JWT access token |
 | POST | `/api/auth/signup` | Self-registration with invite validation |
 | GET | `/api/auth/me` | Current user profile from JWT claims |
-| POST | `/api/auth/forgot-password` | Cognito password reset code via email |
-| POST | `/api/auth/reset-password` | Confirm reset with code + new password |
-| POST | `/api/auth/change-password` | Authenticated password change |
+| POST | `/api/auth/resend-otp` | Resend OTP code via Email or SMS |
+| POST | `/api/auth/logout` | Invalidate session |
+| POST | `/api/auth/change-password` | Authenticated password change (legacy, OTP-first) |
 
 ### Admin Service — `endevo-uat-fn-admin` (24 endpoints)
 
@@ -384,12 +392,11 @@ Every API request follows this validation chain:
 ```
 Request with Bearer token
   → API Gateway passes to Lambda
-    → Lambda calls Cognito get_user(AccessToken)
-      → Cognito validates token signature + expiry
-        → Lambda extracts custom:role + custom:tenantId
-          → Role checked against route requirements
-            → tenantId injected into all database queries
-              → Audit log written with IP, user agent, severity
+    → Lambda validates WorkOS JWT (signature + expiry)
+      → Lambda extracts custom:role + custom:tenantId from claims
+        → Role checked against route requirements
+          → tenantId injected into all database queries
+            → Audit log written with IP, user agent, severity
 ```
 
 No database lookup is required for authorization — role and tenant are embedded in the JWT itself.
@@ -406,20 +413,19 @@ No database lookup is required for authorization — role and tenant are embedde
 | **Zero-Trust PDF Access** | S3 presigned URLs with expiration for document downloads | Active |
 | **Input Sanitization** | HTML tags stripped via regex, forbidden characters rejected at boundary | Active |
 | **Parameterized Queries** | DynamoDB operations use conditions objects, never string concatenation | Active |
-| **Email OTP** | Additional verification layer for Global Admin login | Active |
-| **MFA Support** | Cognito TOTP authenticator app support | Active |
+| **Email + SMS OTP** | Passwordless authentication for all roles via WorkOS | Active |
 | **Audit Trail** | Every action logged: timestamp, IP address, user agent, severity, actor | Active |
 | **Soft Delete** | Tenants are disabled, not deleted — preserves audit history for compliance | Active |
 
-### Cognito Configuration
+### WorkOS Configuration
 
 | Setting | Value |
 |---------|-------|
-| User Pool ID | `us-east-1_DVyEJqgFt` |
-| Custom Attributes | `custom:role` (GLOBAL_ADMIN / HR_ADMIN / EMPLOYEE), `custom:tenantId` |
-| Auth Flows | `ALLOW_USER_PASSWORD_AUTH`, `ALLOW_REFRESH_TOKEN_AUTH` |
-| Password Policy | Minimum 8 characters, uppercase, lowercase, number, special character |
-| MFA | Optional TOTP (authenticator app) |
+| Auth Method | Email + SMS OTP (passwordless) |
+| Custom Claims | `custom:role` (GLOBAL_ADMIN / HR_ADMIN / EMPLOYEE), `custom:tenantId` |
+| OTP Delivery | SES (email) + SNS (SMS) |
+| Session Management | JWT with configurable expiry |
+| Enterprise SSO | SAML/OIDC ready for Phase 8 |
 
 ### US Data Residency
 
@@ -441,12 +447,12 @@ All data is stored and processed in `us-east-1` (N. Virginia). No data leaves th
 ### How tenantId Flows from JWT to Database
 
 ```
-1. User logs in → Cognito returns JWT with custom:tenantId = "tenant-acme-001"
+1. User logs in via Email/SMS OTP → WorkOS returns JWT with custom:tenantId = "tenant-acme-001"
 
 2. User calls GET /api/hr/employees
    → Lambda extracts token from Authorization header
-   → Lambda calls cognito.get_user(AccessToken=token)
-   → Cognito returns custom:tenantId = "tenant-acme-001"
+   → Lambda validates WorkOS JWT and extracts claims
+   → JWT contains custom:tenantId = "tenant-acme-001"
 
 3. Lambda queries DynamoDB:
    users_table.scan(FilterExpression=Attr('tenantId').eq('tenant-acme-001'))
@@ -516,10 +522,10 @@ Plan tier is stored on the tenant record in `endevo-uat-tenants`. The LMS engine
 
 | Stack | File | Creates |
 |-------|------|---------|
-| **01 — Cognito** | `01-cognito-stack.ts` | User Pool, App Client, custom attributes (role, tenantId), password policy, MFA configuration |
+| **01 — Auth (WorkOS)** | `01-auth-stack.ts` | WorkOS integration config, SES email OTP, SNS SMS OTP, session management |
 | **02 — DynamoDB** | `02-dynamo-stack.ts` | Table definitions (managed separately — stack skipped in deploy to avoid conflicts with existing tables) |
 | **03 — S3** | `03-s3-stack.ts` | Content storage buckets for video, PDF, podcast media files |
-| **04 — IAM** | `04-iam-stack.ts` | Lambda execution role (`endevo-uat-lambda-role`) with least-privilege policies for DynamoDB, Cognito, SES, CloudWatch |
+| **04 — IAM** | `04-iam-stack.ts` | Lambda execution role (`endevo-uat-lambda-role`) with least-privilege policies for DynamoDB, SES, SNS, CloudWatch |
 | **05 — API + Lambda** | `05-api-stack.ts` | API Gateway HTTP API, 5 Lambda function definitions, route integrations |
 | **06 — Amplify** | `06-amplify-stack.ts` | Amplify app connected to GitHub repo, auto-deploy on push to `main` |
 | **07 — CloudFront LMS** | `07-cloudfront-lms-stack.ts` | CloudFront distribution for LMS content delivery (video/PDF CDN) |
@@ -529,11 +535,8 @@ Plan tier is stored on the tenant record in `endevo-uat-tenants`. The LMS engine
 
 ```
 DynamoDB:  PutItem, GetItem, UpdateItem, DeleteItem, Scan, Query
-Cognito:   GetUser, AdminCreateUser, AdminSetUserPassword, AdminDeleteUser,
-           AdminDisableUser, AdminEnableUser, AdminUpdateUserAttributes,
-           AdminInitiateAuth, InitiateAuth, ForgotPassword,
-           ConfirmForgotPassword, DescribeUserPool, ListUsers
-SES:       SendEmail, SendRawEmail
+SES:       SendEmail, SendRawEmail (invite emails + Email OTP)
+SNS:       Publish (SMS OTP delivery)
 Logs:      CreateLogGroup, CreateLogStream, PutLogEvents
 ```
 
@@ -576,7 +579,7 @@ Infrastructure deploys are manual by design — CDK changes affect production re
 | **Lambda** | 256 MB / 30s timeout | 1,000 concurrent executions (default) | Request increase to 10K; provisioned concurrency for predictable loads |
 | **API Gateway** | HTTP API | 10,000 requests/second (default) | Request increase; add caching layer |
 | **Amplify/CloudFront** | Edge-cached | Global CDN, auto-scales | Already distributed — no action needed |
-| **Cognito** | Standard tier | 40 requests/second per operation | Request increase; add caching for `get_user` calls |
+| **WorkOS** | Managed auth | No per-operation rate ceiling | Enterprise SSO, scales with plan tier |
 
 ### Projected Scale
 
@@ -609,7 +612,8 @@ Estimates based on AWS pricing for `us-east-1`, on-demand pricing, no reserved i
 | **S3 Storage** | ~$0.02/mo | ~$0.25/mo | ~$1.15/mo | ~$11.50/mo |
 | **CloudFront** | ~$0.50/mo | ~$42/mo | ~$425/mo | ~$4,250/mo |
 | **Amplify Hosting** | ~$0 (free tier) | ~$15/mo | ~$15/mo | ~$15/mo |
-| **Cognito** | ~$0 (free tier) | ~$0 (first 50K free) | ~$0 (first 50K free) | ~$2,750/mo |
+| **WorkOS** | ~$0 (free tier) | ~$49/mo | ~$49/mo | ~$499/mo |
+| **SNS (SMS OTP)** | ~$0.10/mo | ~$10/mo | ~$100/mo | ~$1,000/mo |
 | **SES** | ~$0.10/mo | ~$1/mo | ~$10/mo | ~$100/mo |
 | **Total Estimated** | **~$2/mo** | **~$68/mo** | **~$556/mo** | **~$8,177/mo** |
 
@@ -634,10 +638,10 @@ Real issues encountered during development and how they were resolved. This sect
 
 | Issue | Impact | Resolution |
 |-------|--------|------------|
-| LMS auth role mismatch — frontend checked `super_admin` but Cognito used `GLOBAL_ADMIN` | 403 for all LMS users | Updated auth checks to match actual Cognito role values |
+| LMS auth role mismatch — frontend checked `super_admin` but JWT used `GLOBAL_ADMIN` | 403 for all LMS users | Updated auth checks to match actual JWT role values |
 | Tenant ID mapping — code queried `endevo-global` but DynamoDB used `SYSTEM` | Global admin saw empty LMS content | Added tenant remapping: `endevo-global` → `SYSTEM` at query time |
-| Cognito auth flows wiped by token update | Login broken for all users | Restored `ALLOW_USER_PASSWORD_AUTH` and `ALLOW_REFRESH_TOKEN_AUTH` |
-| OTP applied to all roles | HR and Employee users could not log in | Restricted OTP to `GLOBAL_ADMIN` only |
+| Cognito → WorkOS migration — removed password-based auth | Required full auth flow rewrite | Migrated to Email + SMS OTP via WorkOS; SES for email OTP, SNS for SMS OTP |
+| OTP delivery reliability — email sometimes delayed | Users unable to log in promptly | Added SMS OTP as fallback channel via SNS |
 
 ### LMS & Content Issues
 
@@ -716,7 +720,7 @@ All 6 module definitions exist in `endevo-uat-lms-modules`. The LMS engine, quiz
 1. **Zero-dependency Lambda architecture** — no framework overhead, sub-second cold starts, single-file deploys
 2. **Four quiz engines** — not just multiple choice; Likert, Open Text, and Checklist are essential for estate planning pedagogy
 3. **Multi-tenant content inheritance** — SYSTEM tenant fallback enables 1,000 organizations to share content with per-tenant overrides
-4. **JWT-embedded RBAC** — zero database lookups for authorization; role + tenant flow from Cognito through every Lambda to DynamoDB
+4. **JWT-embedded RBAC** — zero database lookups for authorization; role + tenant flow from WorkOS through every Lambda to DynamoDB
 5. **13 purpose-built DynamoDB tables** — schema designed for estate planning workflows, not retrofitted from a generic LMS
 
 ---
@@ -725,7 +729,7 @@ All 6 module definitions exist in `endevo-uat-lms-modules`. The LMS engine, quiz
 
 | Phase | Scope | Status |
 |-------|-------|--------|
-| **Phase 0** | Infrastructure — CDK, Cognito, DynamoDB, API Gateway, Lambda, Amplify | Complete |
+| **Phase 0** | Infrastructure — CDK, WorkOS, DynamoDB, API Gateway, Lambda, Amplify | Complete |
 | **Phase 1** | Auth + Role-Based Dashboards + QA (98.6% pass rate, 69 tests) | Complete |
 | **Phase 2** | LMS v2 Engine — Lessons, 4 Quiz Types, Video Player, Progress Tracking | Complete |
 | **Phase 3** | LMS Content — Module 1 (15 lessons), video upload pipeline, cert display | Complete |
@@ -760,7 +764,7 @@ All 6 module definitions exist in `endevo-uat-lms-modules`. The LMS engine, quiz
 | **API Gateway** | https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com |
 | **GitHub Repository** | https://github.com/shahzadms7/endevo-life |
 | **AWS Region** | us-east-1 (N. Virginia) |
-| **Cognito User Pool** | us-east-1_DVyEJqgFt |
+| **Auth Provider** | WorkOS (Email + SMS OTP) |
 | **Amplify App ID** | d1vvfv8oltolcf |
 
 ---
@@ -769,12 +773,12 @@ All 6 module definitions exist in `endevo-uat-lms-modules`. The LMS engine, quiz
 
 | Question | Answer |
 |----------|--------|
-| **What is the tech stack?** | Next.js 15 + Python 3.12 Lambda + DynamoDB + Cognito + CDK — 100% AWS serverless |
+| **What is the tech stack?** | Next.js 15 + Python 3.12 Lambda + DynamoDB + WorkOS + CDK + Amplify — serverless with passwordless auth |
 | **How many engineers built this?** | 1 architect (Shahzad) built the entire platform. 4 additional team members for product, AI, QA, and dev. |
 | **How long has it been in development?** | Started 2026-03-18. 107+ commits in 2 weeks. Phases 0-3 complete. |
 | **Is it in production?** | UAT environment is live. Production launch planned after Phase 4 (UI polish + video content). |
 | **What are the external dependencies?** | Zero pip dependencies on backend. Frontend: Next.js, Tailwind, react-hook-form, Zod, js-cookie. No external SaaS dependencies except AWS. |
-| **How is data isolated between tenants?** | `tenantId` is embedded in the Cognito JWT. Every Lambda extracts it and injects it into every DynamoDB query. QA verified: 0 cross-tenant leaks across 69 test cases. |
+| **How is data isolated between tenants?** | `tenantId` is embedded in the WorkOS JWT. Every Lambda extracts it and injects it into every DynamoDB query. QA verified: 0 cross-tenant leaks across 69 test cases. |
 | **What is the cost to serve 10K users?** | Estimated ~$556/month on AWS (DynamoDB + Lambda + CloudFront + API Gateway). |
 | **What is the revenue model?** | B2B annual subscription: $299/yr (Basic, 2 modules) or $499/yr (Premium, 6 modules) per organization. |
 | **Is there vendor lock-in?** | AWS-only, but standard patterns (DynamoDB → any NoSQL, Lambda → any serverless, Cognito → any OIDC). Migration is straightforward. |
