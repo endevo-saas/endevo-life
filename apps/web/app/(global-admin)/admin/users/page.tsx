@@ -4,13 +4,13 @@ export const dynamic = 'force-dynamic'
 import React, { useEffect, useState } from 'react'
 import {
   Users, Search, Loader2, AlertCircle, RefreshCw, Shield, User,
-  Plus, Pencil, Lock, Unlock, KeyRound, Mail, X, Check,
+  Plus, Pencil, Lock, Unlock, KeyRound, X, Check,
   ChevronDown, Building2, Eye, EyeOff, ToggleLeft, ToggleRight, Download
 } from 'lucide-react'
 import { exportCsv } from '@/lib/export'
 import { api, User as UserType, Tenant } from '@/lib/api'
 
-type Modal = 'create' | 'edit' | 'confirm-toggle' | 'resetpw' | 'invite' | null
+type Modal = 'edit' | 'confirm-toggle' | 'resetpw' | 'invite' | null
 
 const ROLES = ['GLOBAL_ADMIN', 'HR_ADMIN', 'EMPLOYEE']
 const DEPARTMENTS = ['Engineering','HR','Finance','Legal','Operations','Sales','Marketing','Executive','Other']
@@ -56,17 +56,9 @@ export default function AllUsersPage() {
 
   const showSuccess = (msg: string) => { setSuccess(msg); setTimeout(() => setSuccess(''), 4000) }
   const closeModal = () => { setModal(null); setSelected(null); setResetPw(''); setShowPw(false); setError('') }
-  const openCreate = () => { setForm({ email:'',firstName:'',lastName:'',role:'EMPLOYEE',tenantId:'',department:'',jobTitle:'',password:'',phone:'' }); setModal('create') }
   const openEdit = (u: UserType) => { setSelected(u); setForm({ email:u.email,firstName:u.firstName,lastName:u.lastName,role:u.role,tenantId:u.tenantId,department:u.department||'',jobTitle:u.jobTitle||'',password:'',phone:(u as UserType & {phone?:string}).phone||'' }); setModal('edit') }
   const openToggle = (u: UserType) => { setSelected(u); setModal('confirm-toggle') }
-  const openInvite = () => { setInviteForm({ email:'',role:'EMPLOYEE',tenantId:'',firstName:'',lastName:'',phone:'' }); setModal('invite') }
-
-  async function createUser() {
-    setSaving(true); setError('')
-    try { await api.adminCreateUser({ ...form }); closeModal(); showSuccess(`User ${form.email} created`); load() }
-    catch (e: unknown) { setError(e instanceof Error ? e.message : 'Create failed') }
-    finally { setSaving(false) }
-  }
+  const openAddUser = () => { setInviteForm({ email:'',role:'EMPLOYEE',tenantId:'',firstName:'',lastName:'',phone:'' }); setModal('invite') }
 
   async function updateUser() {
     if (!selected) return; setSaving(true); setError('')
@@ -138,8 +130,7 @@ export default function AllUsersPage() {
             ])} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm bg-white/5 text-slate-300 hover:text-white border border-white/10 transition-all">
               <Download className="w-4 h-4"/>CSV
             </button>
-            <button onClick={openInvite} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm bg-white/5 text-slate-300 hover:text-white hover:bg-white/10 border border-white/10 transition-all"><Mail className="w-4 h-4" />Invite by Email</button>
-            <button onClick={openCreate} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm btn-primary"><Plus className="w-4 h-4" />Create User</button>
+            <button onClick={openAddUser} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm btn-primary"><Plus className="w-4 h-4" />Add User</button>
           </div>
         </div>
 
@@ -199,26 +190,6 @@ export default function AllUsersPage() {
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4" onClick={e=>{if(e.target===e.currentTarget)closeModal()}}>
           <div className="glass border border-white/10 rounded-2xl w-full max-w-lg shadow-2xl">
 
-            {modal==='create' && <>
-              <MHdr title="Create User" onClose={closeModal}/>
-              <div className="p-6 space-y-3">
-                {error&&<Err msg={error}/>}
-                <div className="grid grid-cols-2 gap-3"><Fld label="First Name" v={form.firstName} set={v=>setForm(f=>({...f,firstName:v}))} ph="John"/><Fld label="Last Name" v={form.lastName} set={v=>setForm(f=>({...f,lastName:v}))} ph="Doe"/></div>
-                <Fld label="Email *" v={form.email} set={v=>setForm(f=>({...f,email:v}))} ph="john@company.com" t="email"/>
-                <Fld label="Phone" v={form.phone} set={v=>setForm(f=>({...f,phone:v}))} ph="+1..." t="tel"/>
-                <div className="grid grid-cols-2 gap-3">
-                  <Sel label="Role *" v={form.role} set={v=>setForm(f=>({...f,role:v}))}>{ROLES.map(r=><option key={r} value={r}>{r.replace('_',' ')}</option>)}</Sel>
-                  <Sel label="Tenant" v={form.tenantId} set={v=>setForm(f=>({...f,tenantId:v}))}><option value="">— Global Admin —</option>{tenants.map(t=><option key={t.tenantId} value={t.tenantId}>{t.name} ({t.tenantId})</option>)}</Sel>
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <Fld label="Job Title" v={form.jobTitle} set={v=>setForm(f=>({...f,jobTitle:v}))} ph="HR Manager"/>
-                  <Sel label="Department" v={form.department} set={v=>setForm(f=>({...f,department:v}))}><option value="">Select...</option>{DEPARTMENTS.map(d=><option key={d} value={d}>{d}</option>)}</Sel>
-                </div>
-                <Fld label="Password (blank = auto)" v={form.password} set={v=>setForm(f=>({...f,password:v}))} ph="Auto-generated if blank" t="password"/>
-              </div>
-              <MFtr onCancel={closeModal} onOk={createUser} saving={saving} label="Create User"/>
-            </>}
-
             {modal==='edit'&&selected&&<>
               <MHdr title={`Edit: ${selected.email}`} onClose={closeModal}/>
               <div className="p-6 space-y-3">
@@ -266,19 +237,19 @@ export default function AllUsersPage() {
             </>}
 
             {modal==='invite'&&<>
-              <MHdr title="Invite by Email" onClose={closeModal}/>
+              <MHdr title="Add User" onClose={closeModal}/>
               <div className="p-6 space-y-3">
                 {error&&<Err msg={error}/>}
-                <p className="text-slate-400 text-xs">Works with Gmail, Hotmail, corporate, or any email provider.</p>
+                <p className="text-slate-400 text-xs">Enter user details and send an invite. They will complete registration via the link.</p>
                 <Fld label="Email Address *" v={inviteForm.email} set={v=>setInviteForm(f=>({...f,email:v}))} ph="anyone@gmail.com" t="email"/>
-                <Fld label="Phone" v={inviteForm.phone} set={v=>setInviteForm(f=>({...f,phone:v}))} ph="+1..." t="tel"/>
-                <div className="grid grid-cols-2 gap-3"><Fld label="First Name" v={inviteForm.firstName} set={v=>setInviteForm(f=>({...f,firstName:v}))} ph="Optional"/><Fld label="Last Name" v={inviteForm.lastName} set={v=>setInviteForm(f=>({...f,lastName:v}))} ph="Optional"/></div>
+                <div className="grid grid-cols-2 gap-3"><Fld label="First Name" v={inviteForm.firstName} set={v=>setInviteForm(f=>({...f,firstName:v}))} ph="John"/><Fld label="Last Name" v={inviteForm.lastName} set={v=>setInviteForm(f=>({...f,lastName:v}))} ph="Doe"/></div>
+                <Fld label="Phone *" v={inviteForm.phone} set={v=>setInviteForm(f=>({...f,phone:v}))} ph="+1..." t="tel"/>
                 <div className="grid grid-cols-2 gap-3">
                   <Sel label="Role *" v={inviteForm.role} set={v=>setInviteForm(f=>({...f,role:v}))}>{ROLES.map(r=><option key={r} value={r}>{r.replace('_',' ')}</option>)}</Sel>
                   <Sel label="Tenant" v={inviteForm.tenantId} set={v=>setInviteForm(f=>({...f,tenantId:v}))}><option value="">— None —</option>{tenants.map(t=><option key={t.tenantId} value={t.tenantId}>{t.name}</option>)}</Sel>
                 </div>
               </div>
-              <MFtr onCancel={closeModal} onOk={sendInvite} saving={saving} label="Send Invitation" icon={<Mail className="w-4 h-4"/>}/>
+              <MFtr onCancel={closeModal} onOk={sendInvite} saving={saving} label="Send Invitation"/>
             </>}
           </div>
         </div>

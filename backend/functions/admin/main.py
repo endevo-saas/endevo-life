@@ -651,7 +651,6 @@ def handler(event, context):
         department = sanitize(body.get("department") or "", 100)
         job_title  = sanitize(body.get("jobTitle") or body.get("job_title") or "", 100)
         phone      = (body.get("phone") or "").strip()[:20]
-        password   = body.get("password") or f"Endevo@{str(uuid.uuid4())[:8]}!"
 
         if not email:
             return err(400, "Email required")
@@ -663,8 +662,6 @@ def handler(event, context):
             return err(400, "Role must be GLOBAL_ADMIN, HR_ADMIN, or EMPLOYEE")
         if user_role in ("HR_ADMIN", "EMPLOYEE") and not tenant_id:
             return err(400, "tenantId required for HR_ADMIN and EMPLOYEE")
-        if password and len(password) < 8:
-            return err(400, "Password must be at least 8 characters")
 
         # Global admins belong to SYSTEM tenant
         if user_role == "GLOBAL_ADMIN":
@@ -683,10 +680,11 @@ def handler(event, context):
                 return err(404, f"Tenant {tenant_id} not found")
             tenant_name = t.get("name", "")
 
+        invite_token = str(uuid.uuid4())
+
         try:
             workos_user = _workos_api("POST", "/user_management/users", {
                 "email": email,
-                "password": password,
                 "first_name": first,
                 "last_name": last,
                 "email_verified": True,
@@ -695,8 +693,6 @@ def handler(event, context):
             msg = str(e)
             if "already exists" in msg.lower() or "duplicate" in msg.lower():
                 return err(409, f"User {email} already exists")
-            if "password" in msg.lower():
-                return err(400, "Password does not meet policy requirements")
             return err(400, f"WorkOS user creation failed: {msg}")
 
         workos_user_id = workos_user.get("id", "")
@@ -707,7 +703,8 @@ def handler(event, context):
                 "userId": user_id, "tenantId": tenant_id, "email": email,
                 "firstName": first, "lastName": last, "role": user_role,
                 "phone": phone,
-                "status": "active", "department": department, "jobTitle": job_title,
+                "status": "pending", "inviteToken": invite_token,
+                "department": department, "jobTitle": job_title,
                 "workosUserId": workos_user_id,
                 "createdBy": caller_email, "createdAt": now
             })
@@ -718,11 +715,51 @@ def handler(event, context):
             except Exception:
                 pass
             return err(500, f"Failed to save user record: {str(e)}")
+
+        invite_url = f"https://uat.endevo.life/register?token={invite_token}&email={email}"
+        try:
+            ses.send_email(
+                Source="no-reply@endevo.life",
+                Destination={"ToAddresses": [email]},
+                Message={
+                    "Subject": {"Data": f"You're invited to Endevo Life — {tenant_name or 'Platform'}"},
+                    "Body": {"Html": {"Data": f"""
+                        <div style="font-family:sans-serif;max-width:600px;margin:0 auto;padding:32px;background:#0f172a;color:#e2e8f0;border-radius:12px">
+                          <div style="text-align:center;margin-bottom:24px">
+                            <h1 style="color:#818cf8;font-size:26px;margin:0">Endevo Life</h1>
+                            <p style="color:#64748b;font-size:13px;margin:4px 0 0">Digital Legacy & Estate Planning</p>
+                          </div>
+                          <h2 style="color:#e2e8f0;font-size:20px">You've been invited!</h2>
+                          <p style="color:#94a3b8">You've been added as <strong style="color:#fff">{user_role.replace('_',' ')}</strong>{(' at <strong style="color:#fff">' + tenant_name + '</strong>') if tenant_name else ' to the Endevo Life platform'}.</p>
+                          <div style="background:#1e293b;border-radius:8px;padding:16px;margin:20px 0;border-left:4px solid #6366f1">
+                            <p style="margin:0;color:#64748b;font-size:12px">Your role:</p>
+                            <p style="margin:4px 0 0;color:#e2e8f0;font-weight:600">{user_role.replace('_',' ')}</p>
+                            {('<p style="margin:4px 0 0;color:#64748b;font-size:12px">Organisation: <span style="color:#e2e8f0">' + tenant_name + '</span></p>') if tenant_name else ''}
+                          </div>
+                          <p style="color:#94a3b8;font-size:14px">Complete your account setup — no password needed, you'll login with a secure OTP code:</p>
+                          <div style="text-align:center;margin:28px 0">
+                            <a href="{invite_url}" style="display:inline-block;padding:16px 36px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:16px">
+                              Complete Account Setup &rarr;
+                            </a>
+                          </div>
+                          <p style="color:#475569;font-size:12px;text-align:center">This link is personal to you. Click it once to complete your account setup.</p>
+                          <p style="color:#334155;font-size:11px;margin-top:24px;border-top:1px solid #1e293b;padding-top:16px;text-align:center">
+                            Questions? <a href="mailto:support@endevo.life" style="color:#818cf8">support@endevo.life</a>
+                          </p>
+                        </div>"""}}
+                }
+            )
+            email_sent = True
+        except Exception as e:
+            print(f"SES_ERROR: {e}")
+            email_sent = False
+
         audit(tenant_id or "SYSTEM", caller_email, "USER_CREATED",
-              f"Created {user_role}: {email} (tenant: {tenant_name or 'SYSTEM'})", ip=ip, device=device)
+              f"Created & invited {user_role}: {email} (tenant: {tenant_name or 'SYSTEM'})", ip=ip, device=device)
         return resp(200, {
-            "message": "User created", "user_id": user_id,
-            "email": email, "role": user_role, "password_set": True
+            "message": f"User created and invitation sent to {email}",
+            "user_id": user_id, "email": email, "role": user_role,
+            "email_sent": email_sent, "invite_url": invite_url
         })
 
     # ── GET /api/admin/users/{id} ─────────────────────────────────────────
@@ -895,12 +932,10 @@ def handler(event, context):
             tenant_name = t.get("name", "")
 
         invite_token  = str(uuid.uuid4())
-        temp_password = f"Invite@{str(uuid.uuid4())[:8]}!"
 
         try:
             workos_user = _workos_api("POST", "/user_management/users", {
                 "email": email,
-                "password": temp_password,
                 "first_name": first,
                 "last_name": last,
                 "email_verified": True,
@@ -951,13 +986,13 @@ def handler(event, context):
                             <p style="margin:4px 0 0;color:#e2e8f0;font-weight:600">{user_role.replace('_',' ')}</p>
                             {('<p style="margin:4px 0 0;color:#64748b;font-size:12px">Organisation: <span style="color:#e2e8f0">' + tenant_name + '</span></p>') if tenant_name else ''}
                           </div>
-                          <p style="color:#94a3b8;font-size:14px">Click below to accept your invitation and create your own secure password:</p>
+                          <p style="color:#94a3b8;font-size:14px">Complete your account setup — no password needed, you'll login with a secure OTP code:</p>
                           <div style="text-align:center;margin:28px 0">
                             <a href="{invite_url}" style="display:inline-block;padding:16px 36px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:16px">
-                              Accept Invitation &rarr;
+                              Complete Account Setup &rarr;
                             </a>
                           </div>
-                          <p style="color:#475569;font-size:12px;text-align:center">This link is personal to you. Click it once to set your password and activate your account.</p>
+                          <p style="color:#475569;font-size:12px;text-align:center">This link is personal to you. Click it once to complete your account setup.</p>
                           <p style="color:#334155;font-size:11px;margin-top:24px;border-top:1px solid #1e293b;padding-top:16px;text-align:center">
                             Questions? <a href="mailto:support@endevo.life" style="color:#818cf8">support@endevo.life</a>
                           </p>
@@ -974,7 +1009,7 @@ def handler(event, context):
         return resp(200, {
             "message": f"Invitation sent to {email}",
             "user_id": user_id, "email_sent": email_sent,
-            "password_set": True, "invite_url": invite_url
+            "invite_url": invite_url
         })
 
     # ── GET /api/admin/audit ──────────────────────────────────────────────

@@ -381,13 +381,13 @@ def handler(event, context):
                             <p style="margin:0;color:#64748b;font-size:12px">Invited as:</p>
                             <p style="margin:4px 0 0;color:#e2e8f0;font-weight:600">Employee</p>
                           </div>
-                          <p style="color:#94a3b8;font-size:14px">Click the button below to accept your invitation and create your own password:</p>
+                          <p style="color:#94a3b8;font-size:14px">Click below to complete your account setup — no password needed, you'll login with a secure OTP code:</p>
                           <div style="text-align:center;margin:28px 0">
                             <a href="{invite_url}" style="display:inline-block;padding:16px 36px;background:linear-gradient(135deg,#6366f1,#8b5cf6);color:#fff;text-decoration:none;border-radius:12px;font-weight:700;font-size:16px;letter-spacing:-0.01em">
-                              Accept Invitation &rarr;
+                              Complete Account Setup &rarr;
                             </a>
                           </div>
-                          <p style="color:#475569;font-size:12px;text-align:center">This link expires in 7 days. Click it once — you'll create your own password.</p>
+                          <p style="color:#475569;font-size:12px;text-align:center">This link expires in 7 days. Click it once to complete your account setup.</p>
                           <p style="color:#334155;font-size:11px;margin-top:24px;border-top:1px solid #1e293b;padding-top:16px;text-align:center">
                             Need help? <a href="mailto:support@endevo.life" style="color:#818cf8">support@endevo.life</a>
                           </p>
