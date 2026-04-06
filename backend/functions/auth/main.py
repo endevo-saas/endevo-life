@@ -263,35 +263,6 @@ def handler(event, context):
 
     body = get_body(event)
 
-    # ── POST /api/auth/verify-otp ─────────────────────────────────
-    if path.endswith("/verify-otp") and method == "POST":
-        email    = (body.get("email") or "").lower().strip()
-        otp_ref  = body.get("otp_ref") or ""
-        otp_code = body.get("code") or ""
-
-        if not all([email, otp_ref, otp_code]):
-            return err(400, "email, otp_ref, and code are required")
-
-        record = get_otp_record(otp_ref, email)
-        if not record:
-            security_audit("OTP_EXPIRED", email, "AUTH", ip, device,
-                           "OTP not found or expired", "WARN")
-            return err(401, "Verification code has expired or is invalid. Please log in again.")
-
-        if record.get("otp_code") != otp_code:
-            security_audit("OTP_FAILED", email, "AUTH", ip, device,
-                           f"Wrong OTP attempt from {ip}", "WARN")
-            return err(401, "Incorrect verification code. Please check your email and try again.")
-
-        # OTP valid — consume it and return stored tokens
-        delete_otp_record(otp_ref, email)
-        token_payload = json.loads(record.get("tokens", "{}"))
-        tenant_id = token_payload.get("tenant_id", "")
-
-        security_audit("LOGIN_SUCCESS", email, tenant_id or "AUTH", ip, device,
-                       f"OTP verified. Login complete from {ip} | {device[:80]}")
-        return resp(200, token_payload)
-
     # ── POST /api/auth/register — Create account via WorkOS (invite-based) ──
     if path.endswith("/register") and method == "POST":
         token = body.get("invite_token") or ""
