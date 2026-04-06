@@ -492,7 +492,7 @@ def handler(event, context):
             "hr_admin_email": hr_email,
             "hr_admin_created": hr_created,
             "invite_email_sent": email_sent,
-            "temp_password":  temp_password if hr_created else None
+            "password_set": True if hr_created else False
         })
 
     # ── GET /api/admin/tenants/{id} ───────────────────────────────────────
@@ -716,7 +716,7 @@ def handler(event, context):
               f"Created {user_role}: {email} (tenant: {tenant_name or 'SYSTEM'})", ip=ip, device=device)
         return resp(200, {
             "message": "User created", "user_id": user_id,
-            "email": email, "role": user_role, "temporary_password": password
+            "email": email, "role": user_role, "password_set": True
         })
 
     # ── GET /api/admin/users/{id} ─────────────────────────────────────────
@@ -849,7 +849,7 @@ def handler(event, context):
             return err(400, f"Password reset failed: {str(e)}")
         audit(item.get("tenantId", "SYSTEM"), caller_email, "PASSWORD_RESET",
               f"Reset password for: {email}", ip=ip, device=device)
-        return resp(200, {"message": f"Password reset for {email}", "new_password": new_password})
+        return resp(200, {"message": f"Password reset for {email}", "password_set": True})
 
     # ── POST /api/admin/invite ────────────────────────────────────────────
     if path.endswith("/invite") and method == "POST":
@@ -964,7 +964,7 @@ def handler(event, context):
         return resp(200, {
             "message": f"Invitation sent to {email}",
             "user_id": user_id, "email_sent": email_sent,
-            "temp_password": temp_password, "invite_url": invite_url
+            "password_set": True, "invite_url": invite_url
         })
 
     # ── GET /api/admin/audit ──────────────────────────────────────────────
