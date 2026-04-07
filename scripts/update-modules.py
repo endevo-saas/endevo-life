@@ -3,8 +3,9 @@ import boto3
 import os
 from datetime import datetime, timezone
 
-os.environ.setdefault('AWS_ACCESS_KEY_ID', 'AKIAVSROV42TEAXVJ6H5')
-os.environ.setdefault('AWS_SECRET_ACCESS_KEY', '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')
+# NEVER hardcode credentials — use AWS CLI profile or environment variables
+# Run: aws configure --profile endevo-uat
+# Then: AWS_PROFILE=endevo-uat python scripts/update-modules.py
 os.environ.setdefault('AWS_DEFAULT_REGION', 'us-east-1')
 
 dynamo = boto3.resource('dynamodb', region_name='us-east-1')
