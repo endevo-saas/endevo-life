@@ -31,6 +31,14 @@ def get_caller(
             items = resp.get("Items", [])
             if items:
                 user = items[0]
+                # Check session expiry (24h TTL)
+                expires = user.get("sessionExpiresAt", "")
+                if expires:
+                    from datetime import datetime, timezone
+                    exp_dt = datetime.fromisoformat(expires)
+                    if datetime.now(timezone.utc) > exp_dt:
+                        logger.info("Session token expired for user %s", user.get("email", ""))
+                        return None, None, None, None
                 return (
                     user.get("tenantId", ""),
                     user.get("email", ""),
@@ -54,8 +62,11 @@ def get_caller(
     email = workos_user.get("email", "")
     try:
         from utils.db import USERS_T
-        from boto3.dynamodb.conditions import Attr
-        resp = USERS_T.scan(FilterExpression=Attr("email").eq(email))
+        from boto3.dynamodb.conditions import Key
+        resp = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=Key("email").eq(email),
+        )
         items = resp.get("Items", [])
         if items:
             user = items[0]

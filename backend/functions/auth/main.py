@@ -235,10 +235,13 @@ def send_otp_sms(phone, otp_code):
         return False
 
 def _lookup_user_by_email(email):
-    """Find a user in DynamoDB by email."""
+    """Find a user in DynamoDB by email using GSI."""
     try:
-        from boto3.dynamodb.conditions import Attr
-        result = USERS_T.scan(FilterExpression=Attr("email").eq(email))
+        from boto3.dynamodb.conditions import Key
+        result = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=Key("email").eq(email),
+        )
         items = result.get("Items", [])
         return items[0] if items else None
     except Exception as e:
@@ -322,6 +325,12 @@ def handler(event, context):
             items = result.get("Items", [])
             if items:
                 u = items[0]
+                # Check session expiry
+                expires = u.get("sessionExpiresAt", "")
+                if expires:
+                    exp_dt = datetime.fromisoformat(expires)
+                    if datetime.now(timezone.utc) > exp_dt:
+                        return err(401, "Session expired. Please log in again.")
                 return resp(200, {
                     "email":       u.get("email", ""),
                     "first_name":  u.get("firstName", ""),
@@ -407,10 +416,10 @@ def handler(event, context):
         first_name = ""
         last_name = ""
         try:
-            result = USERS_T.scan(
-                FilterExpression="email = :e",
-                ExpressionAttributeValues={":e": user_email},
-                Limit=1,
+            from boto3.dynamodb.conditions import Key as _Key
+            result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key("email").eq(user_email),
             )
             items = result.get("Items", [])
             if items:
@@ -547,11 +556,12 @@ def handler(event, context):
         try:
             USERS_T.update_item(
                 Key={"userId": user_id},
-                UpdateExpression="SET sessionToken = :t, lastLoginAt = :ts, lastLoginIp = :ip",
+                UpdateExpression="SET sessionToken = :t, lastLoginAt = :ts, lastLoginIp = :ip, sessionExpiresAt = :exp",
                 ExpressionAttributeValues={
                     ":t": access_token,
                     ":ts": datetime.now(timezone.utc).isoformat(),
                     ":ip": ip,
+                    ":exp": (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
                 }
             )
         except Exception as e:

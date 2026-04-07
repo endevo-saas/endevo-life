@@ -146,7 +146,14 @@ def get_caller(event):
             result = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(token))
             items = result.get("Items", [])
             if items:
-                return items[0].get("role"), items[0].get("email")
+                u = items[0]
+                # Check session expiry (24h TTL)
+                expires = u.get("sessionExpiresAt", "")
+                if expires:
+                    exp_dt = datetime.fromisoformat(expires)
+                    if datetime.now(timezone.utc) > exp_dt:
+                        return None, None
+                return u.get("role"), u.get("email")
         except Exception as e:
             print(f"SESSION_LOOKUP_ERROR: {e}")
         return None, None
@@ -159,7 +166,10 @@ def get_caller(event):
             if workos_user:
                 email = workos_user["email"]
                 try:
-                    result = USERS_T.scan(FilterExpression=Attr("email").eq(email))
+                    result = USERS_T.query(
+                        IndexName="email-index",
+                        KeyConditionExpression=Key("email").eq(email),
+                    )
                     items = result.get("Items", [])
                     if items:
                         return items[0].get("role"), email
@@ -399,7 +409,8 @@ def handler(event, context):
             return err(400, "maxSeats must be a number")
 
         # Check HR email uniqueness globally — one email, one role
-        existing_user = scan_all(USERS_T, Attr("email").eq(hr_email))
+        _email_res = USERS_T.query(IndexName="email-index", KeyConditionExpression=Key("email").eq(hr_email))
+        existing_user = _email_res.get("Items", [])
         if existing_user:
             existing_role = existing_user[0].get("role", "unknown")
             return err(409, f"Email {hr_email} is already registered as {existing_role}. One email can only hold one role.")
@@ -668,7 +679,8 @@ def handler(event, context):
             tenant_id = "SYSTEM"
 
         # Enforce email uniqueness across all roles
-        existing = scan_all(USERS_T, Attr("email").eq(email))
+        _email_res2 = USERS_T.query(IndexName="email-index", KeyConditionExpression=Key("email").eq(email))
+        existing = _email_res2.get("Items", [])
         if existing:
             existing_role = existing[0].get("role", "unknown")
             return err(409, f"Email {email} already registered as {existing_role}. One email, one role.")
@@ -924,7 +936,8 @@ def handler(event, context):
             tenant_id = "SYSTEM"
 
         # Check email uniqueness across ALL roles globally
-        existing = scan_all(USERS_T, Attr("email").eq(email))
+        _email_res3 = USERS_T.query(IndexName="email-index", KeyConditionExpression=Key("email").eq(email))
+        existing = _email_res3.get("Items", [])
         if existing:
             existing_role = existing[0].get("role", "unknown")
             return err(409, f"Email {email} is already registered as {existing_role}. One email can only hold one role.")

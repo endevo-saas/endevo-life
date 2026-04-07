@@ -52,6 +52,13 @@ def get_caller(event):
             items = result.get("Items", [])
             if items:
                 u = items[0]
+                # Check session expiry (24h TTL)
+                expires = u.get("sessionExpiresAt", "")
+                if expires:
+                    from datetime import datetime as _dt, timezone as _tz
+                    exp_dt = _dt.fromisoformat(expires)
+                    if _dt.now(_tz.utc) > exp_dt:
+                        return None, None, None
                 return u.get("tenantId"), u.get("email"), u.get("userId", "")
         except Exception as e:
             print(f"SESSION_LOOKUP_ERROR: {e}")
@@ -65,8 +72,11 @@ def get_caller(event):
             if workos_user:
                 email = workos_user["email"]
                 try:
-                    from boto3.dynamodb.conditions import Attr as _Attr
-                    result = USERS_T.scan(FilterExpression=_Attr("email").eq(email))
+                    from boto3.dynamodb.conditions import Key as _Key
+                    result = USERS_T.query(
+                        IndexName="email-index",
+                        KeyConditionExpression=_Key("email").eq(email),
+                    )
                     items = result.get("Items", [])
                     if items:
                         u = items[0]
@@ -106,21 +116,27 @@ def handler(event, context):
 
     # GET /api/employee/profile
     if path.endswith("/profile") and method == "GET":
-        from boto3.dynamodb.conditions import Attr as _Attr
-        result = USERS_T.scan(FilterExpression=_Attr("email").eq(email) & _Attr("tenantId").eq(tenant_id))
-        items = result.get("Items", [])
+        from boto3.dynamodb.conditions import Key as _Key
+        result = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key("email").eq(email),
+        )
+        items = [i for i in result.get("Items", []) if i.get("tenantId") == tenant_id]
         if not items: return err(404, "Profile not found")
         profile = {k: v for k, v in items[0].items() if k not in ["inviteToken"]}
         return resp(200, profile)
 
     # PUT /api/employee/profile
     if path.endswith("/profile") and method == "PUT":
-        from boto3.dynamodb.conditions import Attr as _Attr
+        from boto3.dynamodb.conditions import Key as _Key2
         allowed = ["firstName","lastName","jobTitle","department"]
         updates = {k: v for k, v in body.items() if k in allowed}
         if not updates: return err(400, "Nothing to update")
-        result = USERS_T.scan(FilterExpression=_Attr("email").eq(email) & _Attr("tenantId").eq(tenant_id))
-        items = result.get("Items", [])
+        result = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key2("email").eq(email),
+        )
+        items = [i for i in result.get("Items", []) if i.get("tenantId") == tenant_id]
         if not items: return err(404, "Profile not found")
         user_id = items[0]["userId"]
         expr  = "SET " + ", ".join([f"#{k} = :{k}" for k in updates])

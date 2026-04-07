@@ -102,6 +102,13 @@ def get_caller(event):
                 u = items[0]
                 if u.get("status") == "inactive":
                     return None, None, None
+                # Check session expiry (24h TTL)
+                expires = u.get("sessionExpiresAt", "")
+                if expires:
+                    from datetime import datetime, timezone
+                    exp_dt = datetime.fromisoformat(expires)
+                    if datetime.now(timezone.utc) > exp_dt:
+                        return None, None, None
                 return u.get("tenantId"), u.get("role"), u.get("email")
         except Exception as e:
             print(f"SESSION_LOOKUP_ERROR: {e}")
@@ -117,7 +124,11 @@ def get_caller(event):
             return None, None, None
         email = workos_user["email"]
         try:
-            result = USERS_T.scan(FilterExpression=Attr("email").eq(email))
+            from boto3.dynamodb.conditions import Key as _Key
+            result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key("email").eq(email),
+            )
             items = result.get("Items", [])
             if items:
                 u = items[0]
@@ -311,8 +322,13 @@ def handler(event, context):
         if not validate_email(email):
             return err(400, "Invalid email format")
 
-        # Check for duplicate invite within this tenant
-        existing = scan_all(USERS_T, Attr("email").eq(email) & Attr("tenantId").eq(tenant_id))
+        # Check for duplicate invite within this tenant (GSI query + tenant filter)
+        from boto3.dynamodb.conditions import Key as _Key
+        _email_result = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key("email").eq(email),
+        )
+        existing = [i for i in _email_result.get("Items", []) if i.get("tenantId") == tenant_id]
         if existing:
             return err(409, f"{email} is already a member of this organisation")
 
@@ -330,8 +346,11 @@ def handler(event, context):
             pass
 
         # Check global email uniqueness — one email one role
-        from boto3.dynamodb.conditions import Attr as _Attr
-        global_existing = scan_all(USERS_T, _Attr("email").eq(email))
+        _global_result = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key("email").eq(email),
+        )
+        global_existing = _global_result.get("Items", [])
         if global_existing:
             existing_role = global_existing[0].get("role", "unknown")
             return err(409, f"{email} is already registered as {existing_role} in the system. One email can only hold one role.")

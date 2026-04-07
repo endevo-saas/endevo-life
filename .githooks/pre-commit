@@ -1,0 +1,29 @@
+#!/bin/bash
+# Pre-commit hook: block commits containing AWS keys or secrets
+PATTERNS=(
+  'AKIA[0-9A-Z]{16}'           # AWS Access Key
+  'aws_secret_access_key'       # AWS Secret Key variable
+  'AWS_SECRET_ACCESS_KEY'        # AWS Secret Key env var
+  'sk_test_'                     # WorkOS/Stripe test keys
+  'sk_live_'                     # WorkOS/Stripe live keys
+  'password.*=.*['\''"]'         # Hardcoded passwords
+)
+
+FOUND=0
+for pattern in "${PATTERNS[@]}"; do
+  MATCHES=$(git diff --cached --diff-filter=ACM -- ':!.githooks/*' | grep -iP "$pattern" 2>/dev/null)
+  if [ ! -z "$MATCHES" ]; then
+    echo "BLOCKED: Found potential secret matching pattern: $pattern"
+    echo "$MATCHES"
+    FOUND=1
+  fi
+done
+
+if [ $FOUND -eq 1 ]; then
+  echo ""
+  echo "COMMIT BLOCKED — Credentials detected in staged files."
+  echo "Remove secrets and use AWS CLI profiles or Secrets Manager instead."
+  exit 1
+fi
+
+exit 0
