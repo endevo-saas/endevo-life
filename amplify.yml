@@ -8,8 +8,7 @@ applications:
             - cd $CODEBUILD_SRC_DIR/endevo-life && npm install --legacy-peer-deps
         build:
           commands:
-            - export NEXT_PUBLIC_API_URL=https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com
-            - cd $CODEBUILD_SRC_DIR/endevo-life && npx turbo run build --filter=@endevo/web
+            - cd $CODEBUILD_SRC_DIR/endevo-life && NEXT_PUBLIC_API_URL=https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com npx turbo run build --filter=@endevo/web
       artifacts:
         baseDirectory: .next
         files:
