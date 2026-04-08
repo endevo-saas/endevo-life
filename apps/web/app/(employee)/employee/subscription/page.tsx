@@ -1,5 +1,4 @@
 'use client'
-export const dynamic = 'force-dynamic'
 
 import { useEffect, useState, useCallback } from 'react'
 import {
@@ -10,10 +9,10 @@ import {
 import { apiFetch } from '@/lib/api'
 import Cookies from 'js-cookie'
 
-// ── Types ───────────────────────────────────────────────────────────────────
+// ── Types (aligned with backend response shapes) ────────────────────────────
 
 interface SubscriptionData {
-  plan: 'basic' | 'premium'
+  plan: string
   planLabel: string
   priceMonthly: number
   priceYearly: number
@@ -26,11 +25,11 @@ interface SubscriptionData {
 }
 
 interface SessionRecord {
-  id: string
-  date: string
-  coach: string
-  duration: string
-  status: 'completed' | 'upcoming' | 'cancelled'
+  sessionId: string
+  scheduledAt: string
+  coachName: string
+  duration: number
+  status: string
 }
 
 interface SessionsData {
@@ -58,20 +57,14 @@ function getMockSubscription(plan: 'basic' | 'premium'): SubscriptionData {
     sessionsTotal: isPremium ? 6 : 2,
     sessionsUsed: 0,
     sessionsRemaining: isPremium ? 6 : 2,
-    features: [
-      '6-module LMS access',
-      '40-question readiness assessment',
-      'Progress tracking',
-      'Completion certificates',
-      'Email support',
-    ],
+    features: isPremium
+      ? ['Readiness Assessment', '6 Learning Modules', '6x 30-min 1:1 Sessions per year', 'AI Guide (Jesse)', 'Priority scheduling', 'Extended session recordings']
+      : ['Readiness Assessment', '6 Learning Modules', '2x 30-min 1:1 Sessions per year', 'AI Guide (Jesse)'],
     premiumFeatures: [
-      '1-on-1 live sessions with estate planning expert',
-      'Priority support (24-hour response)',
-      'Advanced analytics dashboard',
-      'Custom company branding',
-      'Dedicated account manager',
-      'API access',
+      'Everything in Basic',
+      '6x 30-min 1:1 Sessions per year',
+      'Priority scheduling',
+      'Extended session recordings',
     ],
     managedBy: 'Your Employer',
   }
@@ -89,16 +82,13 @@ function getMockSessions(): SessionsData {
 // ── Plan Comparison Data ────────────────────────────────────────────────────
 
 const COMPARISON_ROWS = [
-  { feature: '6-module LMS access', basic: true, premium: true },
-  { feature: '40-question readiness assessment', basic: true, premium: true },
+  { feature: 'Readiness Assessment (40 questions)', basic: true, premium: true },
+  { feature: '6 Learning Modules', basic: true, premium: true },
+  { feature: 'AI Guide (Jesse)', basic: true, premium: true },
   { feature: 'Progress tracking & certificates', basic: true, premium: true },
-  { feature: 'Email support', basic: true, premium: true },
   { feature: '1-on-1 sessions per year', basic: '2', premium: '6' },
-  { feature: 'Priority support (24hr response)', basic: false, premium: true },
-  { feature: 'Advanced analytics dashboard', basic: false, premium: true },
-  { feature: 'Custom company branding', basic: false, premium: true },
-  { feature: 'Dedicated account manager', basic: false, premium: true },
-  { feature: 'API access', basic: false, premium: true },
+  { feature: 'Priority scheduling', basic: false, premium: true },
+  { feature: 'Extended session recordings', basic: false, premium: true },
 ]
 
 const BOOKING_URL = 'https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH'
@@ -126,13 +116,16 @@ function LoadingSkeleton() {
 
 // ── Session Status Badge ────────────────────────────────────────────────────
 
-function SessionStatusBadge({ status }: { status: SessionRecord['status'] }) {
-  const config = {
+function SessionStatusBadge({ status }: { status: string }) {
+  const config: Record<string, { label: string; color: string; bg: string }> = {
     completed: { label: 'Completed', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+    booked: { label: 'Upcoming', color: '#2BBFC5', bg: 'rgba(43,191,197,0.12)' },
     upcoming: { label: 'Upcoming', color: '#2BBFC5', bg: 'rgba(43,191,197,0.12)' },
+    scheduled: { label: 'Scheduled', color: '#2BBFC5', bg: 'rgba(43,191,197,0.12)' },
     cancelled: { label: 'Cancelled', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+    'no-show': { label: 'No Show', color: '#f59e0b', bg: 'rgba(245,158,11,0.12)' },
   }
-  const c = config[status]
+  const c = config[status] || { label: status || 'Unknown', color: '#94a3b8', bg: 'rgba(148,163,184,0.12)' }
   return (
     <span
       className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
@@ -228,7 +221,7 @@ export default function EmployeeSubscriptionPage() {
 
   useEffect(() => { load() }, [load])
 
-  const isPremium = subscription?.plan === 'premium'
+  const isPremium = subscription?.plan?.toLowerCase() === 'premium'
   const planColor = isPremium ? '#E8612A' : '#2BBFC5'
   const PlanIcon = isPremium ? Crown : Star
 
@@ -288,7 +281,7 @@ export default function EmployeeSubscriptionPage() {
                   }}
                 >
                   <Building2 className="w-3 h-3" />
-                  Managed by {subscription.managedBy}
+                  {subscription.managedBy}
                 </div>
               </div>
 
@@ -401,9 +394,9 @@ export default function EmployeeSubscriptionPage() {
                   >
                     Session History
                   </h4>
-                  {sessions.sessions.map(s => (
+                  {sessions.sessions.map((s, i) => (
                     <div
-                      key={s.id}
+                      key={s.sessionId || i}
                       className="flex items-center justify-between p-3 rounded-xl"
                       style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
                     >
@@ -415,13 +408,13 @@ export default function EmployeeSubscriptionPage() {
                           <User className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.4)' }} />
                         </div>
                         <div>
-                          <p className="text-sm font-medium text-white">{s.coach}</p>
+                          <p className="text-sm font-medium text-white">{s.coachName || 'Coach TBD'}</p>
                           <div className="flex items-center gap-2 text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
                             <Calendar className="w-3 h-3" />
-                            {s.date}
+                            {s.scheduledAt ? new Date(s.scheduledAt).toLocaleDateString() : 'Not scheduled'}
                             <span className="mx-1">·</span>
                             <Clock className="w-3 h-3" />
-                            {s.duration}
+                            {s.duration || 30} min
                           </div>
                         </div>
                       </div>

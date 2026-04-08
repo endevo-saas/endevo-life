@@ -275,7 +275,8 @@ def handler(event, context):
             )
             user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
             if user_items:
-                plan = user_items[0].get("plan", "basic") or "basic"
+                raw_plan = user_items[0].get("plan", "basic") or "basic"
+                plan = raw_plan.lower() if isinstance(raw_plan, str) else "basic"
         except Exception as e:
             print(f"SUBSCRIPTION_USER_LOOKUP_ERROR: {e}")
 
@@ -313,7 +314,7 @@ def handler(event, context):
             "sessionsRemaining": max(0, sessions_total - sessions_used),
             "features": config["features"],
             "premiumFeatures": PREMIUM_FEATURES,
-            "managedBy": "Your employer manages your subscription",
+            "managedBy": "Your Employer",
         })
 
     # GET /api/employee/sessions
