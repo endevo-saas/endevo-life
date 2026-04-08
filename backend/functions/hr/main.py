@@ -496,7 +496,6 @@ def handler(event, context):
 
     # ── GET /api/hr/tenant ────────────────────────────────────────────────
     if path.endswith("/tenant") and method == "GET":
-        TENANTS_T = dynamo.Table("endevo-uat-tenants")
         t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
         if not t:
             return err(404, "Tenant not found")
@@ -509,10 +508,10 @@ def handler(event, context):
 
     # ── GET /api/hr/training ──────────────────────────────────────────────
     if path.endswith("/training") and method == "GET":
-        TRAIN_T  = dynamo.Table("endevo-uat-training")
-        PROG_T   = dynamo.Table("endevo-uat-video-progress")
+        _train_t = dynamo.Table("endevo-uat-training")
+        _prog_t  = dynamo.Table("endevo-uat-video-progress")
         from boto3.dynamodb.conditions import Key as _Key
-        courses_resp = TRAIN_T.query(KeyConditionExpression=_Key("tenantId").eq(tenant_id))
+        courses_resp = _train_t.query(KeyConditionExpression=_Key("tenantId").eq(tenant_id))
         courses = courses_resp.get("Items", [])
         # For each course count employees enrolled / completed
         employees = scan_all(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("role").eq("EMPLOYEE"))
@@ -523,7 +522,7 @@ def handler(event, context):
             enrolled = 0
             completed_count = 0
             for emp in employees:
-                prog = PROG_T.get_item(Key={"userId": emp["userId"], "videoId": vid}).get("Item")
+                prog = _prog_t.get_item(Key={"userId": emp["userId"], "videoId": vid}).get("Item")
                 if prog:
                     enrolled += 1
                     if prog.get("completed"):
@@ -542,8 +541,8 @@ def handler(event, context):
 
     # ── GET /api/hr/certificates ──────────────────────────────────────────
     if path.endswith("/certificates") and method == "GET":
-        CERT_T = dynamo.Table("endevo-uat-certificates")
-        certs = scan_all(CERT_T, Attr("tenantId").eq(tenant_id))
+        _cert_t = dynamo.Table("endevo-uat-certificates")
+        certs = scan_all(_cert_t, Attr("tenantId").eq(tenant_id))
         # Enrich with employee name
         for c in certs:
             uid = c.get("userId", "")
