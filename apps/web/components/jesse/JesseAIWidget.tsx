@@ -407,7 +407,7 @@ export default function JesseAIWidget() {
 
   /* ---- voice input (Web Speech API) ---- */
   const toggleListening = useCallback(() => {
-    const win = window as Record<string, unknown>
+    const win = window as unknown as Record<string, unknown>
     if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
       setError('Voice input is not supported in this browser.')
       return

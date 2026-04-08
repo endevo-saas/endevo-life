@@ -263,8 +263,8 @@ export default function EmployeeDashboard() {
 
       // Detect plan from /api/auth/me or cookies
       try {
-        const me = await api.me() as Record<string, unknown>
-        const p = (me?.plan || me?.tenant_plan || (me?.subscription as Record<string, unknown>)?.plan) as string | undefined
+        const me = await api.me() as unknown as Record<string, unknown>
+        const p = (me?.plan || me?.tenant_plan || (me?.subscription as unknown as Record<string, unknown>)?.plan) as string | undefined
         if (p) setUserPlan(p.toLowerCase())
         else setUserPlan(Cookies.get('tenant_plan')?.toLowerCase() || 'basic')
       } catch {
