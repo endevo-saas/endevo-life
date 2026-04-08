@@ -34,7 +34,7 @@ export default function CertificatesPage() {
 
       // Load LMS completion certs via employee progress summary endpoint
       try {
-        const summary = await api.employeeProgressSummary() as Record<string, unknown> & { certificate?: LmsCertificate }
+        const summary = await api.employeeProgressSummary() as unknown as Record<string, unknown> & { certificate?: LmsCertificate }
         if (summary?.certificate && (summary.certificate as LmsCertificate).type === 'lms_completion') {
           setLmsCerts([summary.certificate as LmsCertificate])
         }
