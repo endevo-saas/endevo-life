@@ -388,7 +388,7 @@ def handler(event, context):
         })
 
     # ── GET /api/admin/tenants ────────────────────────────────────────────
-    if path.endswith("/tenants") and method == "GET":
+    if path.endswith("/tenants") and method == "GET" and "/archive/" not in path:
         limit       = qs.get("limit", 50)
         next_token  = qs.get("next_token")
         search      = sanitize(qs.get("search", ""), 100)
@@ -738,7 +738,7 @@ def handler(event, context):
         return err(405, "Tenants cannot be deleted. Use POST /disable to disable or /enable to re-activate.")
 
     # ── GET /api/admin/users ──────────────────────────────────────────────
-    if path.endswith("/users") and method == "GET":
+    if path.endswith("/users") and method == "GET" and "/archive/" not in path:
         limit         = qs.get("limit", 50)
         next_token    = qs.get("next_token")
         search        = sanitize(qs.get("search", ""), 100)

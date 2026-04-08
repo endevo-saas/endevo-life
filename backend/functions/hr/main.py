@@ -295,7 +295,7 @@ def handler(event, context):
         })
 
     # ── GET /api/hr/employees ─────────────────────────────────────────────
-    if path.endswith("/employees") and method == "GET":
+    if path.endswith("/employees") and method == "GET" and "/archive/" not in path:
         limit         = qs.get("limit", 50)
         next_token    = qs.get("next_token")
         search        = sanitize(qs.get("search", ""), 100)
