@@ -10,8 +10,7 @@ import { signOut } from '@/lib/auth/cognito'
 import { api } from '@/lib/api'
 import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
-import { JesseChatWindow } from '@/components/jesse'
-import { CopilotWidget } from '@/components/copilot'
+import { JesseAIWidget } from '@/components/jesse'
 
 const navGroups = [
   {
@@ -241,8 +240,7 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
       </aside>
       <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>
         {children}
-        <CopilotWidget />
-        <JesseChatWindow />
+        <JesseAIWidget />
         <footer className="px-6 py-4 text-center border-t" style={{ borderColor: 'var(--border-subtle)' }}>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             Legacy Readiness OS — Powered by <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Endevo.life</span>

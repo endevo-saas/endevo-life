@@ -11,7 +11,7 @@ import {
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
-import { CopilotWidget } from '@/components/copilot'
+import { JesseAIWidget } from '@/components/jesse'
 
 const navGroups = [
   {
@@ -270,7 +270,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       {/* Main content */}
       <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>
         {children}
-        <CopilotWidget />
+        <JesseAIWidget />
         <footer className="px-6 py-4 text-center border-t" style={{ borderColor: 'var(--border-subtle)' }}>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             Legacy Readiness OS — Powered by <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Endevo.life</span>

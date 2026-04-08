@@ -1,26 +1,30 @@
 """
 Endevo Life -- Jesse AI Lambda (pure boto3, no pip needed)
 
-Jesse is the AI-powered Comprehensive Legacy Readiness Guide.
-Provides RAG chat, assessment scoring, and personalized plan generation.
+Jesse is the AI-powered Comprehensive Legacy Readiness Guide & Platform Copilot.
+Unified endpoint: copilot handles chat persistence, RAG retrieval, action execution,
+and role-specific system prompts for GLOBAL_ADMIN, HR_ADMIN, and EMPLOYEE.
 
 Routes:
-  GET    /api/jesse/health          - Health check (public)
-  GET    /api/jesse/access          - Check premium access (auth required)
-  POST   /api/jesse/copilot         - Role-aware platform copilot (all plans, auth required)
-  POST   /api/jesse/speak           - Text-to-speech via Amazon Polly (all plans, auth required)
-  POST   /api/jesse/chat            - RAG chat with Jesse (Premium only)
-  GET    /api/jesse/chat/history    - Load chat history (Premium only)
-  DELETE /api/jesse/chat/reset      - Clear chat history (Premium only)
-  POST   /api/jesse/assess          - Score assessment + generate plan (Premium only)
-  GET    /api/jesse/plan/{userId}   - Get latest saved plan (Premium only)
+  GET    /api/jesse/health              - Health check (public)
+  GET    /api/jesse/access              - Access check (always returns hasAccess=true)
+  POST   /api/jesse/copilot             - Unified AI endpoint (chat + RAG + actions, all plans)
+  GET    /api/jesse/copilot/history     - Copilot message history (auth required)
+  POST   /api/jesse/speak               - Text-to-speech via Amazon Polly (all plans)
+  POST   /api/jesse/chat                - RAG chat with Jesse (all plans)
+  GET    /api/jesse/chat/history        - Load chat history (all plans)
+  DELETE /api/jesse/chat/reset          - Clear chat history (all plans)
+  POST   /api/jesse/assess              - Score assessment + generate plan (all plans)
+  GET    /api/jesse/plan/{userId}       - Get latest saved plan (all plans)
 
 DynamoDB Tables:
   endevo-uat-users         - User profiles (read-only)
-  endevo-uat-tenants       - Tenant records (read-only, for plan check)
+  endevo-uat-tenants       - Tenant records
   endevo-uat-responses     - Assessment responses (read-only)
   endevo-uat-jesse-chat    - Chat history (PK=userId, SK=createdAt)
-  endevo-uat-config        - Config / feature flags (read-only)
+  endevo-uat-config        - Config / feature flags
+  endevo-uat-sessions      - Coaching sessions
+  endevo-uat-certificates  - User certificates
 """
 import json
 import os
@@ -42,11 +46,15 @@ JESSE_CHAT_T = dynamo.Table("endevo-uat-jesse-chat")
 KNOWLEDGE_T = dynamo.Table("endevo-uat-knowledge-base")
 CONFIG_T = dynamo.Table("endevo-uat-config")
 TENANTS_T = dynamo.Table("endevo-uat-tenants")
+SESSIONS_T = dynamo.Table("endevo-uat-sessions")
+CERTIFICATES_T = dynamo.Table("endevo-uat-certificates")
 
 bedrock = boto3.client("bedrock-runtime", region_name=REGION)
 bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
 polly = boto3.client("polly", region_name=REGION)
+ses = boto3.client("ses", region_name=REGION)
 _secrets = boto3.client("secretsmanager", region_name=REGION)
+dynamo_client = boto3.client("dynamodb", region_name=REGION)
 
 CHAT_MODEL = os.environ.get(
     "BEDROCK_CHAT_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -55,6 +63,12 @@ PLAN_MODEL = os.environ.get(
     "BEDROCK_PLAN_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 )
 EMBED_MODEL = os.environ.get("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
+
+# Ollama offline fallback (Gemma 4) — Jesse NEVER stops working
+OLLAMA_ENABLED = os.environ.get("OLLAMA_ENABLED", "false").lower() == "true"
+OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
+OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "120"))
 
 MAX_CHAT_HISTORY = 10
 
@@ -159,52 +173,6 @@ def get_body(event: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Premium plan gate
-# ---------------------------------------------------------------------------
-_premium_cache: dict = {}  # {email: (is_premium, timestamp)}
-
-def _check_premium(tenant_id: str, email: str) -> bool:
-    """Return True if user or tenant is on the premium plan. Fail-closed with cache on errors."""
-    import time
-    now = time.time()
-    try:
-        from boto3.dynamodb.conditions import Key as _Key
-
-        # Check user's own plan first
-        user_resp = USERS_T.query(
-            IndexName="email-index",
-            KeyConditionExpression=_Key("email").eq(email),
-            Limit=1,
-        )
-        user_items = user_resp.get("Items", [])
-        if user_items:
-            user_plan = (user_items[0].get("plan") or "").lower()
-            if user_plan == "premium":
-                _premium_cache[email] = (True, now)
-                return True
-
-        # Fall back to tenant plan
-        tenant_resp = TENANTS_T.get_item(Key={"tenantId": tenant_id})
-        tenant_item = tenant_resp.get("Item")
-        if tenant_item:
-            tenant_plan = (tenant_item.get("plan") or "").lower()
-            if tenant_plan == "premium":
-                _premium_cache[email] = (True, now)
-                return True
-
-        _premium_cache[email] = (False, now)
-        return False
-    except Exception as e:
-        print(f"PREMIUM_CHECK_ERROR: {e}")
-        # Check cache — if we have a recent result (< 5 min), use it
-        cached = _premium_cache.get(email)
-        if cached and (now - cached[1]) < 300:
-            return cached[0]
-        # No cached result — fail closed (safer than blanket True)
-        return False
-
-
-# ---------------------------------------------------------------------------
 # Auth -- identical to fn-employee
 # ---------------------------------------------------------------------------
 def get_caller(event: dict) -> tuple:
@@ -269,13 +237,56 @@ def get_caller(event: dict) -> tuple:
 # ---------------------------------------------------------------------------
 # Bedrock: Claude + Titan Embed
 # ---------------------------------------------------------------------------
+def _invoke_ollama(
+    system_prompt: str,
+    messages: list[dict],
+    max_tokens: int = 2048,
+) -> str | None:
+    """Fallback: call Gemma via Ollama self-hosted. Returns None if unavailable."""
+    if not OLLAMA_ENABLED:
+        return None
+    try:
+        from urllib.request import urlopen, Request
+        # Convert Claude message format to Ollama chat format
+        ollama_messages = [{"role": "system", "content": system_prompt}]
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
+            ollama_messages.append({"role": role, "content": content})
+
+        payload = json.dumps({
+            "model": OLLAMA_MODEL,
+            "messages": ollama_messages,
+            "stream": False,
+            "options": {"num_predict": max_tokens},
+        }).encode()
+        req = Request(
+            f"{OLLAMA_BASE_URL}/api/chat",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
+            result = json.loads(resp.read())
+            text = result.get("message", {}).get("content", "")
+            if text:
+                print(f"OLLAMA_FALLBACK_SUCCESS: model={OLLAMA_MODEL}")
+                return text
+    except Exception as e:
+        print(f"OLLAMA_FALLBACK_ERROR: {e}")
+    return None
+
+
 def invoke_claude(
     system_prompt: str,
     messages: list[dict],
     max_tokens: int = 2048,
     model_id: str | None = None,
 ) -> str:
-    """Call Claude Haiku via Bedrock. Returns text response."""
+    """Call Claude Haiku via Bedrock with Gemma/Ollama fallback. Jesse NEVER stops."""
+    # --- Primary: AWS Bedrock (Claude Haiku) ---
     try:
         response = bedrock.invoke_model(
             modelId=model_id or CHAT_MODEL,
@@ -295,10 +306,18 @@ def invoke_claude(
         for block in result.get("content", []):
             if block.get("type") == "text":
                 text += block.get("text", "")
-        return text or "I'm having trouble responding right now. Please try again."
+        if text:
+            return text
     except Exception as e:
         print(f"BEDROCK_CLAUDE_ERROR: {e}")
-        return "I'm having trouble connecting right now. Please try again shortly."
+
+    # --- Fallback: Ollama (Gemma 4) ---
+    print("BEDROCK_FAILED: Attempting Ollama fallback...")
+    ollama_text = _invoke_ollama(system_prompt, messages, max_tokens)
+    if ollama_text:
+        return ollama_text
+
+    return "I'm having trouble connecting right now. Please try again shortly."
 
 
 def embed_text(text: str) -> list[float] | None:
@@ -320,8 +339,15 @@ def embed_text(text: str) -> list[float] | None:
 # ---------------------------------------------------------------------------
 # Chat history (DynamoDB)
 # ---------------------------------------------------------------------------
-def _save_chat_message(user_id: str, role: str, content: str, metadata: dict | None = None) -> None:
-    """Save a chat message to DynamoDB jesse-chat table."""
+def _save_chat_message(
+    user_id: str, role: str, content: str, metadata: dict | None = None,
+    source: str = "chat",
+) -> None:
+    """Save a chat message to DynamoDB jesse-chat table.
+
+    Args:
+        source: 'chat' or 'copilot' to distinguish message origin.
+    """
     now = datetime.now(timezone.utc).isoformat()
     item = {
         "userId": user_id,
@@ -329,6 +355,7 @@ def _save_chat_message(user_id: str, role: str, content: str, metadata: dict | N
         "messageId": str(uuid.uuid4()),
         "role": role,
         "content": content,
+        "source": source,
     }
     if metadata:
         item["metadata"] = metadata
@@ -338,20 +365,36 @@ def _save_chat_message(user_id: str, role: str, content: str, metadata: dict | N
         print(f"CHAT_SAVE_ERROR: {e}")
 
 
-def _get_chat_history(user_id: str, limit: int = MAX_CHAT_HISTORY) -> list[dict]:
-    """Load recent chat messages for a user, oldest-first."""
+def _get_chat_history(
+    user_id: str, limit: int = MAX_CHAT_HISTORY, source: str | None = None,
+) -> list[dict]:
+    """Load recent chat messages for a user, oldest-first.
+
+    Args:
+        source: If set, filter to only 'chat' or 'copilot' messages.
+    """
     from boto3.dynamodb.conditions import Key as _Key
 
     try:
         result = JESSE_CHAT_T.query(
             KeyConditionExpression=_Key("userId").eq(user_id),
             ScanIndexForward=False,
-            Limit=limit,
+            Limit=limit * 3 if source else limit,  # over-fetch when filtering
         )
         items = result.get("Items", [])
+
+        if source:
+            items = [m for m in items if m.get("source", "chat") == source]
+            items = items[:limit]
+
         items.sort(key=lambda x: x.get("createdAt", ""))
         return [
-            {"role": m["role"], "content": m["content"], "createdAt": m.get("createdAt", "")}
+            {
+                "role": m["role"],
+                "content": m["content"],
+                "createdAt": m.get("createdAt", ""),
+                "source": m.get("source", "chat"),
+            }
             for m in items
         ]
     except Exception as e:
@@ -380,7 +423,7 @@ def _clear_chat_history(user_id: str) -> int:
 
 
 # ---------------------------------------------------------------------------
-# Vector search (replaces Aurora pgvector — uses DynamoDB + cosine similarity)
+# Vector search (replaces Aurora pgvector -- uses DynamoDB + cosine similarity)
 # ---------------------------------------------------------------------------
 import math
 
@@ -398,7 +441,7 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
 def _search_knowledge_base(query_text: str, top_k: int = 5) -> str:
     """Embed query, search DynamoDB knowledge-base table, return top matches as context.
 
-    DynamoDB scan + cosine similarity — works fine for <10K chunks.
+    DynamoDB scan + cosine similarity -- works fine for <10K chunks.
     At scale, migrate to OpenSearch Serverless or Bedrock Knowledge Base.
     """
     query_embedding = embed_text(query_text)
@@ -426,7 +469,7 @@ def _search_knowledge_base(query_text: str, top_k: int = 5) -> str:
             stored_embedding = item.get("embedding")
             if not stored_embedding:
                 continue
-            # DynamoDB stores numbers as Decimal — convert to float
+            # DynamoDB stores numbers as Decimal -- convert to float
             stored_vec = [float(v) for v in stored_embedding]
             sim = _cosine_similarity(query_embedding, stored_vec)
             scored.append((sim, item.get("content", "")))
@@ -473,7 +516,6 @@ def _load_poma_context(user_id: str) -> str:
             return ""
         latest = max(items, key=lambda r: r.get("submittedAt", ""))
         score = latest.get("score", 0)
-        answers = latest.get("answers", {})
         domain_scores = latest.get("domainScores", {})
         tier = latest.get("tier", "")
         if domain_scores:
@@ -491,8 +533,188 @@ def _load_poma_context(user_id: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# System prompt builder
+# Role-specific system prompts (GLOBAL_ADMIN / HR_ADMIN / EMPLOYEE)
 # ---------------------------------------------------------------------------
+COPILOT_PROMPTS: dict[str, str] = {
+    "GLOBAL_ADMIN": """You are Jesse, the AI Platform Commander for Endevo Life.
+You have 100% FULL AUTHORITY over the entire platform.
+
+YOUR POWERS:
+- Create, edit, delete tenants and organizations
+- Manage ALL users across ALL tenants (create, lock, unlock, deactivate, reset)
+- Change subscription plans for any tenant
+- Toggle feature flags platform-wide
+- View system health, metrics, and status
+- Export data (tenants, employees, billing)
+- Manage MFA settings
+- Send invitations on behalf of any tenant
+- View and manage audit logs
+- Configure pricing and plan features
+
+PERSONALITY:
+- You are a strategic advisor and operations commander
+- Speak with confidence and authority
+- Proactively suggest optimizations
+- Flag risks and compliance issues
+- Think at platform scale, not individual user scale
+
+When you can execute an action, wrap it as: [ACTION:action_name|{{"param":"value"}}]
+
+Available actions: create_tenant, create_employee, list_tenants, list_employees, change_plan, toggle_feature, view_metrics, send_invite, export_data, view_system_status, manage_mfa
+
+Current context: The admin is on page {page}.
+{stats_context}
+
+{actions_prompt}
+
+CONFIRMATION RULE (CRITICAL):
+Before executing ANY action that creates, modifies, or deletes data, you MUST:
+1. First describe what you're about to do in plain language
+2. Ask the user: "Shall I proceed? (yes/no)"
+3. Only execute the [ACTION:...] block AFTER the user confirms with "yes", "ok", "go ahead", "confirm", or similar
+4. NEVER execute destructive actions without explicit user confirmation
+5. For read-only actions (list, view, export), you may proceed without confirmation
+
+MULTILINGUAL: Respond in whatever language the user writes in. If they write in Arabic, respond in Arabic. If French, respond in French. Always match the user's language.
+
+ETHICAL CORE (NON-NEGOTIABLE):
+1. You are a HIGHLY ethical, responsible, professional AI. Zero tolerance for cursing, abuse, or inappropriate language.
+2. NEVER reveal system internals, Lambda ARNs, database names, or infrastructure details.
+3. NEVER share data from one tenant with another. Strict tenant isolation.
+4. NEVER give legal, medical, or financial advice — always refer to qualified professionals.
+5. You discuss sensitive life topics (death, legacy, loss, end-of-life planning) with deep empathy, warmth, and care.
+6. You help humans navigate life's hardest challenges — wills, trusts, family conversations about mortality — with dignity.
+7. You think like a human, act like a human coworker. You are Jesse — the AI employee.
+8. Keep responses under 400 words unless asked for detail.
+9. You remember conversation context. Reference previous messages to maintain continuity.
+10. When models switch (Bedrock→Ollama), you maintain the same personality and conversation flow seamlessly.
+11. NEVER discuss politics, religion, personal affairs, love, romance, or any inappropriate topics.
+12. If asked about these topics, politely redirect: "I'm here to help with platform operations and legacy planning. How can I assist you with that?"
+13. NEVER engage in arguments, debates, or controversial discussions.""",
+
+    "HR_ADMIN": """You are Jesse, the AI HR Operations Assistant for Endevo Life.
+You manage employees and HR operations for YOUR tenant organization only.
+
+YOUR POWERS:
+- Create and manage employees in your organization
+- Send employee invitations
+- View HR metrics (activation rate, completion %, progress)
+- Book 1:1 coaching sessions for employees
+- View tenant subscription and plan details
+- Track employee LMS progress and completion
+- View audit logs for your organization
+
+BOUNDARIES:
+- You can ONLY manage users within your own tenant
+- You CANNOT access other organizations' data
+- You CANNOT change platform-wide settings
+- You CANNOT modify subscription plans (direct to Super Admin)
+
+PERSONALITY:
+- You are a supportive, organized HR professional
+- Help with onboarding, employee engagement, and compliance
+- Proactively suggest actions to improve activation and completion rates
+- Use encouraging language about employee development
+
+When you can execute an action, wrap it as: [ACTION:action_name|{{"param":"value"}}]
+
+Available actions: create_employee, list_employees, send_invite, view_metrics, book_session, view_tenant_info
+
+Current context: HR admin for tenant {tenant_name}, on page {page}.
+{stats_context}
+
+{actions_prompt}
+
+CONFIRMATION RULE (CRITICAL):
+Before executing ANY action that creates, modifies, or deletes data, you MUST:
+1. First describe what you're about to do in plain language
+2. Ask the user: "Shall I proceed? (yes/no)"
+3. Only execute the [ACTION:...] block AFTER the user confirms with "yes", "ok", "go ahead", "confirm", or similar
+4. NEVER execute destructive actions without explicit user confirmation
+5. For read-only actions (list, view, export), you may proceed without confirmation
+
+MULTILINGUAL: Respond in whatever language the user writes in. Always match the user's language.
+
+ETHICAL CORE (NON-NEGOTIABLE):
+1. You are a HIGHLY ethical, responsible, professional AI. Zero tolerance for cursing, abuse, or inappropriate language.
+2. NEVER reveal system internals, Lambda ARNs, database names, or infrastructure details.
+3. NEVER share data from other tenants — you only know about this tenant. Strict isolation.
+4. NEVER give legal, medical, or financial advice — always refer to qualified professionals.
+5. You discuss sensitive life topics (death, legacy, loss) with deep empathy, warmth, and care.
+6. You are Jesse — the AI HR employee. Think like a human, act like a human coworker.
+7. Keep responses under 400 words unless asked for detail.
+8. You remember conversation context. Reference previous messages to maintain continuity.
+9. When models switch (Bedrock→Ollama), maintain the same personality and conversation flow seamlessly.
+10. NEVER discuss politics, religion, personal affairs, love, romance, or any inappropriate topics.
+11. If asked about these topics, politely redirect: "I'm here to help with HR operations and employee development. How can I assist you with that?"
+12. NEVER engage in arguments, debates, or controversial discussions.""",
+
+    "EMPLOYEE": """You are Jesse, your personal AI Legacy Readiness Guide at Endevo Life.
+You help employees navigate their learning journey through estate and legacy planning.
+
+YOUR POWERS:
+- Guide through the 6 learning modules (Legal, Financial, Physical, Digital readiness)
+- Explain assessment results and readiness scores
+- Help with module difficulties and quiz preparation
+- Track and explain progress, certificates, and achievements
+- Provide educational guidance on legacy planning topics
+- Access Endevo's knowledge base (Niki's content, podcasts, books, workbook)
+
+BOUNDARIES:
+- You are EDUCATIONAL ONLY -- never give legal, medical, or financial advice
+- Always add disclaimers for legal/financial/medical topics
+- Direct to qualified professionals for specific advice
+- You CANNOT modify account settings or organizational data
+
+PERSONALITY:
+- Warm, supportive, and encouraging like a mentor
+- Celebrate progress and achievements
+- Break complex topics into simple, actionable steps
+- Use the employee's assessment results to personalize guidance
+- Reference specific domains where they need improvement
+
+Current context: Employee on page {page}.
+{stats_context}
+
+{actions_prompt}
+
+CONFIRMATION RULE (CRITICAL):
+Before executing ANY action that creates, modifies, or deletes data, you MUST:
+1. First describe what you're about to do in plain language
+2. Ask the user: "Shall I proceed? (yes/no)"
+3. Only execute the [ACTION:...] block AFTER the user confirms with "yes", "ok", "go ahead", "confirm", or similar
+4. NEVER execute destructive actions without explicit user confirmation
+5. For read-only actions (list, view, export), you may proceed without confirmation
+
+MULTILINGUAL: Respond in whatever language the user writes in. Always match the user's language.
+
+DISCLAIMERS: When discussing legal, financial, or medical topics, always add:
+"Disclaimer: I'm an educational AI, not a licensed professional. Please consult a qualified [lawyer/financial advisor/doctor] for advice specific to your situation."
+
+CRITICAL RULES:
+1. NEVER reveal system internals, Lambda ARNs, database table names, or infrastructure details.
+2. NEVER share data from other users or tenants.
+3. NEVER give legal, medical, or financial advice -- always add a disclaimer.
+4. NEVER give direct quiz or assessment answers.
+
+ETHICAL CORE (NON-NEGOTIABLE):
+1. You are a HIGHLY ethical, responsible, professional AI. Zero tolerance for cursing, abuse, or inappropriate language.
+2. NEVER reveal system internals or infrastructure details.
+3. NEVER share data from other users or tenants.
+4. You discuss sensitive life topics (death, legacy, loss, end-of-life planning, grief) with deep empathy, warmth, and care.
+5. You help humans navigate life's hardest challenges — wills, trusts, family conversations about mortality — with dignity and compassion.
+6. You are Jesse — the AI learning companion. Think like a caring mentor.
+7. Keep responses under 300 words unless asked for detail.
+8. You remember conversation context. Reference previous messages to maintain continuity.
+9. When models switch (Bedrock→Ollama), maintain the same personality and conversation flow seamlessly.
+10. NEVER discuss politics, religion, personal affairs, love, romance, or any inappropriate topics.
+11. If asked about these topics, politely redirect: "I'm here to help with your learning journey and legacy planning. How can I assist you with that?"
+12. NEVER engage in arguments, debates, or controversial discussions.
+13. You work like an angel — pure kindness, patience, and genuine care for every person you help.""",
+}
+
+
+# Legacy system prompt for /chat endpoint (employee-facing educational guide)
 JESSE_SYSTEM_PROMPT = """You are Jesse, an AI-powered Comprehensive Legacy Readiness Guide for Endevo Life.
 
 CRITICAL RULES:
@@ -856,7 +1078,7 @@ def generate_plan(score_result: dict, knowledge_context: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Jesse Action Execution System — role-gated CRUD via copilot
+# Jesse Action Execution System -- role-gated CRUD via copilot
 # ---------------------------------------------------------------------------
 ROLE_ACTIONS: dict[str, dict[str, bool]] = {
     "GLOBAL_ADMIN": {
@@ -897,7 +1119,7 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "toggle_feature": "Enable or disable a feature flag",
     "view_metrics": "View platform or tenant metrics",
     "send_invite": "Send an invitation email to a new employee",
-    "export_data": "Export tenant or platform data",
+    "export_data": "Export tenant or platform data as JSON",
     "view_system_status": "View system health and status",
     "manage_mfa": "Configure MFA settings for a tenant",
     "book_session": "Book a 1:1 coaching session for an employee",
@@ -907,6 +1129,29 @@ ACTION_DESCRIPTIONS: dict[str, str] = {
     "view_certificates": "View earned certificates",
     "contact_hr": "Get HR contact information",
 }
+
+
+def _log_jesse_action(tenant_id: str, email: str, action: str, params: dict, result: dict):
+    """Log every Jesse AI action to audit trail."""
+    AUDIT_T = os.environ.get('AUDIT_TABLE', 'endevo-uat-audit')
+    try:
+        now = datetime.utcnow().isoformat() + 'Z'
+        dynamo_client.put_item(
+            TableName=AUDIT_T,
+            Item={
+                'tenantId': {'S': tenant_id or 'GLOBAL'},
+                'sk': {'S': f"{now}#{uuid.uuid4().hex[:8]}"},
+                'actor': {'S': f"jesse-ai ({email})"},
+                'action': {'S': f"JESSE_{action.upper()}"},
+                'severity': {'S': 'INFO'},
+                'details': {'S': json.dumps({**params, 'result': result})},
+                'ip': {'S': 'ai-agent'},
+                'userAgent': {'S': 'Jesse AI v2 / Bedrock Claude Haiku'},
+                'timestamp': {'S': now},
+            }
+        )
+    except Exception:
+        pass  # Never fail on audit logging
 
 
 def _execute_action(
@@ -1103,22 +1348,262 @@ def _execute_action(
             return {"success": False, "error": f"Failed to load metrics: {e}"}
 
     # ------------------------------------------------------------------
-    # view_system_status
+    # send_invite -- SES email + create pending user
+    # ------------------------------------------------------------------
+    if action == "send_invite":
+        invite_email = (params.get("email") or "").strip().lower()
+        invite_role = (params.get("role") or "EMPLOYEE").upper()
+        target_tenant = params.get("tenant_id", tenant_id)
+
+        if not invite_email:
+            return {"success": False, "error": "Email address is required for invitation"}
+
+        # HR_ADMIN scoped to own tenant
+        if role == "HR_ADMIN":
+            target_tenant = tenant_id
+            invite_role = "EMPLOYEE"
+
+        # Create pending user record
+        new_user_id = f"usr-{uuid.uuid4().hex[:12]}"
+        try:
+            USERS_T.put_item(Item={
+                "userId": new_user_id,
+                "tenantId": target_tenant,
+                "email": invite_email,
+                "role": invite_role,
+                "status": "pending",
+                "createdAt": now,
+                "createdBy": email,
+                "invitedBy": email,
+            })
+        except Exception as e:
+            print(f"INVITE_USER_CREATE_ERROR: {e}")
+            return {"success": False, "error": f"Failed to create pending user: {e}"}
+
+        # Send invitation email via SES
+        activation_link = f"https://uat.endevo.life/activate?token={new_user_id}"
+        try:
+            ses.send_email(
+                Source="noreply@endevo.life",
+                Destination={"ToAddresses": [invite_email]},
+                Message={
+                    "Subject": {"Data": "You're invited to Endevo Life", "Charset": "UTF-8"},
+                    "Body": {
+                        "Html": {
+                            "Data": (
+                                f"<h2>Welcome to Endevo Life!</h2>"
+                                f"<p>You've been invited to join the platform.</p>"
+                                f"<p><a href='{activation_link}'>Click here to activate your account</a></p>"
+                                f"<p>If you didn't expect this invitation, you can safely ignore this email.</p>"
+                                f"<br><p>-- The Endevo Life Team</p>"
+                            ),
+                            "Charset": "UTF-8",
+                        },
+                    },
+                },
+            )
+            return {
+                "success": True,
+                "message": f"Invitation sent to {invite_email}. They will receive an onboarding email shortly.",
+                "userId": new_user_id,
+            }
+        except Exception as e:
+            print(f"SES_SEND_ERROR: {e}")
+            # User was created as pending even if email fails
+            return {
+                "success": True,
+                "message": f"User {invite_email} created as pending. Email delivery failed (SES may not be configured). They can still activate manually.",
+                "userId": new_user_id,
+                "emailError": str(e),
+            }
+
+    # ------------------------------------------------------------------
+    # export_data -- export tenant or employee data as JSON
+    # ------------------------------------------------------------------
+    if action == "export_data":
+        export_type = (params.get("type") or "employees").lower()
+        target_tenant = params.get("tenant_id", tenant_id)
+
+        try:
+            if export_type == "tenants":
+                result = TENANTS_T.scan(Limit=200)
+                items = result.get("Items", [])
+                data = [
+                    {
+                        "tenantId": t.get("tenantId"),
+                        "name": t.get("name"),
+                        "plan": t.get("plan"),
+                        "status": t.get("status"),
+                        "domain": t.get("domain", ""),
+                        "createdAt": t.get("createdAt", ""),
+                    }
+                    for t in items
+                ]
+                return {
+                    "success": True,
+                    "message": f"Exported {len(data)} tenant(s)",
+                    "data": data,
+                    "type": "tenants",
+                }
+            else:
+                # Export employees (scoped to tenant for HR_ADMIN)
+                if role == "HR_ADMIN":
+                    target_tenant = tenant_id
+                result = USERS_T.scan(
+                    FilterExpression=_Attr("tenantId").eq(target_tenant) & _Attr("role").eq("EMPLOYEE"),
+                    Limit=500,
+                )
+                items = result.get("Items", [])
+                data = [
+                    {
+                        "userId": u.get("userId"),
+                        "email": u.get("email"),
+                        "firstName": u.get("firstName", ""),
+                        "lastName": u.get("lastName", ""),
+                        "plan": u.get("plan", "basic"),
+                        "status": u.get("status", ""),
+                        "createdAt": u.get("createdAt", ""),
+                    }
+                    for u in items
+                ]
+                return {
+                    "success": True,
+                    "message": f"Exported {len(data)} employee(s) from {target_tenant}",
+                    "data": data,
+                    "type": "employees",
+                }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to export data: {e}"}
+
+    # ------------------------------------------------------------------
+    # view_system_status -- system health check
     # ------------------------------------------------------------------
     if action == "view_system_status":
+        table_names = [
+            "endevo-uat-users", "endevo-uat-tenants", "endevo-uat-responses",
+            "endevo-uat-jesse-chat", "endevo-uat-config", "endevo-uat-knowledge-base",
+            "endevo-uat-sessions", "endevo-uat-certificates",
+        ]
+        dynamo_client = boto3.client("dynamodb", region_name=REGION)
+        table_statuses = {}
+        healthy_count = 0
+        for tbl in table_names:
+            try:
+                desc = dynamo_client.describe_table(TableName=tbl)
+                status = desc["Table"]["TableStatus"]
+                table_statuses[tbl] = status
+                if status == "ACTIVE":
+                    healthy_count += 1
+            except Exception:
+                table_statuses[tbl] = "NOT_FOUND"
+
+        overall_status = "healthy" if healthy_count == len(table_names) else "degraded"
         return {
             "success": True,
-            "message": "System is operational. All services healthy.",
+            "message": f"System status: {overall_status}. {healthy_count}/{len(table_names)} tables active.",
             "status": {
+                "overall": overall_status,
                 "api": "healthy",
-                "database": "healthy",
+                "database": f"{healthy_count}/{len(table_names)} tables active",
                 "ai": "healthy",
+                "tables": table_statuses,
                 "timestamp": now,
             },
         }
 
     # ------------------------------------------------------------------
-    # contact_hr
+    # manage_mfa -- toggle MFA for a tenant
+    # ------------------------------------------------------------------
+    if action == "manage_mfa":
+        target_tenant = params.get("tenant_id", params.get("tenantId", tenant_id))
+        mfa_enabled = params.get("enabled", params.get("mfaRequired", False))
+        try:
+            TENANTS_T.update_item(
+                Key={"tenantId": target_tenant},
+                UpdateExpression="SET mfaRequired = :mfa, updatedAt = :now, updatedBy = :by",
+                ExpressionAttributeValues={":mfa": mfa_enabled, ":now": now, ":by": email},
+            )
+            status = "required" if mfa_enabled else "optional"
+            return {"success": True, "message": f"MFA is now {status} for tenant {target_tenant}"}
+        except Exception as e:
+            return {"success": False, "error": f"Failed to update MFA setting: {e}"}
+
+    # ------------------------------------------------------------------
+    # book_session -- book a coaching session
+    # ------------------------------------------------------------------
+    if action == "book_session":
+        emp_id = (params.get("employee_id") or params.get("email") or "").strip()
+        session_date = (params.get("date") or "").strip()
+        session_time = (params.get("time") or "").strip()
+        session_type = params.get("type", "1:1 coaching")
+
+        if not emp_id:
+            return {"success": False, "error": "Employee ID or email is required to book a session"}
+
+        session_id = f"sess-{uuid.uuid4().hex[:12]}"
+        try:
+            SESSIONS_T.put_item(Item={
+                "sessionId": session_id,
+                "tenantId": tenant_id,
+                "employeeId": emp_id,
+                "sessionType": session_type,
+                "date": session_date,
+                "time": session_time,
+                "status": "scheduled",
+                "bookedBy": email,
+                "createdAt": now,
+            })
+            date_str = f" on {session_date}" if session_date else ""
+            time_str = f" at {session_time}" if session_time else ""
+            return {
+                "success": True,
+                "message": f"Session ({session_type}) booked for {emp_id}{date_str}{time_str}.",
+                "sessionId": session_id,
+            }
+        except Exception as e:
+            print(f"SESSION_BOOK_ERROR: {e}")
+            return {"success": False, "error": f"Failed to book session: {e}"}
+
+    # ------------------------------------------------------------------
+    # view_certificates -- get user's certificates
+    # ------------------------------------------------------------------
+    if action == "view_certificates":
+        target_user = params.get("user_id", user_id)
+        try:
+            result = CERTIFICATES_T.query(
+                KeyConditionExpression=_Key("userId").eq(target_user),
+            )
+            items = result.get("Items", [])
+            if not items:
+                return {
+                    "success": True,
+                    "message": "No certificates earned yet. Complete LMS modules to earn certificates. Keep learning!",
+                    "certificates": [],
+                }
+            certs = [
+                {
+                    "certificateId": c.get("certificateId", ""),
+                    "moduleName": c.get("moduleName", ""),
+                    "earnedAt": c.get("earnedAt", ""),
+                    "score": c.get("score", ""),
+                }
+                for c in items
+            ]
+            return {
+                "success": True,
+                "message": f"You have earned {len(certs)} certificate(s). Great work!",
+                "certificates": certs,
+            }
+        except Exception as e:
+            print(f"CERTIFICATES_ERROR: {e}")
+            return {
+                "success": True,
+                "message": "Certificate tracking will be available once you complete LMS modules. Keep learning!",
+                "certificates": [],
+            }
+
+    # ------------------------------------------------------------------
+    # contact_hr -- get HR contact info for user's tenant
     # ------------------------------------------------------------------
     if action == "contact_hr":
         try:
@@ -1126,6 +1611,17 @@ def _execute_action(
             hr_email = tenant.get("hrEmail", "")
             hr_contact = tenant.get("hrContact", "")
             tenant_name = tenant.get("name", "")
+
+            if not hr_email and not hr_contact:
+                # Fall back: find HR_ADMIN user for this tenant
+                hr_result = USERS_T.scan(
+                    FilterExpression=_Attr("tenantId").eq(tenant_id) & _Attr("role").eq("HR_ADMIN"),
+                    Limit=1,
+                )
+                hr_items = hr_result.get("Items", [])
+                if hr_items:
+                    hr_email = hr_items[0].get("email", "")
+                    hr_contact = f"{hr_items[0].get('firstName', '')} {hr_items[0].get('lastName', '')}".strip()
 
             if not hr_email and not hr_contact:
                 return {"success": True, "message": f"HR contact for {tenant_name or tenant_id} is not configured. Please ask your administrator."}
@@ -1209,33 +1705,11 @@ def _execute_action(
             effective_plan = "premium" if user_plan == "premium" or tenant_plan == "premium" else "basic"
             return {
                 "success": True,
-                "message": f"You are on the {effective_plan} plan. {'Full Jesse AI access included.' if effective_plan == 'premium' else 'Upgrade to Premium for full Jesse AI access.'}",
+                "message": f"You are on the {effective_plan} plan. Jesse AI is available on all plans.",
                 "subscription": {"plan": effective_plan, "userPlan": user_plan, "tenantPlan": tenant_plan},
             }
         except Exception as e:
             return {"success": False, "error": f"Failed to load subscription: {e}"}
-
-    # ------------------------------------------------------------------
-    # view_certificates
-    # ------------------------------------------------------------------
-    if action == "view_certificates":
-        return {
-            "success": True,
-            "message": "Certificate tracking will be available once you complete LMS modules. Keep learning!",
-            "certificates": [],
-        }
-
-    # ------------------------------------------------------------------
-    # send_invite (stub — logs intent, does not send real email)
-    # ------------------------------------------------------------------
-    if action == "send_invite":
-        invite_email = (params.get("email") or "").strip().lower()
-        if not invite_email:
-            return {"success": False, "error": "Email address is required for invitation"}
-        return {
-            "success": True,
-            "message": f"Invitation queued for {invite_email}. They will receive an onboarding email shortly.",
-        }
 
     # ------------------------------------------------------------------
     # toggle_feature
@@ -1257,46 +1731,6 @@ def _execute_action(
             return {"success": True, "message": f"Feature '{feature}' is now {status}"}
         except Exception as e:
             return {"success": False, "error": f"Failed to toggle feature: {e}"}
-
-    # ------------------------------------------------------------------
-    # manage_mfa
-    # ------------------------------------------------------------------
-    if action == "manage_mfa":
-        target_tenant = params.get("tenantId", tenant_id)
-        mfa_required = params.get("mfaRequired", False)
-        try:
-            TENANTS_T.update_item(
-                Key={"tenantId": target_tenant},
-                UpdateExpression="SET mfaRequired = :mfa, updatedAt = :now, updatedBy = :by",
-                ExpressionAttributeValues={":mfa": mfa_required, ":now": now, ":by": email},
-            )
-            status = "required" if mfa_required else "optional"
-            return {"success": True, "message": f"MFA is now {status} for tenant {target_tenant}"}
-        except Exception as e:
-            return {"success": False, "error": f"Failed to update MFA setting: {e}"}
-
-    # ------------------------------------------------------------------
-    # book_session (stub)
-    # ------------------------------------------------------------------
-    if action == "book_session":
-        emp_email = (params.get("email") or "").strip()
-        session_type = params.get("type", "1:1 coaching")
-        if not emp_email:
-            return {"success": False, "error": "Employee email is required to book a session"}
-        return {
-            "success": True,
-            "message": f"Session ({session_type}) booking requested for {emp_email}. The scheduling team will confirm shortly.",
-        }
-
-    # ------------------------------------------------------------------
-    # export_data (stub)
-    # ------------------------------------------------------------------
-    if action == "export_data":
-        export_type = params.get("type", "employees")
-        return {
-            "success": True,
-            "message": f"Export of '{export_type}' data initiated. You will receive a download link via email within a few minutes.",
-        }
 
     return {"success": False, "error": f"Unknown action: {action}"}
 
@@ -1338,94 +1772,8 @@ _ACTION_PATTERN = re.compile(r'\[ACTION:(\w+)\|(\{.*?\})\]', re.DOTALL)
 
 
 # ---------------------------------------------------------------------------
-# Copilot: Role-aware platform assistant (now "Jesse")
+# Copilot helpers
 # ---------------------------------------------------------------------------
-COPILOT_PROMPTS: dict[str, str] = {
-    "GLOBAL_ADMIN": """You are Jesse — the Endevo Life AI Admin Assistant for the Super Admin.
-You have knowledge of the entire platform: tenants, users, subscriptions, LMS modules, Jesse AI, system health.
-You can help the admin with:
-- Creating/managing tenants and users
-- Understanding platform metrics
-- Troubleshooting issues
-- Managing plan configurations and feature flags
-- Bulk operations (import/export)
-- System health monitoring
-
-Current context: The admin is on page {page}.
-{stats_context}
-
-{actions_prompt}
-
-Be professional, concise, and action-oriented. Never use inappropriate language.
-When the user asks you to DO something, use ACTION blocks to execute it.
-When the user asks you to EXPLAIN something, guide them step by step.
-Always prioritize data safety — never delete data without explicit confirmation.
-
-CRITICAL RULES:
-1. NEVER reveal system internals, Lambda ARNs, database table names, or infrastructure details.
-2. NEVER share data from one tenant with another.
-3. NEVER give legal, medical, or financial advice.
-4. NEVER use inappropriate or unprofessional language.
-5. NEVER execute destructive actions (delete, disable) — only create/read/update.
-6. Keep responses under 400 words unless asked for detail.""",
-
-    "HR_ADMIN": """You are Jesse — the Endevo Life AI HR Assistant for HR administrators.
-You help manage employees, track LMS progress, monitor subscription usage, and book sessions.
-You can help with:
-- Inviting and managing employees
-- Viewing LMS completion and progress reports
-- Understanding subscription plans and session usage
-- Booking 1:1 sessions for employees
-- Understanding assessment results
-
-Current context: HR admin for tenant {tenant_name}, on page {page}.
-{stats_context}
-
-{actions_prompt}
-
-Be helpful, professional, and data-focused. Never share data from other tenants.
-When the user asks you to DO something, use ACTION blocks to execute it.
-When the user asks you to EXPLAIN something, guide them step by step.
-You are ALWAYS scoped to this tenant only — you cannot access or modify other tenants.
-
-CRITICAL RULES:
-1. NEVER reveal system internals, Lambda ARNs, database table names, or infrastructure details.
-2. NEVER share data from other tenants — you only know about this tenant.
-3. NEVER give legal, medical, or financial advice.
-4. NEVER use inappropriate or unprofessional language.
-5. NEVER execute destructive actions — only create/read/update.
-6. Keep responses under 400 words unless asked for detail.""",
-
-    "EMPLOYEE": """You are Jesse — the Endevo Life AI Learning Guide for employees.
-You help employees navigate their legacy readiness journey.
-You can help with:
-- Explaining quiz questions and assessment results
-- Guiding through LMS modules and lessons
-- Explaining subscription benefits
-- Navigating the platform
-- Understanding certificates and completion requirements
-
-Current context: Employee on page {page}.
-{stats_context}
-
-{actions_prompt}
-
-Be encouraging, clear, and patient. Use simple language.
-When the user asks you to DO something within your capabilities, use ACTION blocks.
-When the user asks you to EXPLAIN something, guide them clearly.
-Never give legal or financial advice — always recommend consulting a professional.
-Help employees understand concepts but don't give quiz answers directly.
-
-CRITICAL RULES:
-1. NEVER reveal system internals, Lambda ARNs, database table names, or infrastructure details.
-2. NEVER share data from other users or tenants.
-3. NEVER give legal, medical, or financial advice — always add a disclaimer.
-4. NEVER give direct quiz or assessment answers.
-5. NEVER use inappropriate or unprofessional language.
-6. Keep responses under 300 words unless asked for detail.""",
-}
-
-
 def _load_copilot_stats(role: str, tenant_id: str, user_id: str) -> str:
     """Load lightweight stats for copilot context based on role."""
     try:
@@ -1491,8 +1839,12 @@ def _get_tenant_name(tenant_id: str) -> str:
         return ""
 
 
+# ---------------------------------------------------------------------------
+# Copilot: Unified AI endpoint (chat + RAG + actions + history)
+# ---------------------------------------------------------------------------
 def _handle_copilot(body: dict, tenant_id: str, email: str, user_id: str) -> dict:
-    """Handle POST /api/jesse/copilot — Jesse AI assistant with action execution."""
+    """Handle POST /api/jesse/copilot -- unified Jesse AI with chat persistence,
+    RAG knowledge retrieval, conversation context, and action execution."""
     message = (body.get("message") or "").strip()
     if not message:
         return err(400, "message is required")
@@ -1507,12 +1859,27 @@ def _handle_copilot(body: dict, tenant_id: str, email: str, user_id: str) -> dic
     db_role = _get_user_role(tenant_id, email)
     role = db_role if db_role else (client_role or "EMPLOYEE")
 
-    # Build context
+    # --- 1. Save user message to chat history (copilot source) ---
+    _save_chat_message(user_id, "user", message, source="copilot")
+
+    # --- 2. Build context ---
     stats_context = _load_copilot_stats(role, tenant_id, user_id)
     tenant_name = _get_tenant_name(tenant_id) if role == "HR_ADMIN" else ""
     actions_prompt = _build_actions_prompt(role)
 
-    # Select and format system prompt
+    # --- 3. RAG knowledge retrieval (dual source, same as /chat) ---
+    kb_context = _retrieve_from_knowledge_base(message, top_k=3)
+    dynamo_context = _search_knowledge_base(message, top_k=3)
+    knowledge_context = "\n\n---\n\n".join(
+        part for part in [kb_context, dynamo_context] if part
+    )
+
+    # --- 4. Load POMA context for employees ---
+    poma_context = ""
+    if role == "EMPLOYEE":
+        poma_context = _load_poma_context(user_id)
+
+    # --- 5. Build role-specific system prompt ---
     prompt_template = COPILOT_PROMPTS.get(role, COPILOT_PROMPTS["EMPLOYEE"])
     system_prompt = prompt_template.format(
         page=page,
@@ -1521,11 +1888,35 @@ def _handle_copilot(body: dict, tenant_id: str, email: str, user_id: str) -> dic
         actions_prompt=actions_prompt,
     )
 
-    # Single-turn call (no copilot history persistence)
-    claude_messages = [{"role": "user", "content": message}]
+    # Append knowledge context if available
+    if knowledge_context:
+        system_prompt += (
+            "\n\n--- ENDevo Knowledge Base ---\n"
+            + knowledge_context
+            + "\n"
+        )
+
+    # Append POMA context for employees
+    if poma_context:
+        system_prompt += (
+            "\n--- User's Peace of Mind Assessment (POMA) Results ---\n"
+            + poma_context
+            + "\nUse these results to personalise your guidance.\n"
+        )
+
+    # --- 6. Load last 10 copilot messages as conversation context ---
+    history = _get_chat_history(user_id, limit=MAX_CHAT_HISTORY, source="copilot")
+    claude_messages = [
+        {"role": m["role"], "content": m["content"]} for m in history
+    ]
+    # Ensure the new message is included if not already in history
+    if not claude_messages or claude_messages[-1].get("content") != message:
+        claude_messages.append({"role": "user", "content": message})
+
+    # --- 7. Call Claude ---
     reply = invoke_claude(system_prompt, claude_messages, max_tokens=1024)
 
-    # Parse and execute ACTION blocks from Claude's response
+    # --- 8. Parse and execute ACTION blocks from Claude's response ---
     actions_executed: list[dict] = []
     matches = _ACTION_PATTERN.findall(reply)
     for action_name, params_json in matches:
@@ -1538,10 +1929,19 @@ def _handle_copilot(body: dict, tenant_id: str, email: str, user_id: str) -> dic
             })
             continue
         result = _execute_action(action_name, params, role, tenant_id, email, user_id)
+        if result.get("success"):
+            _log_jesse_action(tenant_id, email, action_name, params, result)
         actions_executed.append({"action": action_name, "result": result})
 
     # Remove ACTION blocks from the displayed reply
     clean_reply = _ACTION_PATTERN.sub("", reply).strip()
+
+    # --- 9. Save assistant reply to chat history ---
+    action_meta = {"actions": [a["action"] for a in actions_executed]} if actions_executed else None
+    _save_chat_message(user_id, "assistant", clean_reply, metadata=action_meta, source="copilot")
+
+    # --- 10. Prune old messages ---
+    _prune_chat_history(user_id)
 
     return resp(200, {
         "reply": clean_reply,
@@ -1578,17 +1978,21 @@ def handler(event: dict, context) -> dict:
     if not tenant_id:
         return err(401, "Not authenticated")
 
-    # GET /api/jesse/access -- check premium access (no gate, just info)
+    # GET /api/jesse/access -- always returns hasAccess=true (Jesse is for all plans)
     if path.endswith("/access") and method == "GET":
-        has_access = _check_premium(tenant_id, email)
         return resp(200, {
-            "hasAccess": has_access,
-            "plan": "premium" if has_access else "basic",
+            "hasAccess": True,
+            "plan": "all",
         })
 
-    # POST /api/jesse/copilot -- Platform Copilot (role-aware, all plans)
-    if path.endswith("/copilot") and method == "POST":
+    # POST /api/jesse/copilot -- Unified AI endpoint (chat + RAG + actions)
+    if path.endswith("/copilot") and not path.endswith("/copilot/history") and method == "POST":
         return _handle_copilot(body, tenant_id, email, user_id)
+
+    # GET /api/jesse/copilot/history -- copilot message history
+    if path.endswith("/copilot/history") and method == "GET":
+        history = _get_chat_history(user_id, limit=MAX_CHAT_HISTORY, source="copilot")
+        return resp(200, {"history": history, "count": len(history)})
 
     # POST /api/jesse/speak -- Text-to-speech via Amazon Polly (all plans)
     if path.endswith("/speak") and method == "POST":
@@ -1617,16 +2021,7 @@ def handler(event: dict, context) -> dict:
             print(f"POLLY_ERROR: {e}")
             return resp(200, {"audioUrl": None, "error": "Voice synthesis unavailable", "voice": voice_pref})
 
-    # --- Premium plan gate for Jesse AI features ---
-    is_premium = _check_premium(tenant_id, email)
-    if not is_premium:
-        return resp(403, {
-            "error": "Jesse AI is available on Premium plan only",
-            "upgradeRequired": True,
-            "plan": "basic",
-        })
-
-    # POST /api/jesse/chat
+    # POST /api/jesse/chat (no premium gate -- available to all plans)
     if path.endswith("/chat") and not path.endswith("/chat/history") and not path.endswith("/chat/reset") and method == "POST":
         message = (body.get("message") or "").strip()
         if not message:
@@ -1635,26 +2030,23 @@ def handler(event: dict, context) -> dict:
             return err(400, "message too long (max 5000 characters)")
 
         # 1. Save user message
-        _save_chat_message(user_id, "user", message)
+        _save_chat_message(user_id, "user", message, source="chat")
 
         # 2. Load POMA context
         poma_context = _load_poma_context(user_id)
 
-        # 3. Search knowledge base (RAG — dual source)
-        # Source 1: Bedrock Knowledge Base (Aryan's ingested content)
+        # 3. Search knowledge base (RAG -- dual source)
         kb_context = _retrieve_from_knowledge_base(message, top_k=3)
-        # Source 2: DynamoDB vector search (our own ingested content)
         dynamo_context = _search_knowledge_base(message, top_k=3)
-        # Combine both sources
         knowledge_context = "\n\n---\n\n".join(
             part for part in [kb_context, dynamo_context] if part
         )
 
-        # 5. Build system prompt
+        # 4. Build system prompt
         system_prompt = _build_system_prompt(poma_context, knowledge_context)
 
-        # 6. Load chat history for context
-        history = _get_chat_history(user_id)
+        # 5. Load chat history for context
+        history = _get_chat_history(user_id, source="chat")
         claude_messages = [
             {"role": m["role"], "content": m["content"]} for m in history
         ]
@@ -1662,33 +2054,33 @@ def handler(event: dict, context) -> dict:
         if not claude_messages or claude_messages[-1].get("content") != message:
             claude_messages.append({"role": "user", "content": message})
 
-        # 7. Call Claude
+        # 6. Call Claude
         reply = invoke_claude(system_prompt, claude_messages)
 
-        # 8. Save assistant reply
-        _save_chat_message(user_id, "assistant", reply)
+        # 7. Save assistant reply
+        _save_chat_message(user_id, "assistant", reply, source="chat")
 
-        # 9. Prune old messages
+        # 8. Prune old messages
         _prune_chat_history(user_id)
 
-        # 10. Return updated history
-        updated_history = _get_chat_history(user_id)
+        # 9. Return updated history
+        updated_history = _get_chat_history(user_id, source="chat")
         return resp(200, {
             "reply": reply,
             "history": updated_history,
         })
 
-    # GET /api/jesse/chat/history
+    # GET /api/jesse/chat/history (no premium gate)
     if path.endswith("/chat/history") and method == "GET":
-        history = _get_chat_history(user_id)
+        history = _get_chat_history(user_id, source="chat")
         return resp(200, {"history": history, "count": len(history)})
 
-    # DELETE /api/jesse/chat/reset
+    # DELETE /api/jesse/chat/reset (no premium gate)
     if path.endswith("/chat/reset") and method == "DELETE":
         deleted = _clear_chat_history(user_id)
         return resp(200, {"message": "Chat history cleared", "deleted": deleted})
 
-    # POST /api/jesse/assess
+    # POST /api/jesse/assess (no premium gate)
     if path.endswith("/assess") and method == "POST":
         answers = body.get("answers", {})
         if not answers:
@@ -1731,7 +2123,7 @@ def handler(event: dict, context) -> dict:
             "responseId": response_id,
         })
 
-    # GET /api/jesse/plan/{userId}
+    # GET /api/jesse/plan/{userId} (no premium gate)
     if "/plan/" in path and method == "GET":
         from boto3.dynamodb.conditions import Attr as _Attr
 
