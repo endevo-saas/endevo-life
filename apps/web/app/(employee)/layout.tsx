@@ -51,8 +51,9 @@ function SessionPanel() {
     const saved = localStorage.getItem('emp_avatar')
     if (saved) setAvatar(saved)
     // Load avatar from profile if available
-    api.employeeProfile().then((profile: Record<string, unknown>) => {
-      const key = profile?.avatarKey as string | undefined
+    api.employeeProfile().then((profile: unknown) => {
+      const p = profile as Record<string, unknown>
+      const key = p?.avatarKey as string | undefined
       const cfDomain = process.env.NEXT_PUBLIC_CF_DOMAIN || ''
       if (key && cfDomain) {
         const url = `https://${cfDomain}/${key}`
