@@ -1,5 +1,4 @@
 'use client'
-export const dynamic = 'force-dynamic'
 
 import { useEffect, useState, useCallback, useRef } from 'react'
 import {
@@ -22,11 +21,15 @@ interface HrMetrics {
 }
 
 interface HrSubscription {
+  tenantId: string
   plan: string
   seats: number
   usedSeats: number
-  sessionsTotal: number
-  sessionsUsed: number
+  pricePerEmployee: number
+  sessionsPerEmployee: number
+  totalSessions: number
+  usedSessions: number
+  billingHistory: unknown[]
 }
 
 interface RecentUser {
@@ -253,12 +256,17 @@ export default function HrDashboard() {
           // Non-critical — tenant name is cosmetic
         }
       }
+
+      // Show error if ALL three API calls failed
+      if (metricsData.status === 'rejected' && subData.status === 'rejected' && employeesData.status === 'rejected') {
+        setError('Unable to load dashboard data. Please check your connection and try again.')
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load dashboard data')
     } finally {
       setLoading(false)
     }
-  }, [tenantName])
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { load() }, [load])
 
@@ -369,7 +377,7 @@ export default function HrDashboard() {
                 Seats: <span className="text-white font-semibold">{subscription.usedSeats}/{subscription.seats}</span>
               </span>
               <span className="text-slate-400">
-                Sessions: <span className="text-white font-semibold">{subscription.sessionsUsed}/{subscription.sessionsTotal}</span>
+                Sessions: <span className="text-white font-semibold">{subscription.usedSessions}/{subscription.totalSessions}</span>
               </span>
             </div>
           </div>
