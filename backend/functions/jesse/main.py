@@ -38,6 +38,8 @@ KNOWLEDGE_T = dynamo.Table("endevo-uat-knowledge-base")
 CONFIG_T = dynamo.Table("endevo-uat-config")
 
 bedrock = boto3.client("bedrock-runtime", region_name=REGION)
+bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
+_secrets = boto3.client("secretsmanager", region_name=REGION)
 
 CHAT_MODEL = os.environ.get(
     "BEDROCK_CHAT_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
@@ -48,6 +50,55 @@ PLAN_MODEL = os.environ.get(
 EMBED_MODEL = os.environ.get("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 
 MAX_CHAT_HISTORY = 10
+
+# ---------------------------------------------------------------------------
+# Secrets cache
+# ---------------------------------------------------------------------------
+_secret_cache: dict = {}
+
+
+def _get_secret(name: str) -> str:
+    if name in _secret_cache:
+        return _secret_cache[name]
+    val = _secrets.get_secret_value(SecretId=name)["SecretString"]
+    _secret_cache[name] = val
+    return val
+
+
+# ---------------------------------------------------------------------------
+# Bedrock Knowledge Base retrieval (cloned from Aryan's bedrock.ts)
+# ---------------------------------------------------------------------------
+def _retrieve_from_knowledge_base(query: str, top_k: int = 5) -> str:
+    """Retrieve context from Bedrock Knowledge Base (Y52P6BJVGP).
+
+    This is Aryan's ingested knowledge base containing Niki's podcasts,
+    books, transcripts, and the 87-page workbook. Falls back gracefully
+    if KB is not available.
+    """
+    try:
+        kb_id = _get_secret("endevo/jesse/bedrock-kb-id")
+        if not kb_id:
+            return ""
+        response = bedrock_agent.retrieve(
+            knowledgeBaseId=kb_id,
+            retrievalQuery={"text": query},
+            retrievalConfiguration={
+                "vectorSearchConfiguration": {"numberOfResults": top_k}
+            },
+        )
+        results = response.get("retrievalResults", [])
+        if not results:
+            return ""
+        chunks = []
+        for r in results:
+            content = r.get("content", {}).get("text", "")
+            score = r.get("score", 0)
+            if content and score > 0.3:
+                chunks.append(content)
+        return "\n\n---\n\n".join(chunks)
+    except Exception as e:
+        print(f"BEDROCK_KB_RETRIEVE_ERROR: {e}")
+        return ""
 
 # ---------------------------------------------------------------------------
 # CORS
@@ -788,8 +839,15 @@ def handler(event: dict, context) -> dict:
         # 2. Load POMA context
         poma_context = _load_poma_context(user_id)
 
-        # 3. Search knowledge base (RAG — embed query, cosine search DynamoDB)
-        knowledge_context = _search_knowledge_base(message, top_k=5)
+        # 3. Search knowledge base (RAG — dual source)
+        # Source 1: Bedrock Knowledge Base (Aryan's ingested content)
+        kb_context = _retrieve_from_knowledge_base(message, top_k=3)
+        # Source 2: DynamoDB vector search (our own ingested content)
+        dynamo_context = _search_knowledge_base(message, top_k=3)
+        # Combine both sources
+        knowledge_context = "\n\n---\n\n".join(
+            part for part in [kb_context, dynamo_context] if part
+        )
 
         # 5. Build system prompt
         system_prompt = _build_system_prompt(poma_context, knowledge_context)
