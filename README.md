@@ -3,10 +3,43 @@
 > The first purpose-built SaaS platform that transforms estate and legacy planning into a structured, measurable employee benefit — delivered through an enterprise LMS with multi-tenant isolation, serverless infrastructure, and zero-dependency Lambda functions.
 
 [![Live Platform](https://img.shields.io/badge/Live-Platform-brightgreen)](https://uat.endevo.life)
+[![Deploy App](https://github.com/endevo-saas/endevo-life/actions/workflows/deploy-app.yml/badge.svg)](https://github.com/endevo-saas/endevo-life/actions/workflows/deploy-app.yml)
+[![Deploy Lambda](https://github.com/endevo-saas/endevo-life/actions/workflows/deploy-lambda.yml/badge.svg)](https://github.com/endevo-saas/endevo-life/actions/workflows/deploy-lambda.yml)
+[![Deploy CDK](https://github.com/endevo-saas/endevo-life/actions/workflows/deploy-infrastructure.yml/badge.svg)](https://github.com/endevo-saas/endevo-life/actions/workflows/deploy-infrastructure.yml)
 [![AWS Serverless](https://img.shields.io/badge/Stack-AWS_Serverless-orange)](https://aws.amazon.com)
 [![Next.js 15](https://img.shields.io/badge/Frontend-Next.js_15-black)](https://nextjs.org)
 [![Python 3.12](https://img.shields.io/badge/Backend-Python_3.12-blue)](https://aws.amazon.com/lambda/)
 [![160+ Commits](https://img.shields.io/badge/Commits-160%2B-purple)](#)
+
+## Quick Links
+
+| Resource | URL |
+|----------|-----|
+| **Live Platform** | [uat.endevo.life](https://uat.endevo.life) |
+| **API Gateway** | [4jms6sdzk9.execute-api.us-east-1.amazonaws.com](https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com) |
+| **GitHub** | [endevo-saas/endevo-life](https://github.com/endevo-saas/endevo-life) |
+| **Architecture** | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
+| **AWS Inventory** | [docs/AWS-SERVICES-INVENTORY.md](docs/AWS-SERVICES-INVENTORY.md) |
+| **QA Report** | [docs/QA-REPORT.md](docs/QA-REPORT.md) |
+| **Troubleshooting** | [docs/TROUBLESHOOTING-GUIDE.md](docs/TROUBLESHOOTING-GUIDE.md) |
+| **Enterprise Playbook** | [docs/ENTERPRISE-RESILIENCE-PLAYBOOK.md](docs/ENTERPRISE-RESILIENCE-PLAYBOOK.md) |
+
+## Documentation Library
+
+The `/docs` folder contains 15 deep-dive documents (173 KB total):
+
+| Document | Purpose |
+|----------|---------|
+| **ARCHITECTURE.md** | Master architecture — AWS services, schemas, Lambda routes |
+| **PROJECT-STATUS-REPORT.md** | Day-by-day status, executive summary |
+| **AWS-SERVICES-INVENTORY.md** | Complete AWS services catalog with capacity and cost |
+| **TROUBLESHOOTING-GUIDE.md** | Comprehensive error logs and resolution guides |
+| **ENTERPRISE-RESILIENCE-PLAYBOOK.md** | Multi-region failover procedures |
+| **AUTH-MIGRATION-STRATEGY.md** | Cognito → WorkOS migration rationale |
+| **DYNAMODB-SHARDING-DESIGN.md** | DynamoDB scaling and sharding patterns |
+| **IAM-AUDIT-2026-04-03.md** | IAM policy audit and recommendations |
+| **QA-REPORT.md** | Test coverage — 69 tests, 98.6% pass rate |
+| **TEST-GUIDE.md** | Testing procedures and credentials |
 
 ---
 

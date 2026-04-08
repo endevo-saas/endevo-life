@@ -50,7 +50,12 @@ __pycache__/
 
 # Lambda build artifacts
 backend/functions/**/lambda.zip
+backend/functions/**/*-lambda.zip
+*.zip
 scripts/seed-training.sh
+
+# Infrastructure lock files (generated)
+infrastructure/package-lock.json
 
 # Secrets & credentials — NEVER commit
 _keys/

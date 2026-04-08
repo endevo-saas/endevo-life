@@ -2,8 +2,10 @@ name: Deploy Lambda Functions
 
 on:
   push:
+    branches: [main]
     paths:
       - 'backend/**'
+      - '.github/workflows/deploy-lambda.yml'
   workflow_dispatch:
 
 jobs:
@@ -22,6 +24,8 @@ jobs:
             path: backend/functions/admin
           - name: endevo-uat-fn-lms
             path: backend/functions/lms
+          - name: endevo-uat-fn-jesse
+            path: backend/functions/jesse
 
     steps:
       - uses: actions/checkout@v4
