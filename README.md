@@ -194,7 +194,7 @@ The `/docs` folder contains 15 deep-dive documents (173 KB total):
 | Lambda functions | **6** (auth, admin, HR, employee, LMS, **jesse**) |
 | DynamoDB tables | **18** |
 | CDK stacks | **11** |
-| CloudWatch alarms | 35 |
+| CloudWatch alarms | 37 |
 | API Endpoints | 110+ |
 | Jesse AI routes | 7 (health, chat, history, reset, assess, plan, access) |
 | Plan management | Dynamic (DynamoDB-driven, not hardcoded) |
@@ -1216,9 +1216,9 @@ npx cdk deploy --all
 
 | Metric | Value |
 |--------|-------|
-| **Total git commits** | 153 |
-| **Total source files** | 153 (Python + TypeScript + config + docs) |
-| **Total lines of code** | 35,262 |
+| **Total git commits** | 155 |
+| **Total source files** | 155 (Python + TypeScript + config + docs) |
+| **Total lines of code** | 36,073 |
 | **Python files (backend)** | 40 |
 | **TypeScript/TSX files (frontend)** | 85 |
 | **Folders** | 100 |
@@ -1397,10 +1397,46 @@ Three independent QA agents + one security agent deployed in parallel:
 
 ---
 
+## Soft-Delete / Recycle Bin System (2026-04-08)
+
+**No data is ever permanently deleted.** Users, tenants, and employees go to archive with full audit trail and can be restored.
+
+| Feature | Admin | HR | Employee |
+|---------|:-----:|:--:|:--------:|
+| Archive users (soft-delete) | Yes — all users | Yes — own tenant employees | — |
+| Archive tenants | Yes — cascades to all employees | — | — |
+| View archived records | Yes — Recycle Bin page | Yes — Recycle Bin page | — |
+| Restore from archive | Yes — user + tenant restore | Yes — employee restore | — |
+| Audit trail on delete | Yes — who, when, reason logged | Yes — full audit | — |
+| Cascade archive | Yes — archiving tenant archives all its employees | — | — |
+| Cascade restore | Yes — restoring tenant restores all its employees | — | — |
+
+### Recycle Bin Pages
+- **Super Admin**: `/admin/archive` — Two tabs (Archived Users + Archived Tenants), search, restore button, CSV export
+- **HR Admin**: `/hr/archive` — Archived employees in own tenant, restore, CSV export
+
+### Archive Record Fields
+Every archived record contains: `status='archived'`, `archivedAt`, `archivedBy`, `archiveReason`. On restore: `restoredAt`, `restoredBy` added. Original data is NEVER deleted.
+
+---
+
+## AWS Infrastructure Fixes (2026-04-08)
+
+| Fix | Status | Details |
+|-----|--------|---------|
+| PITR on 6 tables | DONE | config, 4 LMS tables, notifications — all now have point-in-time recovery |
+| CloudWatch alarms | DONE | fn-lms + fn-jesse error alarms added (37 total alarms now) |
+| API Gateway throttle | DONE | 500 burst, 200 req/sec, detailed metrics enabled |
+| WAF attachment | BLOCKED | HTTP APIs don't support WAFv2 directly. Need CloudFront in front of API Gateway. Planned for next CDK update. |
+| Lambda concurrency | DOCUMENTED | Account limit = 1000. Need AWS Support quota increase for 1M scale. |
+| Security headers | DOCUMENTED | Need CloudFront or Lambda response changes. |
+
+---
+
 ## Pending / Roadmap
 
 ### Immediate (Pre-Production Blockers)
-- [ ] Attach WAF to API Gateway
+- [ ] Add CloudFront in front of API Gateway (enables WAF + security headers)
 - [ ] Request Lambda concurrency increase (5000+)
 - [ ] Enable PITR on 6 missing tables
 - [ ] Implement JWT RSA signature verification (JWKS)
@@ -1468,6 +1504,8 @@ Three independent QA agents + one security agent deployed in parallel:
 - **Jesse AI v2:** Massive upgrade. Unified component across all 3 dashboards. Voice I/O, 17 executable actions, audit trail, confirmation flow, Gemma 4 fallback, ethical guardrails. Jesse is now the AI employee.
 - **Full QA:** 3 agents + security scan. 90% API pass rate, 100% frontend quality, 14 security findings documented, AWS architecture gaps mapped.
 - **Missing notifications table created** (18th table). LMS health endpoint added. Amplify workflow fixed (wrong app name).
+- **Soft-delete/Recycle Bin:** No data ever permanently deleted. Users, tenants, employees go to archive with full audit trail. Restore capability for admin + HR. Cascade archive/restore for tenants.
+- **AWS hardening:** PITR enabled on 6 tables, 2 new CloudWatch alarms (37 total), API Gateway throttle configured (500 burst/200 rate), detailed metrics enabled.
 
 **What we built in 20 calendar days:**
 A complete enterprise SaaS platform with 6 Lambda functions, 18 DynamoDB tables, 110+ API endpoints, 40+ frontend pages, an AI employee (Jesse) with voice and action capabilities, multi-region failover, zero-trust auth, and full CI/CD automation — with 2 people and AI.
