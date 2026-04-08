@@ -20,6 +20,15 @@ Routes:
   POST /api/admin/invite
   GET  /api/admin/audit              ?limit=100&next_token=
   GET  /api/admin/health
+
+  Subscription & Billing:
+  GET  /api/admin/subscriptions                     Billing overview (all tenants)
+  GET  /api/admin/subscriptions/{tenantId}           Tenant subscription detail
+  POST /api/admin/subscriptions/{tenantId}/invoice   Create manual invoice
+  PUT  /api/admin/subscriptions/{tenantId}/plan      Change tenant plan
+
+  Metrics:
+  GET  /api/admin/metrics/overview                   Platform-wide metrics
 """
 import json, os, uuid, base64, re
 import boto3
@@ -37,6 +46,8 @@ CERT_T           = dynamo.Table("endevo-uat-certificates")
 TRAINING_T       = dynamo.Table("endevo-uat-training")
 VIDEO_PROGRESS_T = dynamo.Table("endevo-uat-video-progress")
 CONFIG_T         = dynamo.Table("endevo-uat-config")
+SUBSCRIPTIONS_T  = dynamo.Table("endevo-uat-subscriptions")
+SESSIONS_T       = dynamo.Table("endevo-uat-sessions")
 
 # ── Platform Config Defaults ──────────────────────────────────────────────────
 CONFIG_DEFAULTS = {
@@ -1188,5 +1199,321 @@ def handler(event, context):
                 "courses":       course_stats
             })
         return resp(200, {"enrollment": result, "count": len(result)})
+
+    # ── GET /api/admin/subscriptions ─────────────────────────────────────
+    if path.endswith("/subscriptions") and method == "GET":
+        try:
+            pricing = get_config("pricing")
+            basic_price  = pricing.get("basic", {}).get("price_yearly", 299)
+            premium_price = pricing.get("premium", {}).get("price_yearly", 499)
+
+            all_tenants = scan_all(TENANTS_T, Attr("status").ne("deleted"))
+            total_tenants = len(all_tenants)
+
+            # Gather subscription data from subscriptions table
+            all_subs = scan_all(SUBSCRIPTIONS_T)
+            active_subs = [s for s in all_subs if s.get("status") == "active" and s.get("sk", "").startswith("SUB#")]
+
+            # Plan distribution from tenants table (source of truth for current plan)
+            basic_count   = sum(1 for t in all_tenants if t.get("plan") == "basic")
+            premium_count = sum(1 for t in all_tenants if t.get("plan") == "premium")
+
+            # Revenue calculation based on tenant plans and seat counts
+            mrr = 0
+            for t in all_tenants:
+                plan = t.get("plan", "basic")
+                seats = int(t.get("employeeCount", 0) or 0) or 1
+                if plan == "premium":
+                    mrr += (premium_price / 12) * seats
+                else:
+                    mrr += (basic_price / 12) * seats
+            arr = mrr * 12
+
+            # Recent subscription changes (plan changes, invoices) — last 20
+            changes = [s for s in all_subs if s.get("sk", "").startswith("CHANGE#")]
+            changes.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+            recent_changes = changes[:20]
+
+            return resp(200, {
+                "total_tenants":      total_tenants,
+                "active_subscriptions": len(active_subs),
+                "revenue": {
+                    "mrr": round(mrr, 2),
+                    "arr": round(arr, 2),
+                    "currency": "USD"
+                },
+                "plan_distribution": {
+                    "basic":   basic_count,
+                    "premium": premium_count
+                },
+                "recent_changes": recent_changes
+            })
+        except Exception as e:
+            print(f"SUBSCRIPTIONS_OVERVIEW_ERROR: {e}")
+            return err(500, f"Failed to load subscriptions overview: {str(e)}")
+
+    # ── GET /api/admin/subscriptions/{tenantId} ──────────────────────────
+    if "/subscriptions/" in path and method == "GET" and not path.endswith("/invoice") and not path.endswith("/plan"):
+        tenant_id = path.split("/")[-1]
+        try:
+            t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+            if not t:
+                return err(404, "Tenant not found")
+
+            pricing = get_config("pricing")
+            plan = t.get("plan", "basic")
+            plan_info = pricing.get(plan, pricing.get("basic", {}))
+            seats = int(t.get("employeeCount", 0) or 0) or int(t.get("maxSeats", 50) or 50)
+
+            # Query subscriptions table for this tenant
+            try:
+                sub_result = SUBSCRIPTIONS_T.query(
+                    KeyConditionExpression=Key("tenantId").eq(tenant_id)
+                )
+                sub_items = sub_result.get("Items", [])
+            except Exception:
+                sub_items = []
+
+            # Separate invoices and plan changes
+            invoices = [s for s in sub_items if s.get("sk", "").startswith("INV#")]
+            invoices.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+            plan_changes = [s for s in sub_items if s.get("sk", "").startswith("CHANGE#")]
+            plan_changes.sort(key=lambda x: x.get("createdAt", ""), reverse=True)
+
+            return resp(200, {
+                "tenantId":    tenant_id,
+                "tenantName":  t.get("name", ""),
+                "current_plan": {
+                    "plan":       plan,
+                    "label":      plan_info.get("label", plan.title()),
+                    "price_yearly": plan_info.get("price_yearly", 0),
+                    "price_monthly": plan_info.get("price_monthly", 0),
+                    "seats":      seats,
+                    "max_seats":  int(t.get("maxSeats", 50) or 50),
+                    "amount_yearly": plan_info.get("price_yearly", 0) * seats
+                },
+                "invoices":      invoices,
+                "plan_changes":  plan_changes,
+                "status":        t.get("status", "unknown")
+            })
+        except Exception as e:
+            print(f"SUBSCRIPTION_DETAIL_ERROR: {e}")
+            return err(500, f"Failed to load subscription detail: {str(e)}")
+
+    # ── POST /api/admin/subscriptions/{tenantId}/invoice ─────────────────
+    if "/subscriptions/" in path and path.endswith("/invoice") and method == "POST":
+        tenant_id = path.split("/")[-2]
+        try:
+            t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+            if not t:
+                return err(404, "Tenant not found")
+
+            amount      = body.get("amount")
+            description = sanitize(body.get("description") or "", 500)
+            due_date    = sanitize(body.get("dueDate") or body.get("due_date") or "", 30)
+
+            if amount is None:
+                return err(400, "amount is required")
+            try:
+                amount = round(float(amount), 2)
+            except (TypeError, ValueError):
+                return err(400, "amount must be a number")
+            if amount <= 0:
+                return err(400, "amount must be greater than zero")
+            if not description:
+                return err(400, "description is required")
+            if not due_date:
+                return err(400, "dueDate is required (ISO format, e.g. 2026-05-01)")
+
+            now = datetime.now(timezone.utc).isoformat()
+            invoice_id = f"INV-{str(uuid.uuid4())[:8].upper()}"
+
+            SUBSCRIPTIONS_T.put_item(Item={
+                "tenantId":    tenant_id,
+                "sk":          f"INV#{invoice_id}",
+                "invoiceId":   invoice_id,
+                "amount":      str(amount),
+                "currency":    "USD",
+                "description": description,
+                "dueDate":     due_date,
+                "status":      "pending",
+                "createdAt":   now,
+                "createdBy":   caller_email
+            })
+
+            audit(tenant_id, caller_email, "INVOICE_CREATED",
+                  f"Created invoice {invoice_id}: ${amount} for {t.get('name', tenant_id)} — {description}",
+                  ip=ip, device=device)
+
+            return resp(200, {
+                "message":    f"Invoice {invoice_id} created for {t.get('name', tenant_id)}",
+                "invoice_id": invoice_id,
+                "amount":     amount,
+                "due_date":   due_date,
+                "status":     "pending"
+            })
+        except Exception as e:
+            if "amount" in str(e) or "required" in str(e):
+                raise
+            print(f"INVOICE_CREATE_ERROR: {e}")
+            return err(500, f"Failed to create invoice: {str(e)}")
+
+    # ── PUT /api/admin/subscriptions/{tenantId}/plan ─────────────────────
+    if "/subscriptions/" in path and path.endswith("/plan") and method == "PUT":
+        tenant_id = path.split("/")[-2]
+        try:
+            t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+            if not t:
+                return err(404, "Tenant not found")
+
+            new_plan       = sanitize(body.get("plan") or "", 20)
+            new_seats      = body.get("seats")
+            effective_date = sanitize(body.get("effectiveDate") or body.get("effective_date") or "", 30)
+
+            if new_plan not in ("basic", "premium"):
+                return err(400, "plan must be 'basic' or 'premium'")
+
+            old_plan  = t.get("plan", "basic")
+            old_seats = int(t.get("maxSeats", 50) or 50)
+
+            if new_seats is not None:
+                try:
+                    new_seats = int(new_seats)
+                except (TypeError, ValueError):
+                    return err(400, "seats must be a number")
+                if new_seats < 1:
+                    return err(400, "seats must be at least 1")
+            else:
+                new_seats = old_seats
+
+            now = datetime.now(timezone.utc).isoformat()
+            change_id = f"CHG-{str(uuid.uuid4())[:8].upper()}"
+
+            # Record the plan change in subscriptions table
+            SUBSCRIPTIONS_T.put_item(Item={
+                "tenantId":      tenant_id,
+                "sk":            f"CHANGE#{change_id}",
+                "changeId":      change_id,
+                "oldPlan":       old_plan,
+                "newPlan":       new_plan,
+                "oldSeats":      old_seats,
+                "newSeats":      new_seats,
+                "effectiveDate": effective_date or now,
+                "createdAt":     now,
+                "createdBy":     caller_email
+            })
+
+            # Update tenant record with new plan and seats
+            update_expr = "SET #p = :plan, maxSeats = :seats, planChangedAt = :at, planChangedBy = :by"
+            TENANTS_T.update_item(
+                Key={"tenantId": tenant_id},
+                UpdateExpression=update_expr,
+                ExpressionAttributeNames={"#p": "plan"},
+                ExpressionAttributeValues={
+                    ":plan":  new_plan,
+                    ":seats": new_seats,
+                    ":at":    now,
+                    ":by":    caller_email
+                }
+            )
+
+            audit(tenant_id, caller_email, "PLAN_CHANGED",
+                  f"Changed plan for {t.get('name', tenant_id)}: {old_plan} -> {new_plan}, seats: {old_seats} -> {new_seats}",
+                  ip=ip, device=device, severity="WARNING")
+
+            return resp(200, {
+                "message":   f"Plan updated for {t.get('name', tenant_id)}",
+                "change_id": change_id,
+                "old_plan":  old_plan,
+                "new_plan":  new_plan,
+                "old_seats": old_seats,
+                "new_seats": new_seats,
+                "effective_date": effective_date or now
+            })
+        except Exception as e:
+            if "plan must be" in str(e) or "seats must be" in str(e):
+                raise
+            print(f"PLAN_CHANGE_ERROR: {e}")
+            return err(500, f"Failed to change plan: {str(e)}")
+
+    # ── GET /api/admin/metrics/overview ───────────────────────────────────
+    if "/metrics/" in path and path.endswith("/overview") and method == "GET":
+        try:
+            # Users by status
+            all_users = scan_all(USERS_T)
+            active_users  = [u for u in all_users if u.get("status") == "active"]
+            pending_users = [u for u in all_users if u.get("status") == "pending"]
+            inactive_users = [u for u in all_users if u.get("status") in ("inactive", "locked")]
+
+            # Users by plan (join with tenant plan)
+            all_tenants = scan_all(TENANTS_T, Attr("status").ne("deleted"))
+            tenant_plans = {t["tenantId"]: t.get("plan", "basic") for t in all_tenants}
+            basic_users   = sum(1 for u in all_users if tenant_plans.get(u.get("tenantId")) == "basic")
+            premium_users = sum(1 for u in all_users if tenant_plans.get(u.get("tenantId")) == "premium")
+
+            # Activation rate: active / (active + pending) — invited users who activated
+            invited_total = len(active_users) + len(pending_users)
+            activation_rate = round(len(active_users) / invited_total * 100, 1) if invited_total > 0 else 0
+
+            # Module completion rates from training/video-progress
+            all_training = scan_all(TRAINING_T)
+            all_progress = scan_all(VIDEO_PROGRESS_T)
+            total_enrollments = len(all_progress)
+            completed_enrollments = sum(1 for p in all_progress if p.get("completed"))
+            module_completion_rate = round(completed_enrollments / total_enrollments * 100, 1) if total_enrollments > 0 else 0
+
+            # Session utilization from sessions table
+            try:
+                all_sessions = scan_all(SESSIONS_T)
+                total_sessions_used = len(all_sessions)
+                # Calculate total sessions available based on tenant plans
+                pricing = get_config("pricing")
+                basic_sessions  = 2
+                premium_sessions = 6
+                total_sessions_available = 0
+                for t in all_tenants:
+                    plan = t.get("plan", "basic")
+                    emp_count = int(t.get("employeeCount", 0) or 0)
+                    if plan == "premium":
+                        total_sessions_available += emp_count * premium_sessions
+                    else:
+                        total_sessions_available += emp_count * basic_sessions
+                session_utilization = round(total_sessions_used / total_sessions_available * 100, 1) if total_sessions_available > 0 else 0
+            except Exception:
+                total_sessions_used = 0
+                total_sessions_available = 0
+                session_utilization = 0
+
+            return resp(200, {
+                "users": {
+                    "total":    len(all_users),
+                    "active":   len(active_users),
+                    "pending":  len(pending_users),
+                    "inactive": len(inactive_users)
+                },
+                "users_by_plan": {
+                    "basic":   basic_users,
+                    "premium": premium_users
+                },
+                "activation_rate": activation_rate,
+                "module_completion": {
+                    "total_enrollments":     total_enrollments,
+                    "completed_enrollments": completed_enrollments,
+                    "completion_rate":       module_completion_rate
+                },
+                "session_utilization": {
+                    "used":         total_sessions_used,
+                    "available":    total_sessions_available,
+                    "utilization":  session_utilization
+                },
+                "tenants": {
+                    "total":  len(all_tenants),
+                    "basic":  sum(1 for t in all_tenants if t.get("plan") == "basic"),
+                    "premium": sum(1 for t in all_tenants if t.get("plan") == "premium")
+                }
+            })
+        except Exception as e:
+            print(f"METRICS_OVERVIEW_ERROR: {e}")
+            return err(500, f"Failed to load metrics overview: {str(e)}")
 
     return err(404, f"Route not found: {method} {path}")

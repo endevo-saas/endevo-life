@@ -195,6 +195,33 @@ export const api = {
     apiFetch(`/api/lms/lessons/${lessonId}/quiz/submit`, { method: 'POST', body: JSON.stringify({ answers }) }),
   lmsGetQuizResults: (lessonId: string) =>
     apiFetch(`/api/lms/lessons/${lessonId}/quiz/results`),
+
+  // Admin — Subscriptions
+  adminSubscriptions: () => apiFetch<SubscriptionOverview>('/api/admin/subscriptions'),
+  adminTenantSubscription: (tenantId: string) => apiFetch<TenantSubscription>(`/api/admin/subscriptions/${tenantId}`),
+  adminCreateInvoice: (tenantId: string, body: { amount: number; description: string; dueDate: string }) =>
+    apiFetch<{ invoiceId: string }>(`/api/admin/subscriptions/${tenantId}/invoice`, { method: 'POST', body: JSON.stringify(body) }),
+  adminChangePlan: (tenantId: string, body: { plan: string; seats?: number }) =>
+    apiFetch(`/api/admin/subscriptions/${tenantId}/plan`, { method: 'PUT', body: JSON.stringify(body) }),
+  adminMetricsOverview: () => apiFetch<PlatformMetrics>('/api/admin/metrics/overview'),
+
+  // HR — Metrics & Subscriptions
+  hrMetrics: () => apiFetch<HrMetrics>('/api/hr/metrics'),
+  hrSubscription: () => apiFetch<HrSubscription>('/api/hr/subscription'),
+  hrSessions: () => apiFetch<SessionOverview>('/api/hr/sessions'),
+  hrBookSession: (body: { userId: string; scheduledAt: string; coachId?: string }) =>
+    apiFetch<{ sessionId: string }>('/api/hr/sessions/book', { method: 'POST', body: JSON.stringify(body) }),
+
+  // Employee — Subscription & Sessions
+  employeeSubscription: () => apiFetch<EmployeeSubscription>('/api/employee/subscription'),
+  employeeSessions: () => apiFetch<EmployeeSessionOverview>('/api/employee/sessions'),
+  employeeProgressSummary: () => apiFetch<ProgressSummary>('/api/employee/progress-summary'),
+
+  // Jesse AI
+  jesseChat: (message: string) =>
+    apiFetch<JesseChatResponse>('/api/jesse/chat', { method: 'POST', body: JSON.stringify({ message }) }),
+  jesseChatHistory: () => apiFetch<JesseChatHistory>('/api/jesse/chat/history'),
+  jesseHealth: () => apiFetch('/api/jesse/health'),
 }
 
 // Types
@@ -272,4 +299,137 @@ export interface Certificate {
 export interface AssessmentAnswer {
   questionId: string
   selectedLabel: string
+}
+
+export interface SubscriptionOverview {
+  totalTenants: number
+  activeSubscriptions: number
+  mrr: number
+  arr: number
+  planDistribution: { basic: number; premium: number }
+  recentChanges: SubscriptionChange[]
+}
+
+export interface TenantSubscription {
+  tenantId: string
+  tenantName: string
+  plan: string
+  seats: number
+  usedSeats: number
+  mrr: number
+  invoices: Invoice[]
+  changes: SubscriptionChange[]
+}
+
+export interface Invoice {
+  invoiceId: string
+  tenantId: string
+  amount: number
+  description: string
+  status: 'draft' | 'sent' | 'paid'
+  dueDate: string
+  createdAt: string
+}
+
+export interface SubscriptionChange {
+  changeId: string
+  tenantId: string
+  fromPlan: string
+  toPlan: string
+  changedBy: string
+  reason?: string
+  createdAt: string
+}
+
+export interface PlatformMetrics {
+  totalUsers: number
+  activeUsers: number
+  pendingUsers: number
+  usersByPlan: { basic: number; premium: number }
+  activationRate: number
+  completionRate: number
+  sessionUtilization: number
+}
+
+export interface HrMetrics {
+  activationRate: number
+  completionRate: number
+  overallProgress: number
+  totalUsers: number
+  activeUsers: number
+  pendingUsers: number
+}
+
+export interface HrSubscription {
+  tenantId: string
+  plan: string
+  seats: number
+  usedSeats: number
+  pricePerEmployee: number
+  sessionsPerEmployee: number
+  totalSessions: number
+  usedSessions: number
+  billingHistory: Invoice[]
+}
+
+export interface SessionOverview {
+  sessions: SessionRecord[]
+  totalAllocated: number
+  used: number
+  remaining: number
+}
+
+export interface SessionRecord {
+  sessionId: string
+  userId: string
+  userName?: string
+  scheduledAt: string
+  completedAt?: string
+  status: 'booked' | 'completed' | 'cancelled' | 'no-show'
+  coachName?: string
+  duration: number
+}
+
+export interface EmployeeSubscription {
+  plan: string
+  planLabel: string
+  priceMonthly: number
+  priceYearly: number
+  sessionsTotal: number
+  sessionsUsed: number
+  sessionsRemaining: number
+  features: string[]
+  premiumFeatures: string[]
+  managedBy: string
+}
+
+export interface EmployeeSessionOverview {
+  sessions: SessionRecord[]
+  total: number
+  used: number
+  remaining: number
+}
+
+export interface ProgressSummary {
+  readinessScore: number
+  readinessTier: string
+  modulesCompleted: number
+  modulesTotal: number
+  overallProgress: number
+  lastActivity?: string
+}
+
+export interface JesseChatResponse {
+  reply: string
+  history: JesseChatMessage[]
+}
+
+export interface JesseChatHistory {
+  history: JesseChatMessage[]
+}
+
+export interface JesseChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+  createdAt: string
 }

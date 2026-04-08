@@ -98,25 +98,52 @@
 - README.md + ARCHITECTURE.md fully updated
 - **13 commits in final session, 50+ AI agents deployed**
 
+### Day 12 — April 7–8, 2026: Phase A+B — Subscriptions + Jesse AI
+**Data model + AI integration in a single session.** 12 parallel agents, 20 files, 4 new DynamoDB tables.
+
+**Phase A — Subscription & Billing Data Model:**
+- CDK Stack 9: `endevo-uat-subscriptions` + `endevo-uat-sessions` tables
+- Admin Lambda: 5 new billing endpoints (subscriptions overview, invoices, plan changes, metrics)
+- HR Lambda: 4 new endpoints (3 CEO-mandated metrics, session booking)
+- Employee Lambda: 3 new endpoints (subscription view, sessions, progress summary)
+- HR Dashboard rebuilt: 3 metrics only (Activation Rate, Completion %, Progress)
+- Employee Subscription page: plan card, sessions tracker, plan comparison
+- Admin Subscriptions page: MRR/ARR revenue cards, tenant billing table, invoice + plan modals
+- Seed script: `seed-subscriptions.py` — populated 15 tenants + 14 subscription records
+- Frontend API client: 15 new methods + 16 TypeScript interfaces
+
+**Phase B — Jesse AI Integration (Comprehensive Legacy Readiness Guide):**
+- CDK Stack 10: `endevo-uat-jesse-chat` + `endevo-uat-knowledge-base` tables
+- New Lambda: `endevo-uat-fn-jesse` — RAG chat via Bedrock Claude Haiku
+- Ported from Aryan's TypeScript: scoring (40 signals, 4 domains, 4 tiers), plan generation, chat pipeline
+- DynamoDB vector search: Titan Embed V2 (1024-dim) + cosine similarity (replaces Aurora pgvector)
+- Jesse chat UI: floating FAB on all employee pages, glassmorphism panel, typing indicators
+- Knowledge base ingest script: `jesse-ingest.py` for Aryan to feed content
+- API Gateway route: `/api/jesse/{proxy+}` → fn-jesse
+- Bedrock IAM permissions added to Lambda role
+- **No separate jesse-users table** — Jesse uses enterprise `endevo-uat-users`
+- **No Firebase** — WorkOS auth (same as all Lambdas)
+
 ### By The Numbers
 
 | Metric | Value |
 |--------|-------|
-| Total commits | 120+ |
-| Calendar days | 17 (March 20 → April 6) |
-| Lambda functions | 5 (auth, admin, HR, employee, LMS) |
-| DynamoDB tables | 13 |
-| CloudWatch alarms | 32 |
+| Total commits | 140+ |
+| Calendar days | 18 (March 20 → April 8) |
+| Lambda functions | **6** (auth, admin, HR, employee, LMS, **jesse**) |
+| DynamoDB tables | **17** |
+| CloudWatch alarms | 35 |
 | Tenants provisioned | 15 |
 | LMS modules | 6 |
 | Assessment questions | 40 |
 | Quiz types | 4 (multiple choice, Likert, open text, checklist) |
 | AWS regions | 2 (active-active failover) |
+| AI models | **2** (Bedrock Claude Haiku + Titan Embed V2) |
 | Security vulnerabilities patched | 10 |
 | Passwords in the system | **0** |
 | Auth provider migrations | Cognito → WorkOS (complete) |
 | Uptime target | 99.99% |
-| Team size | 3 people |
+| Team size | 3 people + 2 upcoming |
 
 ### Team
 
@@ -155,10 +182,10 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 
 | Metric | Value |
 |--------|-------|
-| **DynamoDB Tables** | 13 |
-| **Lambda Functions** | 5 (Python 3.12, 256 MB, 30s timeout) |
-| **API Endpoints** | 81 (counted from frontend API client) |
-| **CDK Stacks** | 8 CloudFormation stacks |
+| **DynamoDB Tables** | 17 |
+| **Lambda Functions** | 6 (Python 3.12, 256 MB, 30s timeout) |
+| **API Endpoints** | 99 (counted from frontend API client) |
+| **CDK Stacks** | 10 CloudFormation stacks |
 | **Quiz Types** | 4 (Multiple Choice, Likert Scale, Open Text, Checklist) |
 | **Learning Modules** | 6 (Module 1 fully built, Modules 2-6 content pending) |
 | **Module 1 Lessons** | 15 (video, PDF, podcast, quiz) |
@@ -190,20 +217,21 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 │              Amazon API Gateway (HTTP API)                            │
 │                                                                      │
 │   /api/auth/*      → endevo-uat-fn-auth      (7 routes)             │
-│   /api/admin/*     → endevo-uat-fn-admin     (24 routes)            │
-│   /api/hr/*        → endevo-uat-fn-hr        (10 routes)            │
-│   /api/employee/*  → endevo-uat-fn-employee  (8 routes)             │
+│   /api/admin/*     → endevo-uat-fn-admin     (29 routes)            │
+│   /api/hr/*        → endevo-uat-fn-hr        (14 routes)            │
+│   /api/employee/*  → endevo-uat-fn-employee  (11 routes)            │
 │   /api/lms/*       → endevo-uat-fn-lms       (32 routes)            │
+│   /api/jesse/*     → endevo-uat-fn-jesse     (6 routes)  [NEW]      │
 │                                                                      │
 │   WAF protection │ CORS restricted │ ~71% cheaper than REST API      │
 └───┬─────────┬─────────┬──────────┬──────────┬───────────────────────┘
     │         │         │          │          │
- fn-auth  fn-admin   fn-hr   fn-employee  fn-lms
-    │         │         │          │          │
+ fn-auth  fn-admin   fn-hr   fn-employee  fn-lms   fn-jesse
+    │         │         │          │          │          │
     │    Python 3.12 │ 256 MB │ 30s timeout │ Pure boto3 (0 deps)
     │         │         │          │          │
 ┌───▼─────────▼─────────▼──────────▼──────────▼───────────────────────┐
-│                  Amazon DynamoDB (13 Tables)                          │
+│                  Amazon DynamoDB (17 Tables)                          │
 │                                                                      │
 │   endevo-uat-tenants            endevo-uat-users                     │
 │   endevo-uat-training           endevo-uat-questions                 │
@@ -211,7 +239,9 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 │   endevo-uat-video-progress     endevo-uat-audit                     │
 │   endevo-uat-config             endevo-uat-lms-modules               │
 │   endevo-uat-lms-lessons        endevo-uat-lms-lesson-progress       │
-│   endevo-uat-lms-user-modules                                        │
+│   endevo-uat-lms-user-modules   endevo-uat-subscriptions     [NEW]   │
+│   endevo-uat-sessions           endevo-uat-jesse-chat        [NEW]   │
+│   endevo-uat-knowledge-base                                  [NEW]   │
 │                                                                      │
 │   Server-side encryption │ On-demand capacity │ Per-tenant isolation  │
 ├──────────────────────────────────────────────────────────────────────┤

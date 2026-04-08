@@ -9,6 +9,10 @@ Routes:
   PUT  /api/hr/employees/{id}
   DELETE /api/hr/employees/{id}
   GET  /api/hr/audit                 ?limit=50&next_token=
+  GET  /api/hr/metrics               — activation rate, completion %, overall progress
+  GET  /api/hr/subscription          — tenant subscription & seat info
+  GET  /api/hr/sessions              — 1:1 session overview for tenant
+  POST /api/hr/sessions/book         — book a 1:1 session for an employee
 """
 import json, os, uuid, base64, re
 import boto3
@@ -19,8 +23,14 @@ REGION    = os.environ.get("AWS_REGION", "us-east-1")
 dynamo    = boto3.resource("dynamodb", region_name=REGION)
 ses       = boto3.client("ses", region_name=REGION)
 _secrets  = boto3.client("secretsmanager", region_name=REGION)
-USERS_T   = dynamo.Table("endevo-uat-users")
-AUDIT_T   = dynamo.Table("endevo-uat-audit")
+USERS_T        = dynamo.Table("endevo-uat-users")
+AUDIT_T        = dynamo.Table("endevo-uat-audit")
+SUBSCRIPTIONS_T = dynamo.Table("endevo-uat-subscriptions")
+SESSIONS_T     = dynamo.Table("endevo-uat-sessions")
+MODULES_T      = dynamo.Table("endevo-uat-lms-modules")
+USER_MODULES_T = dynamo.Table("endevo-uat-lms-user-modules")
+RESPONSES_T    = dynamo.Table("endevo-uat-responses")
+TENANTS_T      = dynamo.Table("endevo-uat-tenants")
 
 # ── Secrets & WorkOS ─────────────────────────────────────────────────────────
 
@@ -559,6 +569,201 @@ def handler(event, context):
             "count":      len(logs),
             "next_token": next_cursor,
             "has_more":   bool(next_cursor)
+        })
+
+    # ── GET /api/hr/metrics ─────────────────────────────────────────────
+    if path.endswith("/metrics") and method == "GET":
+        base_filter = Attr("tenantId").eq(tenant_id)
+        all_users = scan_all(USERS_T, base_filter)
+        total_users = len(all_users)
+        active_users = [u for u in all_users if u.get("status") == "active"]
+        pending_users = [u for u in all_users if u.get("status") == "pending"]
+        active_count = len(active_users)
+        pending_count = len(pending_users)
+
+        # Activation rate: users who activated / total invited
+        activation_rate = round((active_count / total_users * 100), 1) if total_users > 0 else 0.0
+
+        # Module completion & overall progress
+        # Fetch all user-module records for this tenant's active users
+        active_user_ids = {u["userId"] for u in active_users}
+        user_module_records = scan_all(
+            USER_MODULES_T,
+            Attr("tenantId").eq(tenant_id)
+        ) if active_user_ids else []
+
+        users_with_completion = set()
+        # Group by userId to compute per-user progress
+        user_progress_map = {}  # userId -> list of progress %
+        for rec in user_module_records:
+            uid = rec.get("userId", "")
+            if uid not in active_user_ids:
+                continue
+            progress = float(rec.get("progress", 0))
+            user_progress_map.setdefault(uid, []).append(progress)
+            if rec.get("status") == "completed" or progress >= 100:
+                users_with_completion.add(uid)
+
+        # Completion rate: active users with at least 1 completed module / active users
+        completion_rate = round((len(users_with_completion) / active_count * 100), 1) if active_count > 0 else 0.0
+
+        # Overall progress: average of each user's average module progress
+        if user_progress_map:
+            per_user_averages = [
+                sum(progs) / len(progs) for progs in user_progress_map.values()
+            ]
+            overall_progress = round(sum(per_user_averages) / len(per_user_averages), 1)
+        else:
+            overall_progress = 0.0
+
+        return resp(200, {
+            "activationRate":  activation_rate,
+            "completionRate":  completion_rate,
+            "overallProgress": overall_progress,
+            "totalUsers":      total_users,
+            "activeUsers":     active_count,
+            "pendingUsers":    pending_count,
+        })
+
+    # ── GET /api/hr/subscription ──────────────────────────────────────────
+    if path.endswith("/subscription") and method == "GET":
+        # Fetch tenant record for subscription info
+        tenant_item = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+        if not tenant_item:
+            return err(404, "Tenant not found")
+
+        plan = tenant_item.get("plan", "basic").lower()
+        seats = int(tenant_item.get("seats", 0))
+
+        # Plan pricing constants
+        plan_config = {
+            "basic":   {"pricePerEmployee": 299, "sessionsPerEmployee": 2},
+            "premium": {"pricePerEmployee": 499, "sessionsPerEmployee": 6},
+        }
+        cfg = plan_config.get(plan, plan_config["basic"])
+        price_per_employee = cfg["pricePerEmployee"]
+        sessions_per_employee = cfg["sessionsPerEmployee"]
+        total_sessions = seats * sessions_per_employee
+
+        # Count used seats (active + pending users in tenant)
+        used_seats = count_items(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("status").is_in(["active", "pending"]))
+
+        # Count used sessions
+        tenant_sessions = scan_all(SESSIONS_T, Attr("tenantId").eq(tenant_id))
+        used_sessions = len([s for s in tenant_sessions if s.get("status") in ("completed", "scheduled", "in_progress")])
+
+        # Fetch subscription record for billing history
+        sub_item = None
+        try:
+            sub_results = scan_all(SUBSCRIPTIONS_T, Attr("tenantId").eq(tenant_id))
+            sub_item = sub_results[0] if sub_results else None
+        except Exception:
+            pass
+        billing_history = sub_item.get("billingHistory", []) if sub_item else []
+
+        return resp(200, {
+            "tenantId":            tenant_id,
+            "plan":                plan,
+            "seats":               seats,
+            "usedSeats":           used_seats,
+            "pricePerEmployee":    price_per_employee,
+            "sessionsPerEmployee": sessions_per_employee,
+            "totalSessions":       total_sessions,
+            "usedSessions":        used_sessions,
+            "billingHistory":      billing_history,
+        })
+
+    # ── GET /api/hr/sessions ──────────────────────────────────────────────
+    if path.endswith("/sessions") and method == "GET" and "/sessions/book" not in path:
+        # Tenant session overview
+        tenant_item = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+        plan = (tenant_item.get("plan", "basic").lower()) if tenant_item else "basic"
+        seats = int(tenant_item.get("seats", 0)) if tenant_item else 0
+        sessions_per_employee = 2 if plan == "basic" else 6
+        total_allocated = seats * sessions_per_employee
+
+        # Fetch all session records for tenant
+        tenant_sessions = scan_all(SESSIONS_T, Attr("tenantId").eq(tenant_id))
+        used = len([s for s in tenant_sessions if s.get("status") in ("completed", "scheduled", "in_progress")])
+        remaining = max(total_allocated - used, 0)
+
+        # Recent sessions (last 20, sorted by date desc)
+        recent = sorted(tenant_sessions, key=lambda s: s.get("scheduledAt", s.get("createdAt", "")), reverse=True)[:20]
+        recent_list = [{
+            "sessionId":   s.get("sessionId", ""),
+            "userId":      s.get("userId", ""),
+            "coachId":     s.get("coachId", ""),
+            "scheduledAt": s.get("scheduledAt", ""),
+            "status":      s.get("status", ""),
+            "createdAt":   s.get("createdAt", ""),
+        } for s in recent]
+
+        return resp(200, {
+            "plan":              plan,
+            "sessionsPerEmployee": sessions_per_employee,
+            "totalAllocated":    total_allocated,
+            "used":              used,
+            "remaining":         remaining,
+            "recentSessions":    recent_list,
+        })
+
+    # ── POST /api/hr/sessions/book ────────────────────────────────────────
+    if path.endswith("/sessions/book") and method == "POST":
+        user_id = sanitize((body.get("userId") or "").strip(), 100)
+        scheduled_at = sanitize((body.get("scheduledAt") or "").strip(), 50)
+        coach_id = sanitize((body.get("coachId") or "").strip(), 100)
+
+        if not user_id:
+            return err(400, "userId is required")
+        if not scheduled_at:
+            return err(400, "scheduledAt is required")
+
+        # Validate employee belongs to tenant
+        emp = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not emp or emp.get("tenantId") != tenant_id:
+            return err(404, "User not found in your organisation")
+        if emp.get("status") == "inactive":
+            return err(400, "Cannot book session for inactive user")
+
+        # Check session quota
+        tenant_item = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+        plan = (tenant_item.get("plan", "basic").lower()) if tenant_item else "basic"
+        seats = int(tenant_item.get("seats", 0)) if tenant_item else 0
+        sessions_per_employee = 2 if plan == "basic" else 6
+        total_allocated = seats * sessions_per_employee
+
+        tenant_sessions = scan_all(SESSIONS_T, Attr("tenantId").eq(tenant_id))
+        used = len([s for s in tenant_sessions if s.get("status") in ("completed", "scheduled", "in_progress")])
+        if used >= total_allocated:
+            return err(400, f"Session quota exceeded ({used}/{total_allocated}). Upgrade plan or add seats.")
+
+        # Create session record
+        now = datetime.now(timezone.utc).isoformat()
+        session_id = str(uuid.uuid4())
+        session_item = {
+            "tenantId":    tenant_id,
+            "sessionId":   session_id,
+            "userId":      user_id,
+            "scheduledAt": scheduled_at,
+            "status":      "scheduled",
+            "createdAt":   now,
+            "bookedBy":    caller_email,
+        }
+        if coach_id:
+            session_item["coachId"] = coach_id
+
+        SESSIONS_T.put_item(Item=session_item)
+
+        audit(tenant_id, caller_email, "SESSION_BOOKED",
+              f"Booked session {session_id} for user {user_id} at {scheduled_at}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "message":     "Session booked successfully",
+            "sessionId":   session_id,
+            "userId":      user_id,
+            "scheduledAt": scheduled_at,
+            "status":      "scheduled",
         })
 
     return err(404, f"Route not found: {method} {path}")

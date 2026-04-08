@@ -1,6 +1,7 @@
 """
 Endevo Life — Employee Lambda (pure boto3, no pip needed)
-Routes: dashboard, profile, training list, video progress, assessment, certificates
+Routes: dashboard, profile, training list, video progress, assessment, certificates,
+        subscription, sessions, progress-summary
 """
 import json, os, uuid, boto3
 from datetime import datetime, timezone
@@ -14,6 +15,10 @@ PROG_T   = dynamo.Table("endevo-uat-video-progress")
 QUEST_T  = dynamo.Table("endevo-uat-questions")
 RESP_T   = dynamo.Table("endevo-uat-responses")
 CERT_T   = dynamo.Table("endevo-uat-certificates")
+SUBSCRIPTIONS_T = dynamo.Table("endevo-uat-subscriptions")
+SESSIONS_T = dynamo.Table("endevo-uat-sessions")
+TENANTS_T  = dynamo.Table("endevo-uat-tenants")
+MODULES_T  = dynamo.Table("endevo-uat-lms-user-modules")
 
 ALLOWED_ORIGINS = [
     "https://uat.endevo.life",
@@ -220,5 +225,212 @@ def handler(event, context):
         from boto3.dynamodb.conditions import Attr as _Attr
         certs = CERT_T.scan(FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id))
         return resp(200, {"certificates": certs.get("Items", []), "count": len(certs.get("Items", []))})
+
+    # GET /api/employee/subscription
+    if path.endswith("/subscription") and method == "GET":
+        from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+        from decimal import Decimal
+
+        PLAN_CONFIG = {
+            "basic": {
+                "planLabel": "Endevo Basic",
+                "priceYearly": 299,
+                "priceMonthly": 24.92,
+                "sessionsTotal": 2,
+                "features": [
+                    "Readiness Assessment",
+                    "6 Learning Modules",
+                    "2x 30-min 1:1 Sessions per year",
+                    "AI Guide (Jesse)",
+                ],
+            },
+            "premium": {
+                "planLabel": "Endevo Premium",
+                "priceYearly": 499,
+                "priceMonthly": 41.58,
+                "sessionsTotal": 6,
+                "features": [
+                    "Readiness Assessment",
+                    "6 Learning Modules",
+                    "6x 30-min 1:1 Sessions per year",
+                    "AI Guide (Jesse)",
+                    "Priority scheduling",
+                    "Extended session recordings",
+                ],
+            },
+        }
+        PREMIUM_FEATURES = [
+            "Everything in Basic",
+            "6x 30-min 1:1 Sessions per year",
+            "Priority scheduling",
+            "Extended session recordings",
+        ]
+
+        # Determine user plan
+        plan = "basic"
+        try:
+            user_result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key("email").eq(email),
+            )
+            user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
+            if user_items:
+                plan = user_items[0].get("plan", "basic") or "basic"
+        except Exception as e:
+            print(f"SUBSCRIPTION_USER_LOOKUP_ERROR: {e}")
+
+        # Fallback to tenant plan if user has no plan
+        if plan == "basic":
+            try:
+                tenant_result = TENANTS_T.get_item(Key={"tenantId": tenant_id})
+                tenant_item = tenant_result.get("Item", {})
+                tenant_plan = tenant_item.get("plan", "basic") or "basic"
+                if tenant_plan in PLAN_CONFIG:
+                    plan = tenant_plan
+            except Exception as e:
+                print(f"SUBSCRIPTION_TENANT_LOOKUP_ERROR: {e}")
+
+        config = PLAN_CONFIG.get(plan, PLAN_CONFIG["basic"])
+
+        # Count used sessions
+        sessions_used = 0
+        try:
+            session_result = SESSIONS_T.scan(
+                FilterExpression=_Attr("userId").eq(user_sub) & _Attr("status").eq("completed")
+            )
+            sessions_used = len(session_result.get("Items", []))
+        except Exception as e:
+            print(f"SUBSCRIPTION_SESSIONS_COUNT_ERROR: {e}")
+
+        sessions_total = config["sessionsTotal"]
+        return resp(200, {
+            "plan": plan,
+            "planLabel": config["planLabel"],
+            "priceMonthly": config["priceMonthly"],
+            "priceYearly": config["priceYearly"],
+            "sessionsTotal": sessions_total,
+            "sessionsUsed": sessions_used,
+            "sessionsRemaining": max(0, sessions_total - sessions_used),
+            "features": config["features"],
+            "premiumFeatures": PREMIUM_FEATURES,
+            "managedBy": "Your employer manages your subscription",
+        })
+
+    # GET /api/employee/sessions
+    if path.endswith("/sessions") and method == "GET":
+        from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+
+        # Determine session quota from user/tenant plan
+        plan = "basic"
+        try:
+            user_result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key("email").eq(email),
+            )
+            user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
+            if user_items:
+                plan = user_items[0].get("plan", "basic") or "basic"
+        except Exception:
+            pass
+
+        if plan == "basic":
+            try:
+                tenant_result = TENANTS_T.get_item(Key={"tenantId": tenant_id})
+                tenant_plan = tenant_result.get("Item", {}).get("plan", "basic") or "basic"
+                if tenant_plan in ("basic", "premium"):
+                    plan = tenant_plan
+            except Exception:
+                pass
+
+        total_allowed = 6 if plan == "premium" else 2
+
+        # Fetch session history for this user
+        sessions_list = []
+        used_count = 0
+        try:
+            result = SESSIONS_T.scan(
+                FilterExpression=_Attr("userId").eq(user_sub)
+            )
+            raw = sorted(result.get("Items", []), key=lambda s: s.get("scheduledAt", ""), reverse=True)
+            for s in raw:
+                sessions_list.append({
+                    "sessionId": s.get("sessionId", ""),
+                    "scheduledAt": s.get("scheduledAt", ""),
+                    "status": s.get("status", ""),
+                    "coachName": s.get("coachName", ""),
+                    "duration": int(s.get("duration", 30)),
+                })
+            used_count = len([s for s in raw if s.get("status") == "completed"])
+        except Exception as e:
+            print(f"SESSIONS_LIST_ERROR: {e}")
+
+        return resp(200, {
+            "sessions": sessions_list,
+            "total": total_allowed,
+            "used": used_count,
+            "remaining": max(0, total_allowed - used_count),
+        })
+
+    # GET /api/employee/progress-summary
+    if path.endswith("/progress-summary") and method == "GET":
+        from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+
+        TIER_MAP = [
+            (0, "Not Started"),
+            (40, "Getting Started"),
+            (60, "On Your Way"),
+            (80, "Well Prepared"),
+            (100, "Fully Ready"),
+        ]
+
+        def _score_to_tier(score: int) -> str:
+            tier = "Not Started"
+            for threshold, label in TIER_MAP:
+                if score >= threshold:
+                    tier = label
+            return tier
+
+        # Latest readiness assessment
+        readiness_score = 0
+        last_activity = None
+        try:
+            resp_result = RESP_T.scan(
+                FilterExpression=_Attr("userId").eq(user_sub)
+            )
+            responses = resp_result.get("Items", [])
+            if responses:
+                latest = max(responses, key=lambda r: r.get("submittedAt", ""))
+                readiness_score = int(latest.get("score", 0))
+                last_activity = latest.get("submittedAt")
+        except Exception as e:
+            print(f"PROGRESS_READINESS_ERROR: {e}")
+
+        # Module completion
+        modules_completed = 0
+        modules_total = 6
+        try:
+            mod_result = MODULES_T.scan(
+                FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id)
+            )
+            mod_items = mod_result.get("Items", [])
+            modules_completed = len([m for m in mod_items if m.get("completed") or m.get("status") == "completed"])
+            # Check last activity from modules too
+            for m in mod_items:
+                updated = m.get("updatedAt") or m.get("completedAt", "")
+                if updated and (last_activity is None or updated > last_activity):
+                    last_activity = updated
+        except Exception as e:
+            print(f"PROGRESS_MODULES_ERROR: {e}")
+
+        overall_progress = round((modules_completed / modules_total * 100) if modules_total > 0 else 0, 1)
+
+        return resp(200, {
+            "readinessScore": readiness_score,
+            "readinessTier": _score_to_tier(readiness_score),
+            "modulesCompleted": modules_completed,
+            "modulesTotal": modules_total,
+            "overallProgress": overall_progress,
+            "lastActivity": last_activity,
+        })
 
     return err(404, f"Route not found: {method} {path}")

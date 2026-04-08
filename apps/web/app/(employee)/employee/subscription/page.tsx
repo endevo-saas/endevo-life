@@ -1,130 +1,185 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
-  CreditCard, Loader2, RefreshCw, AlertCircle, CheckCircle, Crown,
-  Calendar, Star, Sparkles, ArrowRight, Lock, Video
+  Loader2, RefreshCw, AlertCircle, CheckCircle, Crown,
+  Calendar, Star, Sparkles, Video, Building2, Clock, User,
+  ArrowRight, XCircle,
 } from 'lucide-react'
-import { api } from '@/lib/api'
+import { apiFetch } from '@/lib/api'
 import Cookies from 'js-cookie'
 
-// ── Plan Constants ──────────────────────────────────────────────────────────
+// ── Types ───────────────────────────────────────────────────────────────────
 
-const BASIC_FEATURES = [
-  '6-module LMS access',
-  '40-question readiness assessment',
-  'Progress tracking',
-  'Completion certificates',
-  'Email support',
-]
+interface SubscriptionData {
+  plan: 'basic' | 'premium'
+  planLabel: string
+  priceMonthly: number
+  priceYearly: number
+  sessionsTotal: number
+  sessionsUsed: number
+  sessionsRemaining: number
+  features: string[]
+  premiumFeatures: string[]
+  managedBy: string
+}
 
-const PREMIUM_FEATURES = [
-  '1-on-1 live sessions with estate planning expert',
-  'Priority support (24-hour response)',
-  'Advanced analytics dashboard',
-  'Custom company branding',
-  'Dedicated account manager',
-  'API access',
+interface SessionRecord {
+  id: string
+  date: string
+  coach: string
+  duration: string
+  status: 'completed' | 'upcoming' | 'cancelled'
+}
+
+interface SessionsData {
+  sessions: SessionRecord[]
+  total: number
+  used: number
+  remaining: number
+}
+
+// ── Mock Data (fallback until API is ready) ─────────────────────────────────
+
+function detectPlanFromCookie(): 'basic' | 'premium' {
+  const cookiePlan = Cookies.get('tenant_plan') || Cookies.get('user_plan')
+  if (cookiePlan?.toLowerCase() === 'premium') return 'premium'
+  return 'basic'
+}
+
+function getMockSubscription(plan: 'basic' | 'premium'): SubscriptionData {
+  const isPremium = plan === 'premium'
+  return {
+    plan,
+    planLabel: isPremium ? 'Endevo Premium' : 'Endevo Basic',
+    priceMonthly: isPremium ? 41.58 : 24.92,
+    priceYearly: isPremium ? 499 : 299,
+    sessionsTotal: isPremium ? 6 : 2,
+    sessionsUsed: 0,
+    sessionsRemaining: isPremium ? 6 : 2,
+    features: [
+      '6-module LMS access',
+      '40-question readiness assessment',
+      'Progress tracking',
+      'Completion certificates',
+      'Email support',
+    ],
+    premiumFeatures: [
+      '1-on-1 live sessions with estate planning expert',
+      'Priority support (24-hour response)',
+      'Advanced analytics dashboard',
+      'Custom company branding',
+      'Dedicated account manager',
+      'API access',
+    ],
+    managedBy: 'Your Employer',
+  }
+}
+
+function getMockSessions(): SessionsData {
+  return {
+    sessions: [],
+    total: 0,
+    used: 0,
+    remaining: 0,
+  }
+}
+
+// ── Plan Comparison Data ────────────────────────────────────────────────────
+
+const COMPARISON_ROWS = [
+  { feature: '6-module LMS access', basic: true, premium: true },
+  { feature: '40-question readiness assessment', basic: true, premium: true },
+  { feature: 'Progress tracking & certificates', basic: true, premium: true },
+  { feature: 'Email support', basic: true, premium: true },
+  { feature: '1-on-1 sessions per year', basic: '2', premium: '6' },
+  { feature: 'Priority support (24hr response)', basic: false, premium: true },
+  { feature: 'Advanced analytics dashboard', basic: false, premium: true },
+  { feature: 'Custom company branding', basic: false, premium: true },
+  { feature: 'Dedicated account manager', basic: false, premium: true },
+  { feature: 'API access', basic: false, premium: true },
 ]
 
 const BOOKING_URL = 'https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH'
 
-// ── Types ───────────────────────────────────────────────────────────────────
+// ── Skeleton Loader ─────────────────────────────────────────────────────────
 
-interface MeResponse {
-  plan?: string
-  tenant_plan?: string
-  subscription?: {
-    plan: string
-    billing_cycle?: string
-    next_billing_date?: string
-  }
-}
-
-// ── Helpers ─────────────────────────────────────────────────────────────────
-
-function detectPlan(): string {
-  const cookiePlan = Cookies.get('tenant_plan') || Cookies.get('user_plan')
-  if (cookiePlan) return cookiePlan.toLowerCase()
-  return 'basic'
-}
-
-function mockNextBillingDate(): string {
-  const d = new Date()
-  d.setFullYear(d.getFullYear() + 1)
-  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
-}
-
-// ── Components ──────────────────────────────────────────────────────────────
-
-function BookingCard({ isPremium }: { isPremium: boolean }) {
-  if (isPremium) {
-    return (
-      <div
-        className="rounded-2xl p-6 transition-all"
-        style={{
-          background: 'linear-gradient(135deg, rgba(232,97,42,0.12) 0%, rgba(232,97,42,0.04) 100%)',
-          border: '1px solid rgba(232,97,42,0.3)',
-        }}
-      >
-        <div className="flex items-start gap-4">
-          <div
-            className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-            style={{ background: 'rgba(232,97,42,0.15)', border: '1px solid rgba(232,97,42,0.25)' }}
-          >
-            <Video className="w-6 h-6 text-[#E8612A]" />
-          </div>
-          <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-bold text-white">1-on-1 Session with Legacy Expert</h3>
-            <p className="text-sm mt-1" style={{ color: 'rgba(255,255,255,0.5)' }}>
-              Included with your Premium subscription
-            </p>
-            <p className="text-xs mt-2" style={{ color: 'rgba(255,255,255,0.35)' }}>
-              Get personalised guidance from a certified estate planning expert. 30-minute sessions available weekly.
-            </p>
-          </div>
-        </div>
-        <a
-          href={BOOKING_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="mt-5 w-full flex items-center justify-center gap-2 py-3 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02] hover:shadow-lg"
-          style={{
-            background: 'linear-gradient(135deg, #E8612A, #d4541f)',
-            boxShadow: '0 4px 24px rgba(232,97,42,0.3)',
-          }}
-        >
-          Book Your Session <ArrowRight className="w-4 h-4" />
-        </a>
-      </div>
-    )
-  }
-
+function Skeleton({ className }: { className?: string }) {
   return (
     <div
-      className="rounded-2xl p-6"
-      style={{
-        background: 'rgba(255,255,255,0.02)',
-        border: '1px solid rgba(255,255,255,0.08)',
-      }}
+      className={`animate-pulse rounded-lg ${className ?? ''}`}
+      style={{ background: 'rgba(255,255,255,0.06)' }}
+    />
+  )
+}
+
+function LoadingSkeleton() {
+  return (
+    <div className="space-y-6">
+      <Skeleton className="h-52 w-full rounded-2xl" />
+      <Skeleton className="h-48 w-full rounded-2xl" />
+      <Skeleton className="h-64 w-full rounded-2xl" />
+    </div>
+  )
+}
+
+// ── Session Status Badge ────────────────────────────────────────────────────
+
+function SessionStatusBadge({ status }: { status: SessionRecord['status'] }) {
+  const config = {
+    completed: { label: 'Completed', color: '#22c55e', bg: 'rgba(34,197,94,0.12)' },
+    upcoming: { label: 'Upcoming', color: '#2BBFC5', bg: 'rgba(43,191,197,0.12)' },
+    cancelled: { label: 'Cancelled', color: '#ef4444', bg: 'rgba(239,68,68,0.12)' },
+  }
+  const c = config[status]
+  return (
+    <span
+      className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+      style={{ background: c.bg, color: c.color, border: `1px solid ${c.color}30` }}
     >
-      <div className="flex items-start gap-4">
+      {c.label}
+    </span>
+  )
+}
+
+// ── Progress Bar ────────────────────────────────────────────────────────────
+
+function SessionProgressBar({ used, total }: { used: number; total: number }) {
+  const pct = total > 0 ? Math.min((used / total) * 100, 100) : 0
+  const remaining = total - used
+  const isLow = remaining <= 1 && total > 0
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between">
+        <div className="flex items-baseline gap-2">
+          <span className="text-3xl font-black text-white">{remaining}</span>
+          <span className="text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
+            of {total} sessions remaining
+          </span>
+        </div>
+        {isLow && (
+          <span className="text-xs font-medium text-amber-400">Running low</span>
+        )}
+      </div>
+      <div
+        className="h-3 rounded-full overflow-hidden"
+        style={{ background: 'rgba(255,255,255,0.06)' }}
+      >
         <div
-          className="w-12 h-12 rounded-xl flex items-center justify-center flex-shrink-0"
-          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-        >
-          <Lock className="w-5 h-5" style={{ color: 'rgba(255,255,255,0.3)' }} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <h3 className="text-lg font-bold text-white">1-on-1 Session with Legacy Expert</h3>
-          <p className="text-sm mt-1 text-[#E8612A] font-medium">
-            Upgrade to Premium to access 1-on-1 sessions
-          </p>
-          <p className="text-xs mt-2" style={{ color: 'rgba(255,255,255,0.35)' }}>
-            Premium subscribers get personalised sessions with certified estate planning experts to review their legacy plan.
-          </p>
-        </div>
+          className="h-full rounded-full transition-all duration-500"
+          style={{
+            width: `${100 - pct}%`,
+            background: isLow
+              ? 'linear-gradient(90deg, #f59e0b, #ef4444)'
+              : 'linear-gradient(90deg, #2BBFC5, #E8612A)',
+          }}
+        />
+      </div>
+      <div className="flex justify-between text-[10px] font-medium" style={{ color: 'rgba(255,255,255,0.3)' }}>
+        <span>{used} used</span>
+        <span>{total} total</span>
       </div>
     </div>
   )
@@ -133,57 +188,69 @@ function BookingCard({ isPremium }: { isPremium: boolean }) {
 // ── Main Page ───────────────────────────────────────────────────────────────
 
 export default function EmployeeSubscriptionPage() {
-  const [plan, setPlan] = useState<string>('basic')
-  const [billingCycle] = useState<string>('Yearly')
+  const [subscription, setSubscription] = useState<SubscriptionData | null>(null)
+  const [sessions, setSessions] = useState<SessionsData | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [showYearly, setShowYearly] = useState(false)
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true)
     setError('')
-    try {
-      const data = await api.me() as MeResponse
-      const apiPlan = data?.subscription?.plan || data?.tenant_plan || data?.plan
-      if (apiPlan) {
-        setPlan(apiPlan.toLowerCase())
-      } else {
-        setPlan(detectPlan())
-      }
-    } catch {
-      setPlan(detectPlan())
-    } finally {
-      setLoading(false)
+
+    const fallbackPlan = detectPlanFromCookie()
+
+    // Fetch subscription + sessions in parallel, fallback to mock on failure
+    const [subResult, sessResult] = await Promise.allSettled([
+      apiFetch<SubscriptionData>('/api/employee/subscription'),
+      apiFetch<SessionsData>('/api/employee/sessions'),
+    ])
+
+    if (subResult.status === 'fulfilled') {
+      setSubscription(subResult.value)
+    } else {
+      setSubscription(getMockSubscription(fallbackPlan))
     }
-  }
 
-  useEffect(() => { load() }, [])
+    if (sessResult.status === 'fulfilled') {
+      setSessions(sessResult.value)
+    } else {
+      const mock = getMockSubscription(fallbackPlan)
+      setSessions({
+        ...getMockSessions(),
+        total: mock.sessionsTotal,
+        remaining: mock.sessionsRemaining,
+      })
+    }
 
-  const isPremium = plan === 'premium'
-  const planLabel = isPremium ? 'Endevo Premium' : 'Endevo Basic'
-  const planPrice = isPremium ? 499 : 299
-  const monthlyPrice = isPremium ? 49 : 29
+    setLoading(false)
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const isPremium = subscription?.plan === 'premium'
   const planColor = isPremium ? '#E8612A' : '#2BBFC5'
   const PlanIcon = isPremium ? Crown : Star
-  const nextBilling = mockNextBillingDate()
 
   return (
     <div className="p-6">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
+      <div className="max-w-5xl mx-auto">
+        {/* ── Header ── */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold text-white flex items-center gap-3">
-              <CreditCard className="w-6 h-6" style={{ color: planColor }} />
+              <Sparkles className="w-6 h-6" style={{ color: planColor }} />
               My Subscription
             </h1>
             <p className="text-sm mt-0.5" style={{ color: 'rgba(255,255,255,0.4)' }}>
-              Manage your plan and billing
+              View your plan details and 1:1 sessions
             </p>
           </div>
           <button
             onClick={load}
             className="p-2 rounded-lg transition-all hover:bg-white/5"
             style={{ color: 'rgba(255,255,255,0.4)' }}
+            title="Refresh"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -196,201 +263,330 @@ export default function EmployeeSubscriptionPage() {
         )}
 
         {loading ? (
-          <div className="glass p-12 flex justify-center">
-            <Loader2 className="w-7 h-7 animate-spin text-[#2BBFC5]" />
-          </div>
-        ) : (
+          <LoadingSkeleton />
+        ) : subscription && sessions ? (
           <div className="space-y-6">
 
-            {/* ── Current Plan Card ── */}
+            {/* ═══════════════════════════════════════════════════════════
+                SECTION 1: Current Plan Card
+               ═══════════════════════════════════════════════════════════ */}
             <div
-              className="rounded-2xl p-6"
+              className="rounded-2xl p-6 relative overflow-hidden"
               style={{
-                background: `${planColor}08`,
+                background: `linear-gradient(135deg, ${planColor}12 0%, ${planColor}04 100%)`,
                 border: `1px solid ${planColor}40`,
               }}
             >
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-4">
-                  <div
-                    className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                    style={{ background: `${planColor}15`, border: `1px solid ${planColor}30` }}
+              {/* Managed-by badge */}
+              <div className="absolute top-4 right-4">
+                <div
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[11px] font-semibold"
+                  style={{
+                    background: 'rgba(255,255,255,0.05)',
+                    border: '1px solid rgba(255,255,255,0.1)',
+                    color: 'rgba(255,255,255,0.5)',
+                  }}
+                >
+                  <Building2 className="w-3 h-3" />
+                  Managed by {subscription.managedBy}
+                </div>
+              </div>
+
+              <div className="flex items-start gap-4">
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0"
+                  style={{ background: `${planColor}15`, border: `1px solid ${planColor}30` }}
+                >
+                  <PlanIcon className="w-7 h-7" style={{ color: planColor }} />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-xl font-bold text-white">{subscription.planLabel}</h2>
+                    <span
+                      className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
+                      style={{ background: `${planColor}20`, color: planColor, border: `1px solid ${planColor}30` }}
+                    >
+                      Active
+                    </span>
+                  </div>
+
+                  {/* Price toggle */}
+                  <div className="flex items-baseline gap-2 mt-2">
+                    <span className="text-3xl font-black text-white">
+                      ${showYearly ? subscription.priceYearly : subscription.priceMonthly.toFixed(2)}
+                    </span>
+                    <span className="text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                      /{showYearly ? 'year' : 'month'}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => setShowYearly(prev => !prev)}
+                    className="text-xs mt-1 underline underline-offset-2 transition-colors hover:text-white"
+                    style={{ color: 'rgba(255,255,255,0.35)' }}
                   >
-                    <PlanIcon className="w-7 h-7" style={{ color: planColor }} />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <h2 className="text-xl font-bold text-white">{planLabel}</h2>
-                      <span
-                        className="px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider"
-                        style={{ background: `${planColor}20`, color: planColor, border: `1px solid ${planColor}30` }}
-                      >
-                        Active
-                      </span>
-                    </div>
-                    <div className="flex items-baseline gap-1 mt-1">
-                      <span className="text-3xl font-black text-white">${planPrice}</span>
-                      <span style={{ color: 'rgba(255,255,255,0.4)' }} className="text-sm">/year</span>
-                    </div>
-                    <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.35)' }}>
-                      or ${monthlyPrice}/month billed monthly
-                    </p>
-                  </div>
+                    {showYearly
+                      ? `View as $${subscription.priceMonthly.toFixed(2)}/month`
+                      : `View as $${subscription.priceYearly}/year`}
+                  </button>
                 </div>
               </div>
 
-              {/* Billing Details */}
-              <div className="mt-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
-                <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Calendar className="w-3.5 h-3.5" style={{ color: 'rgba(255,255,255,0.4)' }} />
-                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                      Billing Cycle
-                    </span>
-                  </div>
-                  <p className="text-sm font-medium text-white">{billingCycle}</p>
-                </div>
-                <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <Calendar className="w-3.5 h-3.5" style={{ color: 'rgba(255,255,255,0.4)' }} />
-                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                      Next Billing
-                    </span>
-                  </div>
-                  <p className="text-sm font-medium text-white">{nextBilling}</p>
-                </div>
-                <div className="p-3 rounded-xl" style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <CreditCard className="w-3.5 h-3.5" style={{ color: 'rgba(255,255,255,0.4)' }} />
-                    <span className="text-[10px] font-semibold uppercase tracking-wider" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                      Payment
-                    </span>
-                  </div>
-                  <p className="text-sm font-medium text-white">Managed by HR</p>
-                </div>
-              </div>
-            </div>
-
-            {/* ── 1-on-1 Booking Card ── */}
-            <BookingCard isPremium={isPremium} />
-
-            {/* ── Plan Features ── */}
-            <div className="glass p-6">
-              <h3 className="text-base font-semibold text-white mb-4 flex items-center gap-2">
-                <Sparkles className="w-4 h-4" style={{ color: planColor }} />
-                Your Plan Features
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {BASIC_FEATURES.map(f => (
+              {/* Feature list */}
+              <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                {subscription.features.map(f => (
                   <div key={f} className="flex items-start gap-2.5 text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>
                     <CheckCircle className="w-4 h-4 text-[#2BBFC5] flex-shrink-0 mt-0.5" />
                     {f}
                   </div>
                 ))}
-                {isPremium && PREMIUM_FEATURES.map(f => (
+                {isPremium && subscription.premiumFeatures.map(f => (
                   <div key={f} className="flex items-start gap-2.5 text-sm" style={{ color: 'rgba(255,255,255,0.7)' }}>
                     <CheckCircle className="w-4 h-4 text-[#E8612A] flex-shrink-0 mt-0.5" />
                     {f}
                   </div>
                 ))}
               </div>
+
+              {/* Employer-managed notice */}
+              <div
+                className="mt-5 p-3 rounded-xl flex items-center gap-3"
+                style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+              >
+                <Building2 className="w-4 h-4 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.4)' }} />
+                <p className="text-xs" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  Your employer manages your subscription. For plan changes, contact your HR administrator.
+                </p>
+              </div>
             </div>
 
-            {/* ── Upgrade CTA (Basic only) ── */}
-            {!isPremium && (
-              <div className="space-y-6">
-                {/* Feature Comparison */}
-                <div className="glass overflow-hidden">
-                  <div className="px-6 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                    <h3 className="text-base font-semibold text-white flex items-center gap-2">
-                      <Crown className="w-4 h-4 text-[#E8612A]" />
-                      Upgrade to Premium
-                    </h3>
-                    <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>
-                      Unlock advanced features and 1-on-1 expert sessions
-                    </p>
-                  </div>
-                  <div className="overflow-x-auto">
-                    <table className="w-full">
-                      <thead>
-                        <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                          <th className="px-6 py-3 text-left text-xs font-medium" style={{ color: 'rgba(255,255,255,0.35)' }}>Feature</th>
-                          <th className="px-6 py-3 text-center text-xs font-medium text-[#2BBFC5]">Basic ($299/yr)</th>
-                          <th className="px-6 py-3 text-center text-xs font-medium text-[#E8612A]">Premium ($499/yr)</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
-                        {[
-                          { feature: '6-module LMS access', basic: true, premium: true },
-                          { feature: '40-question readiness assessment', basic: true, premium: true },
-                          { feature: 'Progress tracking', basic: true, premium: true },
-                          { feature: 'Completion certificates', basic: true, premium: true },
-                          { feature: 'Email support', basic: true, premium: true },
-                          { feature: '1-on-1 live sessions with expert', basic: false, premium: true },
-                          { feature: 'Priority support (24-hour response)', basic: false, premium: true },
-                          { feature: 'Advanced analytics dashboard', basic: false, premium: true },
-                          { feature: 'Custom company branding', basic: false, premium: true },
-                          { feature: 'Dedicated account manager', basic: false, premium: true },
-                          { feature: 'API access', basic: false, premium: true },
-                        ].map(row => (
-                          <tr key={row.feature} className="hover:bg-white/[0.02]">
-                            <td className="px-6 py-3 text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>{row.feature}</td>
-                            <td className="px-6 py-3 text-center">
-                              {row.basic
-                                ? <CheckCircle className="w-4 h-4 text-[#2BBFC5] mx-auto" />
-                                : <span style={{ color: 'rgba(255,255,255,0.15)' }}>--</span>}
-                            </td>
-                            <td className="px-6 py-3 text-center">
-                              {row.premium
-                                ? <CheckCircle className="w-4 h-4 text-[#E8612A] mx-auto" />
-                                : <span style={{ color: 'rgba(255,255,255,0.15)' }}>--</span>}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Upgrade button */}
-                <div
-                  className="rounded-2xl p-6 text-center"
+            {/* ═══════════════════════════════════════════════════════════
+                SECTION 2: 1:1 Sessions
+               ═══════════════════════════════════════════════════════════ */}
+            <div
+              className="rounded-2xl p-6"
+              style={{
+                background: 'linear-gradient(135deg, rgba(232,97,42,0.08) 0%, rgba(43,191,197,0.04) 100%)',
+                border: '1px solid rgba(255,255,255,0.1)',
+              }}
+            >
+              <div className="flex items-center justify-between mb-5">
+                <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                  <Video className="w-5 h-5 text-[#E8612A]" />
+                  1:1 Sessions
+                </h3>
+                <span
+                  className="px-2.5 py-1 rounded-full text-[11px] font-semibold"
                   style={{
-                    background: 'linear-gradient(135deg, rgba(232,97,42,0.08) 0%, rgba(232,97,42,0.03) 100%)',
-                    border: '1px solid rgba(232,97,42,0.25)',
+                    background: isPremium ? 'rgba(232,97,42,0.12)' : 'rgba(43,191,197,0.12)',
+                    color: isPremium ? '#E8612A' : '#2BBFC5',
+                    border: `1px solid ${isPremium ? 'rgba(232,97,42,0.25)' : 'rgba(43,191,197,0.25)'}`,
                   }}
                 >
-                  <Crown className="w-8 h-8 text-[#E8612A] mx-auto mb-3" />
-                  <h3 className="text-lg font-bold text-white mb-1">Ready to upgrade?</h3>
-                  <p className="text-sm mb-4" style={{ color: 'rgba(255,255,255,0.5)' }}>
-                    Contact your HR administrator to upgrade your company plan to Premium
-                  </p>
-                  <a
-                    href="mailto:support@endevo.life?subject=Upgrade to Premium"
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02]"
-                    style={{
-                      background: 'linear-gradient(135deg, #E8612A, #d4541f)',
-                      boxShadow: '0 4px 24px rgba(232,97,42,0.3)',
-                    }}
-                  >
-                    Upgrade to Premium <ArrowRight className="w-4 h-4" />
-                  </a>
-                </div>
+                  {isPremium ? 'Premium — 6/yr' : 'Basic — 2/yr'}
+                </span>
               </div>
-            )}
 
-            {/* Footer note */}
+              {/* Progress bar */}
+              <SessionProgressBar
+                used={sessions.used}
+                total={sessions.total > 0 ? sessions.total : subscription.sessionsTotal}
+              />
+
+              {/* Session history */}
+              {sessions.sessions.length > 0 && (
+                <div className="mt-5 space-y-2">
+                  <h4
+                    className="text-xs font-semibold uppercase tracking-wider mb-3"
+                    style={{ color: 'rgba(255,255,255,0.35)' }}
+                  >
+                    Session History
+                  </h4>
+                  {sessions.sessions.map(s => (
+                    <div
+                      key={s.id}
+                      className="flex items-center justify-between p-3 rounded-xl"
+                      style={{ background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)' }}
+                    >
+                      <div className="flex items-center gap-3">
+                        <div
+                          className="w-9 h-9 rounded-lg flex items-center justify-center"
+                          style={{ background: 'rgba(255,255,255,0.05)' }}
+                        >
+                          <User className="w-4 h-4" style={{ color: 'rgba(255,255,255,0.4)' }} />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-white">{s.coach}</p>
+                          <div className="flex items-center gap-2 text-[11px]" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                            <Calendar className="w-3 h-3" />
+                            {s.date}
+                            <span className="mx-1">·</span>
+                            <Clock className="w-3 h-3" />
+                            {s.duration}
+                          </div>
+                        </div>
+                      </div>
+                      <SessionStatusBadge status={s.status} />
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {sessions.sessions.length === 0 && (
+                <div
+                  className="mt-5 p-4 rounded-xl text-center"
+                  style={{ background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.08)' }}
+                >
+                  <Calendar className="w-6 h-6 mx-auto mb-2" style={{ color: 'rgba(255,255,255,0.2)' }} />
+                  <p className="text-sm" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                    No sessions booked yet
+                  </p>
+                  <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.25)' }}>
+                    Book your first session with an estate planning expert
+                  </p>
+                </div>
+              )}
+
+              {/* Book session button */}
+              {(sessions.total > 0 ? sessions.remaining : subscription.sessionsRemaining) > 0 && (
+                <a
+                  href={BOOKING_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mt-5 w-full flex items-center justify-center gap-2 py-3.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-[1.02] hover:shadow-lg"
+                  style={{
+                    background: 'linear-gradient(135deg, #E8612A, #d4541f)',
+                    boxShadow: '0 4px 24px rgba(232,97,42,0.3)',
+                  }}
+                >
+                  Book a Session <ArrowRight className="w-4 h-4" />
+                </a>
+              )}
+
+              {(sessions.total > 0 ? sessions.remaining : subscription.sessionsRemaining) <= 0 && (
+                <div
+                  className="mt-5 p-3 rounded-xl flex items-center gap-3"
+                  style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)' }}
+                >
+                  <XCircle className="w-4 h-4 text-red-400 flex-shrink-0" />
+                  <p className="text-xs text-red-400">
+                    You have used all your sessions for this year. Contact your HR administrator for options.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* ═══════════════════════════════════════════════════════════
+                SECTION 3: Plan Comparison (read-only)
+               ═══════════════════════════════════════════════════════════ */}
+            <div
+              className="rounded-2xl overflow-hidden"
+              style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.08)' }}
+            >
+              <div className="px-6 py-4" style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <h3 className="text-base font-semibold text-white flex items-center gap-2">
+                  <Sparkles className="w-4 h-4" style={{ color: planColor }} />
+                  Plan Comparison
+                </h3>
+                <p className="text-xs mt-1" style={{ color: 'rgba(255,255,255,0.4)' }}>
+                  See what is included in each plan
+                </p>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full">
+                  <thead>
+                    <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                      <th
+                        className="px-6 py-3 text-left text-xs font-medium"
+                        style={{ color: 'rgba(255,255,255,0.35)' }}
+                      >
+                        Feature
+                      </th>
+                      <th className="px-6 py-3 text-center text-xs font-medium relative" style={{ color: '#2BBFC5' }}>
+                        Basic ($24.92/mo)
+                        {!isPremium && (
+                          <div
+                            className="absolute -top-0.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest"
+                            style={{ background: '#2BBFC520', color: '#2BBFC5', border: '1px solid #2BBFC530' }}
+                          >
+                            Your Plan
+                          </div>
+                        )}
+                      </th>
+                      <th className="px-6 py-3 text-center text-xs font-medium relative" style={{ color: '#E8612A' }}>
+                        Premium ($41.58/mo)
+                        {isPremium && (
+                          <div
+                            className="absolute -top-0.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest"
+                            style={{ background: '#E8612A20', color: '#E8612A', border: '1px solid #E8612A30' }}
+                          >
+                            Your Plan
+                          </div>
+                        )}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y" style={{ borderColor: 'rgba(255,255,255,0.05)' }}>
+                    {COMPARISON_ROWS.map(row => (
+                      <tr key={row.feature} className="hover:bg-white/[0.02]">
+                        <td className="px-6 py-3 text-sm" style={{ color: 'rgba(255,255,255,0.6)' }}>
+                          {row.feature}
+                        </td>
+                        <td
+                          className="px-6 py-3 text-center"
+                          style={!isPremium ? { background: 'rgba(43,191,197,0.04)' } : undefined}
+                        >
+                          {renderCell(row.basic, '#2BBFC5')}
+                        </td>
+                        <td
+                          className="px-6 py-3 text-center"
+                          style={isPremium ? { background: 'rgba(232,97,42,0.04)' } : undefined}
+                        >
+                          {renderCell(row.premium, '#E8612A')}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* Contact HR note */}
+              <div
+                className="px-6 py-4 flex items-center gap-3"
+                style={{ borderTop: '1px solid rgba(255,255,255,0.05)', background: 'rgba(255,255,255,0.01)' }}
+              >
+                <Building2 className="w-4 h-4 flex-shrink-0" style={{ color: 'rgba(255,255,255,0.3)' }} />
+                <p className="text-xs" style={{ color: 'rgba(255,255,255,0.35)' }}>
+                  Contact your HR administrator for plan changes. Employees cannot modify their subscription directly.
+                </p>
+              </div>
+            </div>
+
+            {/* ── Footer ── */}
             <div className="pt-4" style={{ borderTop: '1px solid rgba(255,255,255,0.05)' }}>
               <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
-                Subscription is managed by your company administrator. For billing questions, contact{' '}
-                <a href="mailto:support@endevo.life" className="text-[#2BBFC5] hover:underline">support@endevo.life</a>.
-                Stripe integration coming soon.
+                Your subscription is managed by your employer. For questions, contact{' '}
+                <a href="mailto:support@endevo.life" className="text-[#2BBFC5] hover:underline">
+                  support@endevo.life
+                </a>.
               </p>
             </div>
 
           </div>
-        )}
+        ) : null}
       </div>
     </div>
   )
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
+
+function renderCell(value: boolean | string, color: string) {
+  if (typeof value === 'string') {
+    return <span className="text-sm font-semibold" style={{ color }}>{value}</span>
+  }
+  if (value) {
+    return <CheckCircle className="w-4 h-4 mx-auto" style={{ color }} />
+  }
+  return <span style={{ color: 'rgba(255,255,255,0.15)' }}>--</span>
 }

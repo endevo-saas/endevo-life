@@ -1,83 +1,270 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import {
-  Users, UserCheck, Clock, TrendingUp, Loader2, RefreshCw,
-  UserPlus, Activity, Award, Target, Sparkles, ArrowUpRight,
-  BookOpen, CreditCard, FileText, Settings
+  Users, UserPlus, RefreshCw, Calendar,
+  ArrowUpRight, TrendingUp, CheckCircle2, Zap
 } from 'lucide-react'
-import { api, User } from '@/lib/api'
+import { apiFetch, User } from '@/lib/api'
 import Link from 'next/link'
 import Cookies from 'js-cookie'
 
-interface HrDashData {
-  total_users: number
-  active_users: number
-  pending_invites: number
-  total_employees: number
-  tenant_name?: string
+// ─── Types ───────────────────────────────────────────────────────────────────
+
+interface HrMetrics {
+  activationRate: number
+  completionRate: number
+  overallProgress: number
+  totalUsers: number
+  activeUsers: number
+  pendingUsers: number
 }
 
-function PulseRing({ color = 'green' }: { color?: string }) {
-  const c: Record<string, string> = { green: 'bg-green-500', yellow: 'bg-yellow-500', brand: 'bg-brand-500' }
+interface HrSubscription {
+  plan: string
+  seats: number
+  usedSeats: number
+  sessionsTotal: number
+  sessionsUsed: number
+}
+
+interface RecentUser {
+  userId: string
+  firstName: string
+  lastName: string
+  email: string
+  status: string
+  lastActive?: string
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function getColorClass(value: number): string {
+  if (value > 70) return 'text-green-400'
+  if (value >= 40) return 'text-yellow-400'
+  return 'text-red-400'
+}
+
+function getRingColor(value: number): string {
+  if (value > 70) return 'stroke-green-400'
+  if (value >= 40) return 'stroke-yellow-400'
+  return 'stroke-red-400'
+}
+
+function getBgGradient(value: number): string {
+  if (value > 70) return 'from-green-600/20 to-green-800/10 border-green-500/20'
+  if (value >= 40) return 'from-yellow-600/20 to-yellow-800/10 border-yellow-500/20'
+  return 'from-red-600/20 to-red-800/10 border-red-500/20'
+}
+
+// ─── Animated Counter ────────────────────────────────────────────────────────
+
+function AnimatedNumber({ target, duration = 1200 }: { target: number; duration?: number }) {
+  const [current, setCurrent] = useState(0)
+  const frameRef = useRef<number>(0)
+
+  useEffect(() => {
+    if (target === 0) {
+      setCurrent(0)
+      return
+    }
+    const start = performance.now()
+    const animate = (now: number) => {
+      const elapsed = now - start
+      const progress = Math.min(elapsed / duration, 1)
+      // Ease out cubic
+      const eased = 1 - Math.pow(1 - progress, 3)
+      setCurrent(Math.round(eased * target))
+      if (progress < 1) {
+        frameRef.current = requestAnimationFrame(animate)
+      }
+    }
+    frameRef.current = requestAnimationFrame(animate)
+    return () => cancelAnimationFrame(frameRef.current)
+  }, [target, duration])
+
+  return <>{current}</>
+}
+
+// ─── Progress Ring ───────────────────────────────────────────────────────────
+
+function ProgressRing({ value, size = 88, strokeWidth = 6 }: { value: number; size?: number; strokeWidth?: number }) {
+  const radius = (size - strokeWidth) / 2
+  const circumference = 2 * Math.PI * radius
+  const offset = circumference - (value / 100) * circumference
+
   return (
-    <span className="relative flex h-2 w-2">
-      <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${c[color]} opacity-60`} />
-      <span className={`relative inline-flex rounded-full h-2 w-2 ${c[color]}`} />
-    </span>
+    <svg width={size} height={size} className="transform -rotate-90">
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={strokeWidth}
+        className="text-white/5"
+      />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={radius}
+        fill="none"
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeDasharray={circumference}
+        strokeDashoffset={offset}
+        className={`${getRingColor(value)} transition-all duration-1000 ease-out`}
+      />
+    </svg>
   )
 }
 
+// ─── Skeleton Card ───────────────────────────────────────────────────────────
+
+function MetricSkeleton() {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-white/3 p-6 animate-pulse">
+      <div className="flex items-start justify-between">
+        <div className="space-y-3 flex-1">
+          <div className="h-4 w-32 bg-white/10 rounded" />
+          <div className="h-10 w-20 bg-white/10 rounded" />
+          <div className="h-3 w-40 bg-white/5 rounded" />
+        </div>
+        <div className="w-[88px] h-[88px] rounded-full bg-white/5" />
+      </div>
+    </div>
+  )
+}
+
+// ─── Metric Card ─────────────────────────────────────────────────────────────
+
+interface MetricCardProps {
+  title: string
+  value: number
+  subtitle: string
+  icon: React.ElementType
+}
+
+function MetricCard({ title, value, subtitle, icon: Icon }: MetricCardProps) {
+  return (
+    <div className={`group relative overflow-hidden rounded-2xl border bg-gradient-to-br p-6 transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl ${getBgGradient(value)}`}>
+      <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-white/[0.02]" />
+      <div className="relative flex items-start justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-white/10 border border-white/10">
+              <Icon className={`w-4 h-4 ${getColorClass(value)}`} />
+            </div>
+            <span className="text-sm font-semibold text-white/70">{title}</span>
+          </div>
+          <div className={`text-4xl font-black tracking-tight mb-1 ${getColorClass(value)}`}>
+            <AnimatedNumber target={value} />%
+          </div>
+          <p className="text-xs text-white/40 leading-relaxed">{subtitle}</p>
+        </div>
+        <div className="flex-shrink-0 ml-4">
+          <div className="relative">
+            <ProgressRing value={value} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <span className={`text-sm font-bold ${getColorClass(value)}`}>
+                <AnimatedNumber target={value} />
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── Main Component ──────────────────────────────────────────────────────────
+
 export default function HrDashboard() {
-  const [data, setData] = useState<HrDashData | null>(null)
-  const [employees, setEmployees] = useState<User[]>([])
+  const [metrics, setMetrics] = useState<HrMetrics | null>(null)
+  const [subscription, setSubscription] = useState<HrSubscription | null>(null)
+  const [recentUsers, setRecentUsers] = useState<RecentUser[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [tenantName, setTenantName] = useState(Cookies.get('tenant_name') || '')
+
   const firstName = Cookies.get('first_name') || ''
   const displayName = firstName || Cookies.get('user_email')?.split('@')[0]?.replace(/[^a-zA-Z]/g, '') || 'HR Admin'
 
   const load = useCallback(async () => {
-    setLoading(true); setError('')
+    setLoading(true)
+    setError('')
     try {
-      const requests: Promise<unknown>[] = [
-        api.hrDashboard() as Promise<HrDashData>,
-        api.hrEmployees(),
-      ]
-      if (!tenantName) {
-        requests.push(api.hrTenant())
+      const [metricsData, subData, employeesData] = await Promise.allSettled([
+        apiFetch<HrMetrics>('/api/hr/metrics'),
+        apiFetch<HrSubscription>('/api/hr/subscription'),
+        apiFetch<{ employees: User[] }>('/api/hr/employees'),
+      ])
+
+      // Metrics — use API data or compute fallback from employees
+      if (metricsData.status === 'fulfilled') {
+        setMetrics(metricsData.value)
+      } else {
+        // Fallback: compute from employee list if metrics endpoint not ready
+        const employees = employeesData.status === 'fulfilled'
+          ? (employeesData.value.employees || [])
+          : []
+        const total = employees.length
+        const active = employees.filter((u: User) => u.status === 'active').length
+        setMetrics({
+          activationRate: total > 0 ? Math.round((active / total) * 100) : 0,
+          completionRate: 0,
+          overallProgress: 0,
+          totalUsers: total,
+          activeUsers: active,
+          pendingUsers: employees.filter((u: User) => u.status === 'pending' || u.status === 'invited').length,
+        })
       }
-      const results = await Promise.all(requests)
-      const dashData = results[0] as HrDashData
-      setData(dashData)
-      setEmployees(((results[1] as { employees?: User[] }).employees) || [])
-      // Pick up tenant_name from dashboard API or tenant API
+
+      // Subscription — optional, gracefully handle if not available
+      if (subData.status === 'fulfilled') {
+        setSubscription(subData.value)
+      }
+
+      // Recent users — last 10 from employee list
+      if (employeesData.status === 'fulfilled') {
+        const emps = employeesData.value.employees || []
+        const sorted = [...emps]
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+          .slice(0, 10)
+        setRecentUsers(sorted.map(u => ({
+          userId: u.userId,
+          firstName: u.firstName,
+          lastName: u.lastName,
+          email: u.email,
+          status: u.status,
+        })))
+      }
+
+      // Tenant name resolution
       if (!tenantName) {
-        const fromDash = dashData.tenant_name
-        if (fromDash) {
-          setTenantName(fromDash)
-          Cookies.set('tenant_name', fromDash, { expires: 1, sameSite: 'strict' })
-        } else if (results[2]) {
-          const t = results[2] as { name?: string }
-          if (t.name) {
-            setTenantName(t.name)
-            Cookies.set('tenant_name', t.name, { expires: 1, sameSite: 'strict' })
+        try {
+          const tenant = await apiFetch<{ name?: string }>('/api/hr/tenant')
+          if (tenant.name) {
+            setTenantName(tenant.name)
+            Cookies.set('tenant_name', tenant.name, { expires: 1, sameSite: 'strict' })
           }
+        } catch {
+          // Non-critical — tenant name is cosmetic
         }
       }
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load')
-    } finally { setLoading(false) }
+      setError(e instanceof Error ? e.message : 'Failed to load dashboard data')
+    } finally {
+      setLoading(false)
+    }
   }, [tenantName])
 
   useEffect(() => { load() }, [load])
 
-  const activeRate = data ? Math.round((data.active_users / Math.max(data.total_users, 1)) * 100) : 0
-  const recent = employees.slice(0, 5)
-
   return (
-    <div className="min-h-screen p-6">
+    <div className="min-h-screen p-4 sm:p-6">
+      {/* Background glow */}
       <div className="fixed inset-0 pointer-events-none overflow-hidden">
         <div className="absolute top-0 right-0 w-96 h-96 bg-green-600/6 rounded-full blur-3xl" />
         <div className="absolute bottom-0 left-0 w-80 h-80 bg-brand-600/6 rounded-full blur-3xl" />
@@ -85,183 +272,186 @@ export default function HrDashboard() {
 
       <div className="relative max-w-7xl mx-auto space-y-6">
 
-        {/* Header */}
-        <div className="flex items-start justify-between">
+        {/* ── Header ── */}
+        <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2 mb-1">
-              <PulseRing color="green" />
-              <span className="text-xs text-slate-500">Team portal live</span>
-            </div>
-            <h1 className="text-3xl font-black text-white tracking-tight">
-              {tenantName || 'Team Command'} <span className="text-green-400 text-lg font-medium">(HR Admin)</span>
+            <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+              {tenantName || 'Company'} Dashboard
             </h1>
-            <p className="text-slate-400 text-sm mt-0.5">
-              Welcome, <span className="text-white font-medium capitalize">{displayName}</span> · Manage your team
+            <p className="text-slate-400 text-sm mt-1">
+              Welcome back, <span className="text-white font-medium capitalize">{displayName}</span>
             </p>
           </div>
-          <button onClick={load} disabled={loading}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white text-sm transition-all disabled:opacity-50">
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} /> Refresh
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-slate-400 hover:text-white text-sm transition-all disabled:opacity-50 self-start"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
           </button>
         </div>
 
+        {/* ── Error Banner ── */}
         {error && (
           <div className="p-4 bg-red-500/10 border border-red-500/30 rounded-2xl text-red-400 text-sm flex items-center gap-3">
-            {error}
-            <button onClick={load} className="ml-auto text-red-300 hover:text-white font-medium">Retry</button>
+            <span className="flex-1">{error}</span>
+            <button onClick={load} className="text-red-300 hover:text-white font-medium whitespace-nowrap">
+              Retry
+            </button>
           </div>
         )}
 
-        {/* KPI row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* ── 3 Metric Cards ── */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {loading ? (
+            <>
+              <MetricSkeleton />
+              <MetricSkeleton />
+              <MetricSkeleton />
+            </>
+          ) : (
+            <>
+              <MetricCard
+                title="Activation Rate"
+                value={metrics?.activationRate ?? 0}
+                subtitle={`${metrics?.activeUsers ?? 0} of ${metrics?.totalUsers ?? 0} invited users activated`}
+                icon={Zap}
+              />
+              <MetricCard
+                title="Module Completion"
+                value={metrics?.completionRate ?? 0}
+                subtitle={`Active users who completed at least 1 module`}
+                icon={CheckCircle2}
+              />
+              <MetricCard
+                title="Overall User Progress"
+                value={metrics?.overallProgress ?? 0}
+                subtitle="Average progress across all users"
+                icon={TrendingUp}
+              />
+            </>
+          )}
+        </div>
+
+        {/* ── Quick Actions ── */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           {[
-            {
-              icon: Users, label: 'Total Team', value: loading ? '—' : (data?.total_users ?? 0),
-              sub: 'registered members', color: 'text-blue-400',
-              gradient: 'bg-gradient-to-br from-blue-600/20 to-blue-800/10 border-blue-500/30',
-              href: '/hr/employees'
-            },
-            {
-              icon: UserCheck, label: 'Active Now', value: loading ? '—' : (data?.active_users ?? 0),
-              sub: `${activeRate}% activation rate`, color: 'text-green-400',
-              gradient: 'bg-gradient-to-br from-green-600/20 to-green-800/10 border-green-500/30',
-              href: '/hr/employees'
-            },
-            {
-              icon: Clock, label: 'Pending Invites', value: loading ? '—' : (data?.pending_invites ?? 0),
-              sub: 'awaiting acceptance', color: 'text-yellow-400',
-              gradient: 'bg-gradient-to-br from-yellow-600/20 to-yellow-800/10 border-yellow-500/30',
-              href: '/hr/invite'
-            },
-            {
-              icon: TrendingUp, label: 'Employees', value: loading ? '—' : (data?.total_employees ?? 0),
-              sub: 'in your organisation', color: 'text-purple-400',
-              gradient: 'bg-gradient-to-br from-purple-600/20 to-purple-800/10 border-purple-500/30',
-              href: '/hr/employees'
-            },
-          ].map(s => {
-            const Icon = s.icon
+            { href: '/hr/invite', icon: UserPlus, label: 'Invite User', color: 'hover:border-green-500/50 hover:bg-green-600/10', iconColor: 'text-green-400' },
+            { href: '/hr/employees', icon: Users, label: 'View Users', color: 'hover:border-blue-500/50 hover:bg-blue-600/10', iconColor: 'text-blue-400' },
+            { href: '/hr/training', icon: Calendar, label: 'View Sessions', color: 'hover:border-purple-500/50 hover:bg-purple-600/10', iconColor: 'text-purple-400' },
+          ].map(action => {
+            const Icon = action.icon
             return (
-              <Link key={s.label} href={s.href}
-                className={`group relative overflow-hidden rounded-2xl p-5 border transition-all duration-300 hover:-translate-y-1 hover:shadow-2xl ${s.gradient}`}>
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-white/3" />
-                <div className="relative">
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-white/10 border border-white/10 mb-4">
-                    <Icon className={`w-5 h-5 ${s.color}`} />
-                  </div>
-                  <div className="text-3xl font-black text-white tracking-tight mb-1">{s.value}</div>
-                  <div className="text-sm font-semibold text-white/80 mb-0.5">{s.label}</div>
-                  <div className="text-xs text-white/50">{s.sub}</div>
+              <Link
+                key={action.href}
+                href={action.href}
+                className={`group flex items-center gap-3 p-4 rounded-xl border border-white/8 bg-white/3 transition-all duration-200 hover:-translate-y-0.5 ${action.color}`}
+              >
+                <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform flex-shrink-0">
+                  <Icon className={`w-5 h-5 ${action.iconColor}`} />
                 </div>
-                <ArrowUpRight className="absolute bottom-4 right-4 w-4 h-4 text-white/20 group-hover:text-white/60 transition-colors" />
+                <span className="text-sm font-medium text-slate-400 group-hover:text-white transition-colors">{action.label}</span>
+                <ArrowUpRight className="w-4 h-4 text-white/20 group-hover:text-white/60 transition-colors ml-auto" />
               </Link>
             )
           })}
         </div>
 
-        {/* Middle row */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* ── Subscription Summary (if available) ── */}
+        {subscription && (
+          <div className="rounded-2xl border border-white/8 bg-white/3 p-5">
+            <div className="flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
+              <span className="text-slate-400">
+                Plan: <span className="text-white font-semibold capitalize">{subscription.plan}</span>
+              </span>
+              <span className="text-slate-400">
+                Seats: <span className="text-white font-semibold">{subscription.usedSeats}/{subscription.seats}</span>
+              </span>
+              <span className="text-slate-400">
+                Sessions: <span className="text-white font-semibold">{subscription.sessionsUsed}/{subscription.sessionsTotal}</span>
+              </span>
+            </div>
+          </div>
+        )}
 
-          {/* Team health */}
-          <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
-            <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
-              <Target className="w-4 h-4 text-green-400" /> Team Health
+        {/* ── Recent User Activity ── */}
+        <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
+          <div className="flex items-center justify-between mb-5">
+            <h2 className="text-base font-bold text-white flex items-center gap-2">
+              <Users className="w-4 h-4 text-brand-400" />
+              Recent Users
             </h2>
-            <div className="space-y-4">
-              {[
-                { label: 'Activation Rate', value: activeRate, color: 'bg-green-500' },
-                { label: 'Engagement',      value: loading ? 0 : Math.min(activeRate + 10, 100), color: 'bg-blue-500' },
-                { label: 'Invite Fill Rate',value: loading || !data ? 0 : Math.round(((data.total_users - data.pending_invites) / Math.max(data.total_users, 1)) * 100), color: 'bg-purple-500' },
-              ].map(m => (
-                <div key={m.label}>
-                  <div className="flex justify-between text-xs mb-1.5">
-                    <span className="text-slate-400">{m.label}</span>
-                    <span className="text-white font-semibold">{loading ? '—' : `${m.value}%`}</span>
-                  </div>
-                  <div className="h-2 bg-white/5 rounded-full overflow-hidden">
-                    <div className={`h-full ${m.color} rounded-full transition-all duration-700`}
-                      style={{ width: loading ? '0%' : `${m.value}%` }} />
-                  </div>
-                </div>
+            <Link href="/hr/employees" className="text-xs text-brand-400 hover:text-brand-300 transition-colors">
+              View all →
+            </Link>
+          </div>
+
+          {loading ? (
+            <div className="space-y-3">
+              {[1, 2, 3, 4, 5].map(i => (
+                <div key={i} className="h-12 bg-white/3 rounded-xl animate-pulse" />
               ))}
             </div>
-          </div>
-
-          {/* Recent employees */}
-          <div className="lg:col-span-2 rounded-2xl border border-white/8 bg-white/3 p-6">
-            <div className="flex items-center justify-between mb-5">
-              <h2 className="text-base font-bold text-white flex items-center gap-2">
-                <Activity className="w-4 h-4 text-brand-400" /> Recent Team Members
-              </h2>
-              <Link href="/hr/employees" className="text-xs text-brand-400 hover:text-brand-300 transition-colors">
-                View all →
+          ) : recentUsers.length === 0 ? (
+            <div className="text-center py-10 text-slate-500">
+              <Users className="w-10 h-10 mx-auto mb-3 opacity-30" />
+              <p className="text-sm">No users yet. Invite your first user to get started.</p>
+              <Link href="/hr/invite" className="inline-flex items-center gap-1.5 mt-3 text-sm text-green-400 hover:text-green-300 transition-colors">
+                <UserPlus className="w-4 h-4" /> Invite User
               </Link>
             </div>
-            {loading ? (
-              <div className="space-y-3">
-                {[1,2,3].map(i => <div key={i} className="h-12 bg-white/3 rounded-xl animate-pulse" />)}
-              </div>
-            ) : recent.length === 0 ? (
-              <div className="text-center py-8 text-slate-500">
-                <Users className="w-10 h-10 mx-auto mb-2 opacity-30" />
-                <p className="text-sm">No team members yet</p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {recent.map((emp, i) => (
-                  <div key={emp.userId} className="flex items-center gap-3 p-3 rounded-xl bg-white/3 border border-white/5 hover:bg-white/5 transition-colors">
-                    <div className="relative flex-shrink-0">
-                      <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-green-500/20 to-brand-500/20 border border-white/10 flex items-center justify-center text-sm font-bold text-white">
-                        {(emp.firstName?.[0] || emp.email?.[0] || '?').toUpperCase()}
-                      </div>
-                      {i < 3 && <div className="absolute -top-1 -right-1 w-3 h-3 rounded-full bg-green-500 border-2 border-slate-900" />}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-white truncate">{emp.firstName} {emp.lastName}</p>
-                      <p className="text-xs text-slate-500 truncate">{emp.jobTitle || emp.department || emp.email}</p>
-                    </div>
-                    <span className={`px-2 py-0.5 rounded-lg text-xs font-medium flex-shrink-0 ${
-                      emp.status === 'active' ? 'bg-green-500/10 text-green-400' : 'bg-slate-500/10 text-slate-400'
-                    }`}>{emp.status}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-xs text-slate-500 border-b border-white/5">
+                    <th className="pb-3 font-medium">User</th>
+                    <th className="pb-3 font-medium hidden sm:table-cell">Email</th>
+                    <th className="pb-3 font-medium text-right">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recentUsers.map(user => (
+                    <tr key={user.userId} className="border-b border-white/5 last:border-0 hover:bg-white/[0.02] transition-colors">
+                      <td className="py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-green-500/20 to-brand-500/20 border border-white/10 flex items-center justify-center text-xs font-bold text-white flex-shrink-0">
+                            {(user.firstName?.[0] || user.email?.[0] || '?').toUpperCase()}
+                          </div>
+                          <span className="text-white font-medium truncate max-w-[150px]">
+                            {user.firstName && user.lastName
+                              ? `${user.firstName} ${user.lastName}`
+                              : user.email.split('@')[0]}
+                          </span>
+                        </div>
+                      </td>
+                      <td className="py-3 text-slate-500 truncate max-w-[200px] hidden sm:table-cell">
+                        {user.email}
+                      </td>
+                      <td className="py-3 text-right">
+                        <span className={`inline-flex px-2 py-0.5 rounded-lg text-xs font-medium ${
+                          user.status === 'active'
+                            ? 'bg-green-500/10 text-green-400'
+                            : user.status === 'pending' || user.status === 'invited'
+                              ? 'bg-yellow-500/10 text-yellow-400'
+                              : 'bg-slate-500/10 text-slate-400'
+                        }`}>
+                          {user.status}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
-        {/* Actions */}
-        <div className="rounded-2xl border border-white/8 bg-white/3 p-6">
-          <h2 className="text-base font-bold text-white flex items-center gap-2 mb-5">
-            <Sparkles className="w-4 h-4 text-green-400" /> Quick Actions
-          </h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            {[
-              { href: '/hr/employees',    icon: Users,      label: 'All Employees',     color: 'hover:border-blue-500/50 hover:bg-blue-600/10',    iconColor: 'text-blue-400' },
-              { href: '/hr/invite',       icon: UserPlus,   label: 'Invite Employee',   color: 'hover:border-green-500/50 hover:bg-green-600/10',   iconColor: 'text-green-400' },
-              { href: '/hr/training',     icon: BookOpen,   label: 'Training',          color: 'hover:border-brand-500/50 hover:bg-brand-600/10',   iconColor: 'text-brand-300' },
-              { href: '/hr/certificates', icon: Award,      label: 'Certificates',      color: 'hover:border-purple-500/50 hover:bg-purple-600/10', iconColor: 'text-purple-400' },
-              { href: '/hr/subscription', icon: CreditCard, label: 'Subscription',      color: 'hover:border-orange-500/50 hover:bg-orange-600/10', iconColor: 'text-orange-400' },
-              { href: '/hr/audit',        icon: FileText,   label: 'Audit Log',         color: 'hover:border-yellow-500/50 hover:bg-yellow-600/10', iconColor: 'text-yellow-400' },
-              { href: '/hr/settings',     icon: Settings,   label: 'Settings',          color: 'hover:border-slate-500/50 hover:bg-slate-600/10',   iconColor: 'text-slate-400' },
-            ].map(a => {
-              const Icon = a.icon
-              return (
-                <Link key={a.href} href={a.href}
-                  className={`group flex flex-col items-center gap-2 p-4 rounded-xl border border-white/8 bg-white/3 transition-all duration-200 hover:-translate-y-0.5 ${a.color}`}>
-                  <div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:scale-110 transition-transform">
-                    <Icon className={`w-5 h-5 ${a.iconColor}`} />
-                  </div>
-                  <span className="text-xs font-medium text-slate-400 group-hover:text-white transition-colors text-center">{a.label}</span>
-                </Link>
-              )
-            })}
-          </div>
-        </div>
-
+        {/* ── Footer ── */}
         <div className="flex items-center justify-between text-xs text-slate-600 pb-2">
-          <span>Endevo Life · {tenantName ? `${tenantName} HR Portal` : 'HR Admin Portal'}</span>
-          <span className="flex items-center gap-1.5"><PulseRing color="green" /> Tenant-scoped · Secure</span>
+          <span>Endevo Life {tenantName ? `· ${tenantName}` : ''}</span>
+          <span>HR Dashboard</span>
         </div>
       </div>
     </div>

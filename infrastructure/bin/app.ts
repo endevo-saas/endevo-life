@@ -9,6 +9,8 @@ import { ApiStack } from '../lib/05-api-stack'
 import { AmplifyStack } from '../lib/06-amplify-stack'
 import { CloudFrontLmsStack } from '../lib/07-cloudfront-lms-stack'
 import { LmsInfraStack } from '../lib/08-lms-infra-stack'
+import { SubscriptionStack } from '../lib/09-subscription-stack'
+import { JesseStack } from '../lib/10-jesse-stack'
 
 const app = new cdk.App()
 
@@ -59,3 +61,9 @@ new CloudFrontLmsStack(app, 'EndevoUatCloudFrontLms', {
 
 // Stack 8 — LMS Infra (imports manually-created LMS resources for CDK awareness)
 new LmsInfraStack(app, 'EndevoUatLmsInfra', { env, tags })
+
+// Stack 9 — Subscriptions + Sessions
+new SubscriptionStack(app, 'EndevoUatSubscriptions', { env, tags })
+
+// Stack 10 — Jesse AI (chat history table)
+new JesseStack(app, 'EndevoUatJesse', { env, tags })
