@@ -6,7 +6,7 @@ import {
   Shield, Building2, Users, FileText, Activity, LogOut,
   BarChart3, Settings, CreditCard, Globe, Monitor, MapPin,
   Wifi, ChevronDown, ChevronUp, Camera, Award, BookOpen,
-  ClipboardList, TrendingUp, DollarSign, Flag, Cpu, ArrowUpDown
+  ClipboardList, TrendingUp, DollarSign, Flag, Cpu, ArrowUpDown, Archive
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
@@ -23,6 +23,7 @@ const navGroups = [
       { href: '/admin/subscriptions', icon: CreditCard,     label: 'Subscriptions' },
       { href: '/admin/certificates',  icon: Award,          label: 'Certificates' },
       { href: '/admin/audit',         icon: FileText,       label: 'Audit Log' },
+      { href: '/admin/archive',       icon: Archive,        label: 'Recycle Bin' },
     ]
   },
   {

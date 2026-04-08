@@ -52,6 +52,12 @@ Routes:
   File Upload & Branding:
   POST /api/admin/upload-url                          Get S3 presigned upload URL
   POST /api/admin/tenants/{id}/branding               Update tenant branding config
+
+  Archive / Recycle Bin:
+  GET  /api/admin/archive/users                        List all archived users
+  POST /api/admin/archive/users/{userId}/restore       Restore archived user
+  GET  /api/admin/archive/tenants                      List all archived tenants
+  POST /api/admin/archive/tenants/{tenantId}/restore   Restore archived tenant
 """
 import json, os, uuid, base64, re
 import boto3
@@ -184,6 +190,9 @@ def get_caller(event):
             items = result.get("Items", [])
             if items:
                 u = items[0]
+                # Block archived users from authenticating
+                if u.get("status") == "archived":
+                    return None, None
                 # Check session expiry (24h TTL)
                 expires = u.get("sessionExpiresAt", "")
                 if expires:
@@ -209,6 +218,8 @@ def get_caller(event):
                     )
                     items = result.get("Items", [])
                     if items:
+                        if items[0].get("status") == "archived":
+                            return None, None
                         return items[0].get("role"), email
                 except Exception as e:
                     print(f"WORKOS_ADMIN_DB_ERROR: {e}")
@@ -370,6 +381,8 @@ def handler(event, context):
             "active_users":       active_users,
             "locked_users":       count_items(USERS_T, Attr("status").eq("locked")),
             "pending_users":      count_items(USERS_T, Attr("status").eq("pending")),
+            "archived_users":     count_items(USERS_T, Attr("status").eq("archived")),
+            "archived_tenants":   count_items(TENANTS_T, Attr("status").eq("archived")),
             "total_certificates": total_certs,
             "system_status":      "healthy"
         })
@@ -667,27 +680,28 @@ def handler(event, context):
             return err(404, "Tenant not found")
         if tenant_id in ("SYSTEM", "tenant-ind"):
             return err(400, "System tenants cannot be disabled")
-        if t.get("status") == "disabled":
-            return err(400, "Tenant is already disabled")
+        if t.get("status") in ("disabled", "archived"):
+            return err(400, "Tenant is already disabled/archived")
         now = datetime.now(timezone.utc).isoformat()
+        reason = sanitize(body.get("reason", "Admin action"), 500)
         TENANTS_T.update_item(Key={"tenantId": tenant_id},
-            UpdateExpression="SET #s = :v, disabledAt = :at, disabledBy = :by",
+            UpdateExpression="SET #s = :v, archivedAt = :at, archivedBy = :by, archiveReason = :reason, disabledAt = :at, disabledBy = :by",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":v": "disabled", ":at": now, ":by": caller_email})
-        # Deactivate all users in this tenant (DynamoDB status controls login)
-        all_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("status").eq("active"))
+            ExpressionAttributeValues={":v": "archived", ":at": now, ":by": caller_email, ":reason": reason})
+        # Archive all users in this tenant (DynamoDB status controls login)
+        all_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("status").ne("archived"))
         for u in all_users:
             try:
                 USERS_T.update_item(Key={"userId": u["userId"]},
-                    UpdateExpression="SET #s = :v",
+                    UpdateExpression="SET #s = :v, archivedAt = :at, archivedBy = :by, archiveReason = :reason",
                     ExpressionAttributeNames={"#s": "status"},
-                    ExpressionAttributeValues={":v": "inactive"})
+                    ExpressionAttributeValues={":v": "archived", ":at": now, ":by": caller_email, ":reason": f"Tenant archived: {reason}"})
             except Exception:
                 pass
-        audit("SYSTEM", caller_email, "TENANT_DISABLED",
-              f"Disabled tenant: {t.get('name')} ({tenant_id}) — {len(all_users)} users deactivated",
-              ip=ip, device=device, severity="WARNING")
-        return resp(200, {"message": f"Tenant '{t.get('name')}' disabled. {len(all_users)} users deactivated."})
+        audit("SYSTEM", caller_email, "TENANT_ARCHIVED",
+              f"Archived tenant: {t.get('name')} ({tenant_id}) — {len(all_users)} users archived. Reason: {reason}",
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"Tenant '{t.get('name')}' archived. {len(all_users)} users archived.", "archivedAt": now})
 
     # ── POST /api/admin/tenants/{id}/enable ──────────────────────────────
     if "/tenants/" in path and path.endswith("/enable") and method == "POST":
@@ -695,7 +709,7 @@ def handler(event, context):
         t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
         if not t:
             return err(404, "Tenant not found")
-        if t.get("status") not in ("disabled", "suspended", "inactive"):
+        if t.get("status") not in ("disabled", "suspended", "inactive", "archived"):
             return err(400, f"Tenant is already active (status: {t.get('status')})")
         now = datetime.now(timezone.utc).isoformat()
         TENANTS_T.update_item(Key={"tenantId": tenant_id},
@@ -908,7 +922,7 @@ def handler(event, context):
             return err(400, "Nothing to update")
         if "role" in updates and updates["role"] not in ("GLOBAL_ADMIN", "HR_ADMIN", "EMPLOYEE"):
             return err(400, "Invalid role")
-        if "status" in updates and updates["status"] not in ("active", "inactive", "locked", "pending"):
+        if "status" in updates and updates["status"] not in ("active", "inactive", "locked", "pending", "archived"):
             return err(400, "Invalid status")
         expr  = "SET " + ", ".join([f"#{k} = :{k}" for k in updates])
         names = {f"#{k}": k for k in updates}
@@ -929,17 +943,19 @@ def handler(event, context):
         item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
         if not item:
             return err(404, "User not found")
-        if item.get("status") == "inactive":
-            return err(400, "User is already inactive")
+        if item.get("status") in ("inactive", "archived"):
+            return err(400, "User is already inactive/archived")
         email = item.get("email", "")
         now = datetime.now(timezone.utc).isoformat()
+        reason = sanitize(body.get("reason", "Admin action"), 500)
         USERS_T.update_item(Key={"userId": user_id},
-            UpdateExpression="SET #s = :v, deactivatedAt = :at, deactivatedBy = :by",
+            UpdateExpression="SET #s = :v, archivedAt = :at, archivedBy = :by, archiveReason = :reason, deactivatedAt = :at, deactivatedBy = :by",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":v": "inactive", ":at": now, ":by": caller_email})
-        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_DEACTIVATED",
-              f"Deactivated: {email}", ip=ip, device=device, severity="WARNING")
-        return resp(200, {"message": f"User {email} deactivated"})
+            ExpressionAttributeValues={":v": "archived", ":at": now, ":by": caller_email, ":reason": reason})
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_ARCHIVED",
+              json.dumps({"userId": user_id, "email": email, "reason": reason}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"User {email} archived", "archivedAt": now})
 
     # ── POST /api/admin/users/{id}/reactivate ─────────────────────────────
     if "/users/" in path and path.endswith("/reactivate") and method == "POST":
@@ -952,11 +968,12 @@ def handler(event, context):
         email = item.get("email", "")
         now = datetime.now(timezone.utc).isoformat()
         USERS_T.update_item(Key={"userId": user_id},
-            UpdateExpression="SET #s = :v, reactivatedAt = :at, reactivatedBy = :by",
+            UpdateExpression="SET #s = :v, reactivatedAt = :at, reactivatedBy = :by, restoredAt = :at, restoredBy = :by",
             ExpressionAttributeNames={"#s": "status"},
             ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
-        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_REACTIVATED",
-              f"Reactivated: {email}", ip=ip, device=device, severity="WARNING")
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_RESTORED",
+              json.dumps({"userId": user_id, "email": email, "previousStatus": item.get("status", "")}),
+              ip=ip, device=device, severity="WARN")
         return resp(200, {"message": f"User {email} reactivated"})
 
     # ── POST /api/admin/users/{id}/lock ───────────────────────────────────
@@ -2240,6 +2257,91 @@ def handler(event, context):
             "message": "Branding updated successfully",
             "tenantId": target_tenant,
             "branding": updates,
+        })
+
+    # ══════════════════════════════════════════════════════════════════════
+    # ── Archive / Recycle Bin Routes ─────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── GET /api/admin/archive/users — List all archived users ───────────
+    if path.endswith("/archive/users") and method == "GET":
+        all_archived = scan_all(USERS_T, Attr("status").eq("archived"))
+        result_items = [{
+            "userId":        u.get("userId"),
+            "email":         u.get("email"),
+            "name":          u.get("name", ""),
+            "role":          u.get("role", ""),
+            "tenantId":      u.get("tenantId", ""),
+            "archivedAt":    u.get("archivedAt", u.get("deactivatedAt", "")),
+            "archivedBy":    u.get("archivedBy", u.get("deactivatedBy", "")),
+            "archiveReason": u.get("archiveReason", ""),
+        } for u in all_archived]
+        return resp(200, {"items": result_items, "count": len(result_items)})
+
+    # ── POST /api/admin/archive/users/{userId}/restore — Restore user ────
+    if "/archive/users/" in path and path.endswith("/restore") and method == "POST":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item:
+            return err(404, "Archived user not found")
+        if item.get("status") != "archived":
+            return err(400, f"User is not archived (status: {item.get('status')})")
+        email = item.get("email", "")
+        now = datetime.now(timezone.utc).isoformat()
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET #s = :v, restoredAt = :at, restoredBy = :by, reactivatedAt = :at, reactivatedBy = :by",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "USER_RESTORED",
+              json.dumps({"userId": user_id, "email": email, "restoredBy": caller_email}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"User {email} restored from archive", "restoredAt": now})
+
+    # ── GET /api/admin/archive/tenants — List all archived tenants ────────
+    if path.endswith("/archive/tenants") and method == "GET":
+        all_archived = scan_all(TENANTS_T, Attr("status").eq("archived"))
+        result_items = [{
+            "tenantId":      t.get("tenantId"),
+            "name":          t.get("name", ""),
+            "status":        t.get("status"),
+            "archivedAt":    t.get("archivedAt", t.get("disabledAt", "")),
+            "archivedBy":    t.get("archivedBy", t.get("disabledBy", "")),
+            "archiveReason": t.get("archiveReason", ""),
+            "userCount":     count_items(USERS_T, Attr("tenantId").eq(t.get("tenantId", "")) & Attr("status").eq("archived")),
+        } for t in all_archived]
+        return resp(200, {"items": result_items, "count": len(result_items)})
+
+    # ── POST /api/admin/archive/tenants/{tenantId}/restore — Restore tenant
+    if "/archive/tenants/" in path and path.endswith("/restore") and method == "POST":
+        target_tenant_id = path.split("/")[-2]
+        t = TENANTS_T.get_item(Key={"tenantId": target_tenant_id}).get("Item")
+        if not t:
+            return err(404, "Archived tenant not found")
+        if t.get("status") != "archived":
+            return err(400, f"Tenant is not archived (status: {t.get('status')})")
+        now = datetime.now(timezone.utc).isoformat()
+        TENANTS_T.update_item(Key={"tenantId": target_tenant_id},
+            UpdateExpression="SET #s = :v, restoredAt = :at, restoredBy = :by, reactivatedAt = :at, reactivatedBy = :by",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
+        # Restore all archived users in this tenant
+        archived_users = scan_all(USERS_T, Attr("tenantId").eq(target_tenant_id) & Attr("status").eq("archived"))
+        restored_count = 0
+        for u in archived_users:
+            try:
+                USERS_T.update_item(Key={"userId": u["userId"]},
+                    UpdateExpression="SET #s = :v, restoredAt = :at, restoredBy = :by",
+                    ExpressionAttributeNames={"#s": "status"},
+                    ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
+                restored_count += 1
+            except Exception:
+                pass
+        audit("SYSTEM", caller_email, "TENANT_RESTORED",
+              json.dumps({"tenantId": target_tenant_id, "name": t.get("name", ""), "usersRestored": restored_count, "restoredBy": caller_email}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {
+            "message": f"Tenant '{t.get('name')}' restored from archive. {restored_count} users restored.",
+            "restoredAt": now,
         })
 
     return err(404, f"Route not found: {method} {path}")

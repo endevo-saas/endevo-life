@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   Users, BarChart3, UserPlus, FileText, LogOut, Settings,
   Globe, Monitor, MapPin, Wifi, ChevronDown, ChevronUp, Camera,
-  BookOpen, Award, CreditCard, TrendingUp
+  BookOpen, Award, CreditCard, TrendingUp, Archive
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
@@ -21,6 +21,7 @@ const navGroups = [
       { href: '/hr/invite',       icon: UserPlus,   label: 'Invite Employee' },
       { href: '/hr/certificates', icon: Award,      label: 'Certificates' },
       { href: '/hr/audit',        icon: FileText,   label: 'Audit Log' },
+      { href: '/hr/archive',      icon: Archive,    label: 'Recycle Bin' },
     ],
   },
   {

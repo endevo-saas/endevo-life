@@ -15,6 +15,10 @@ Routes:
   POST /api/hr/sessions/book         — book a 1:1 session for an employee
   POST /api/hr/upload-url            — get S3 presigned upload URL (scoped to tenant)
   POST /api/hr/branding              — update own tenant branding
+
+  Archive / Recycle Bin:
+  GET  /api/hr/archive/employees                       List archived employees in own tenant
+  POST /api/hr/archive/employees/{userId}/restore      Restore archived employee
 """
 import json, os, uuid, base64, re
 import boto3
@@ -115,7 +119,7 @@ def get_caller(event):
             items = result.get("Items", [])
             if items:
                 u = items[0]
-                if u.get("status") == "inactive":
+                if u.get("status") in ("inactive", "archived"):
                     return None, None, None
                 # Check session expiry (24h TTL)
                 expires = u.get("sessionExpiresAt", "")
@@ -147,7 +151,7 @@ def get_caller(event):
             items = result.get("Items", [])
             if items:
                 u = items[0]
-                if u.get("status") == "inactive":
+                if u.get("status") in ("inactive", "archived"):
                     return None, None, None
                 return u.get("tenantId"), u.get("role"), email
         except Exception as e:
@@ -467,21 +471,25 @@ def handler(event, context):
               f"Updated {item.get('email','')} fields: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "Employee updated"})
 
-    # ── DELETE /api/hr/employees/{id} — deactivate (no hard delete) ─────────
-    if "/employees/" in path and method == "DELETE":
+    # ── DELETE /api/hr/employees/{id} — archive (no hard delete) ────────────
+    if "/employees/" in path and method == "DELETE" and "/archive/" not in path:
         user_id = path.split("/")[-1]
         item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
         if not item or item.get("tenantId") != tenant_id:
             return err(404, "Employee not found in your organisation")
+        if item.get("status") == "archived":
+            return err(400, "Employee is already archived")
         emp_email = item.get("email", "")
         now = datetime.now(timezone.utc).isoformat()
+        reason = sanitize(body.get("reason", "HR action"), 500)
         USERS_T.update_item(Key={"userId": user_id},
-            UpdateExpression="SET #s = :v, deactivatedAt = :at, deactivatedBy = :by",
+            UpdateExpression="SET #s = :v, archivedAt = :at, archivedBy = :by, archiveReason = :reason, deactivatedAt = :at, deactivatedBy = :by",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":v": "inactive", ":at": now, ":by": caller_email})
-        audit(tenant_id, caller_email, "EMPLOYEE_DEACTIVATED",
-              f"Deactivated: {emp_email}", ip=ip, device=device, severity="WARNING")
-        return resp(200, {"message": f"Employee {emp_email} deactivated"})
+            ExpressionAttributeValues={":v": "archived", ":at": now, ":by": caller_email, ":reason": reason})
+        audit(tenant_id, caller_email, "EMPLOYEE_ARCHIVED",
+              json.dumps({"userId": user_id, "email": emp_email, "reason": reason}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"Employee {emp_email} archived", "archivedAt": now})
 
     # ── POST /api/hr/employees/{id}/reactivate ────────────────────────────
     if "/employees/" in path and path.endswith("/reactivate") and method == "POST":
@@ -489,15 +497,18 @@ def handler(event, context):
         item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
         if not item or item.get("tenantId") != tenant_id:
             return err(404, "Employee not found in your organisation")
+        if item.get("status") == "active":
+            return err(400, "Employee is already active")
         emp_email = item.get("email", "")
         now = datetime.now(timezone.utc).isoformat()
         USERS_T.update_item(Key={"userId": user_id},
-            UpdateExpression="SET #s = :v, reactivatedAt = :at",
+            UpdateExpression="SET #s = :v, reactivatedAt = :at, reactivatedBy = :by, restoredAt = :at, restoredBy = :by",
             ExpressionAttributeNames={"#s": "status"},
-            ExpressionAttributeValues={":v": "active", ":at": now})
-        audit(tenant_id, caller_email, "EMPLOYEE_REACTIVATED",
-              f"Reactivated: {emp_email}", ip=ip, device=device)
-        return resp(200, {"message": f"Employee {emp_email} reactivated"})
+            ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
+        audit(tenant_id, caller_email, "EMPLOYEE_RESTORED",
+              json.dumps({"userId": user_id, "email": emp_email, "previousStatus": item.get("status", ""), "restoredBy": caller_email}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"Employee {emp_email} restored"})
 
     # ── GET /api/hr/tenant ────────────────────────────────────────────────
     if path.endswith("/tenant") and method == "GET":
@@ -867,5 +878,44 @@ def handler(event, context):
             "tenantId": tenant_id,
             "branding": updates,
         })
+
+    # ══════════════════════════════════════════════════════════════════════
+    # ── Archive / Recycle Bin Routes ─────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── GET /api/hr/archive/employees — List archived employees in tenant ─
+    if path.endswith("/archive/employees") and method == "GET":
+        all_archived = scan_all(USERS_T,
+            Attr("tenantId").eq(tenant_id) & Attr("status").eq("archived"))
+        result_items = [{
+            "userId":        u.get("userId"),
+            "email":         u.get("email"),
+            "name":          u.get("name", ""),
+            "role":          u.get("role", ""),
+            "department":    u.get("department", ""),
+            "archivedAt":    u.get("archivedAt", u.get("deactivatedAt", "")),
+            "archivedBy":    u.get("archivedBy", u.get("deactivatedBy", "")),
+            "archiveReason": u.get("archiveReason", ""),
+        } for u in all_archived]
+        return resp(200, {"items": result_items, "count": len(result_items)})
+
+    # ── POST /api/hr/archive/employees/{userId}/restore — Restore employee
+    if "/archive/employees/" in path and path.endswith("/restore") and method == "POST":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item or item.get("tenantId") != tenant_id:
+            return err(404, "Archived employee not found in your organisation")
+        if item.get("status") != "archived":
+            return err(400, f"Employee is not archived (status: {item.get('status')})")
+        emp_email = item.get("email", "")
+        now = datetime.now(timezone.utc).isoformat()
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET #s = :v, restoredAt = :at, restoredBy = :by, reactivatedAt = :at, reactivatedBy = :by",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
+        audit(tenant_id, caller_email, "EMPLOYEE_RESTORED",
+              json.dumps({"userId": user_id, "email": emp_email, "restoredBy": caller_email}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"Employee {emp_email} restored from archive", "restoredAt": now})
 
     return err(404, f"Route not found: {method} {path}")

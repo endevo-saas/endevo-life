@@ -260,6 +260,20 @@ export const api = {
   adminExportEmployees: (tenantId?: string) =>
     apiFetch<{ employees: User[]; count: number; exportedAt: string }>(`/api/admin/employees/export${tenantId ? `?tenantId=${tenantId}` : ''}`),
 
+  // Archive / Recycle Bin
+  adminArchivedUsers: () =>
+    apiFetch<{ users: User[] }>('/api/admin/archive/users'),
+  adminArchivedTenants: () =>
+    apiFetch<{ tenants: Tenant[] }>('/api/admin/archive/tenants'),
+  adminRestoreUser: (userId: string) =>
+    apiFetch(`/api/admin/archive/users/${userId}/restore`, { method: 'POST' }),
+  adminRestoreTenant: (tenantId: string) =>
+    apiFetch(`/api/admin/archive/tenants/${tenantId}/restore`, { method: 'POST' }),
+  hrArchivedEmployees: () =>
+    apiFetch<{ employees: User[] }>('/api/hr/archive/employees'),
+  hrRestoreEmployee: (userId: string) =>
+    apiFetch(`/api/hr/archive/employees/${userId}/restore`, { method: 'POST' }),
+
   // Feature Flags
   adminGetFeatures: () =>
     apiFetch<{ flags: Record<string, boolean>; source: string }>('/api/admin/features'),
