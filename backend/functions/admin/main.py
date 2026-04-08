@@ -29,6 +29,29 @@ Routes:
 
   Metrics:
   GET  /api/admin/metrics/overview                   Platform-wide metrics
+
+  Re-engagement:
+  POST /api/admin/re-engage                          Scan inactive users & send re-engagement emails
+
+  Bulk Import/Export:
+  POST /api/admin/tenants/import                     Bulk import tenants from JSON array
+  GET  /api/admin/tenants/export                     Export all tenants as JSON
+  POST /api/admin/employees/import                   Bulk import employees for a tenant
+  GET  /api/admin/employees/export                   Export employees (optional ?tenantId= filter)
+
+  Feature Flags:
+  GET  /api/admin/features                           Get all feature flags
+  PUT  /api/admin/features                           Update feature flags
+
+  System Health:
+  GET  /api/admin/system/status                      Full system status dashboard
+
+  MFA Management:
+  POST /api/admin/tenants/{id}/mfa                   Toggle MFA requirement for tenant
+
+  File Upload & Branding:
+  POST /api/admin/upload-url                          Get S3 presigned upload URL
+  POST /api/admin/tenants/{id}/branding               Update tenant branding config
 """
 import json, os, uuid, base64, re
 import boto3
@@ -38,7 +61,10 @@ from boto3.dynamodb.conditions import Attr, Key
 REGION    = os.environ.get("AWS_REGION", "us-east-1")
 dynamo    = boto3.resource("dynamodb", region_name=REGION)
 ses       = boto3.client("ses", region_name=REGION)
+s3_client = boto3.client("s3", region_name=REGION)
 _secrets  = boto3.client("secretsmanager", region_name=REGION)
+UPLOAD_BUCKET = os.environ.get("S3_UPLOAD_BUCKET", "endevo-uat-uploads")
+CF_DOMAIN = os.environ.get("CF_DOMAIN", "")
 USERS_T          = dynamo.Table("endevo-uat-users")
 TENANTS_T        = dynamo.Table("endevo-uat-tenants")
 AUDIT_T          = dynamo.Table("endevo-uat-audit")
@@ -518,6 +544,75 @@ def handler(event, context):
             "invite_email_sent": email_sent,
             "password_set": True if hr_created else False
         })
+
+    # ── GET /api/admin/tenants/export — Export all tenants (BEFORE {id} catch-all)
+    if path.endswith("/tenants/export") and method == "GET":
+        try:
+            all_tenants = scan_all(TENANTS_T)
+            now = datetime.now(timezone.utc).isoformat()
+            audit("SYSTEM", caller_email, "TENANTS_EXPORTED",
+                  f"Exported {len(all_tenants)} tenants",
+                  ip=ip, device=device)
+            return resp(200, {
+                "tenants": all_tenants,
+                "count": len(all_tenants),
+                "exportedAt": now,
+            })
+        except Exception as e:
+            print(f"TENANTS_EXPORT_ERROR: {e}")
+            return err(500, f"Tenant export failed: {str(e)}")
+
+    # ── POST /api/admin/tenants/{tenantId}/mfa — Toggle MFA (BEFORE {id} catch-all)
+    if "/tenants/" in path and path.endswith("/mfa") and method == "POST":
+        try:
+            parts = path.rstrip("/").split("/")
+            tenant_id = parts[-2] if len(parts) >= 2 else ""
+
+            if not tenant_id or not tenant_id.startswith("tenant-"):
+                return err(400, "Invalid tenant ID")
+
+            tenant = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+            if not tenant:
+                return err(404, f"Tenant '{tenant_id}' not found")
+
+            mfa_required = body.get("mfaRequired")
+            allowed_methods = body.get("allowedMethods", ["email"])
+
+            if not isinstance(mfa_required, bool):
+                return err(400, "'mfaRequired' must be a boolean")
+            if not isinstance(allowed_methods, list):
+                return err(400, "'allowedMethods' must be an array")
+
+            valid_methods = {"email", "sms"}
+            invalid = [m for m in allowed_methods if m not in valid_methods]
+            if invalid:
+                return err(400, f"Invalid MFA methods: {invalid}. Allowed: {list(valid_methods)}")
+
+            now = datetime.now(timezone.utc).isoformat()
+            TENANTS_T.update_item(
+                Key={"tenantId": tenant_id},
+                UpdateExpression="SET mfaRequired = :mfa, allowedMfaMethods = :methods, mfaUpdatedAt = :now, mfaUpdatedBy = :who",
+                ExpressionAttributeValues={
+                    ":mfa": mfa_required,
+                    ":methods": allowed_methods,
+                    ":now": now,
+                    ":who": caller_email,
+                },
+            )
+
+            audit(tenant_id, caller_email, "TENANT_MFA_UPDATED",
+                  f"MFA {'enabled' if mfa_required else 'disabled'} for {tenant_id}, methods: {allowed_methods}",
+                  ip=ip, device=device, severity="WARNING")
+
+            return resp(200, {
+                "message": f"MFA {'enabled' if mfa_required else 'disabled'} for {tenant_id}",
+                "tenantId": tenant_id,
+                "mfaRequired": mfa_required,
+                "allowedMethods": allowed_methods,
+            })
+        except Exception as e:
+            print(f"MFA_UPDATE_ERROR: {e}")
+            return err(500, f"Failed to update MFA settings: {str(e)}")
 
     # ── GET /api/admin/tenants/{id} ───────────────────────────────────────
     if "/tenants/" in path and method == "GET":
@@ -1436,6 +1531,112 @@ def handler(event, context):
             print(f"PLAN_CHANGE_ERROR: {e}")
             return err(500, f"Failed to change plan: {str(e)}")
 
+    # ── GET /api/admin/plan-config ──────────────────────────────────────
+    if path.endswith("/plan-config") and method == "GET":
+        _PLAN_CONFIG_DEFAULTS = {
+            "basic": {
+                "planLabel": "Endevo Basic",
+                "priceYearly": 299,
+                "priceMonthly": 24.92,
+                "sessionsTotal": 2,
+                "features": [
+                    "Readiness Assessment",
+                    "6 Learning Modules",
+                    "2x 30-min 1:1 Sessions per year",
+                    "AI Guide (Jesse)",
+                ],
+            },
+            "premium": {
+                "planLabel": "Endevo Premium",
+                "priceYearly": 499,
+                "priceMonthly": 41.58,
+                "sessionsTotal": 6,
+                "features": [
+                    "Readiness Assessment",
+                    "6 Learning Modules",
+                    "6x 30-min 1:1 Sessions per year",
+                    "AI Guide (Jesse)",
+                    "Priority scheduling",
+                    "Extended session recordings",
+                ],
+            },
+            "premiumFeatures": [
+                "Everything in Basic",
+                "6x 30-min 1:1 Sessions per year",
+                "AI Guide (Jesse)",
+                "Priority scheduling",
+                "Extended session recordings",
+            ],
+        }
+        try:
+            item = CONFIG_T.get_item(Key={"configKey": "PLAN_CONFIG"}).get("Item")
+            if item and "configValue" in item:
+                cfg = json.loads(json.dumps(item["configValue"], default=str))
+                return resp(200, {"config": cfg, "source": "dynamodb"})
+            return resp(200, {"config": _PLAN_CONFIG_DEFAULTS, "source": "defaults"})
+        except Exception as e:
+            print(f"PLAN_CONFIG_GET_ERROR: {e}")
+            return resp(200, {"config": _PLAN_CONFIG_DEFAULTS, "source": "defaults"})
+
+    # ── PUT /api/admin/plan-config ──────────────────────────────────────
+    if path.endswith("/plan-config") and method == "PUT":
+        try:
+            body = get_body(event)
+            if not isinstance(body.get("basic"), dict):
+                return err(400, "Missing or invalid 'basic' plan configuration")
+            if not isinstance(body.get("premium"), dict):
+                return err(400, "Missing or invalid 'premium' plan configuration")
+
+            # Validate required fields in each plan
+            required_fields = ["planLabel", "priceYearly", "priceMonthly", "sessionsTotal", "features"]
+            for plan_key in ("basic", "premium"):
+                plan_data = body[plan_key]
+                missing = [f for f in required_fields if f not in plan_data]
+                if missing:
+                    return err(400, f"Plan '{plan_key}' missing fields: {', '.join(missing)}")
+                if not isinstance(plan_data["features"], list):
+                    return err(400, f"Plan '{plan_key}' features must be a list")
+                if not isinstance(plan_data["sessionsTotal"], (int, float)):
+                    return err(400, f"Plan '{plan_key}' sessionsTotal must be a number")
+
+            config_value = {
+                "basic": body["basic"],
+                "premium": body["premium"],
+                "premiumFeatures": body.get("premiumFeatures", []),
+            }
+
+            from decimal import Decimal
+
+            def _to_decimal(obj):
+                """Convert floats to Decimal for DynamoDB storage."""
+                if isinstance(obj, float):
+                    return Decimal(str(obj))
+                if isinstance(obj, dict):
+                    return {k: _to_decimal(v) for k, v in obj.items()}
+                if isinstance(obj, list):
+                    return [_to_decimal(i) for i in obj]
+                return obj
+
+            now = datetime.now(timezone.utc).isoformat()
+            CONFIG_T.put_item(Item={
+                "configKey":   "PLAN_CONFIG",
+                "sk":          "v1",
+                "configValue": _to_decimal(config_value),
+                "updatedAt":   now,
+                "updatedBy":   caller_email,
+            })
+
+            audit("SYSTEM", caller_email, "PLAN_CONFIG_UPDATED",
+                  f"Plan config updated by {caller_email}",
+                  ip=ip, device=device, severity="WARNING")
+
+            return resp(200, {"message": "Plan config updated", "config": config_value})
+        except Exception as e:
+            if "Missing or invalid" in str(e) or "missing fields" in str(e):
+                raise
+            print(f"PLAN_CONFIG_PUT_ERROR: {e}")
+            return err(500, f"Failed to update plan config: {str(e)}")
+
     # ── GET /api/admin/metrics/overview ───────────────────────────────────
     if "/metrics/" in path and path.endswith("/overview") and method == "GET":
         try:
@@ -1515,5 +1716,530 @@ def handler(event, context):
         except Exception as e:
             print(f"METRICS_OVERVIEW_ERROR: {e}")
             return err(500, f"Failed to load metrics overview: {str(e)}")
+
+    # ── POST /api/admin/re-engage — Scan for inactive users and send re-engagement emails
+    if path.endswith("/re-engage") and method == "POST":
+        from datetime import timedelta
+        SES_FROM = os.environ.get("SES_FROM_EMAIL", "noreply@endevo.life")
+        PLATFORM_URL = "https://uat.endevo.life"
+        INACTIVE_DAYS = 7
+
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=INACTIVE_DAYS)).isoformat()
+        all_users = scan_all(USERS_T, Attr("status").eq("active"))
+
+        inactive_users = []
+        for u in all_users:
+            last_active = u.get("lastLoginAt") or u.get("updatedAt") or u.get("createdAt", "")
+            if last_active and last_active < cutoff:
+                user_email = u.get("email")
+                if user_email:
+                    inactive_users.append({"email": user_email, "firstName": u.get("firstName", "")})
+
+        sent = 0
+        failed = 0
+        for u in inactive_users:
+            first_name = u.get("firstName") or "there"
+            html_body = f"""
+            <html>
+            <body style="font-family: Georgia, serif; background: #0D1825; color: #ffffff; padding: 40px; max-width: 600px; margin: 0 auto;">
+              <div style="text-align: center; margin-bottom: 32px;">
+                <h1 style="color: #2BBFC5; font-size: 28px; margin: 0;">Endevo Life</h1>
+                <p style="color: #94a3b8; margin: 4px 0 0;">Digital Legacy Platform</p>
+              </div>
+              <div style="background: #1e293b; border: 1px solid #334155; border-radius: 16px; padding: 32px;">
+                <h2 style="color: #ffffff; font-size: 22px; margin: 0 0 16px;">Hi {first_name},</h2>
+                <p style="color: #94a3b8; line-height: 1.6;">
+                  We noticed you haven't logged in for a while. Your Legacy Readiness journey is waiting for you!
+                </p>
+                <p style="color: #94a3b8; line-height: 1.6;">
+                  Complete all 6 modules to earn your Legacy Readiness Certificate and protect what matters most.
+                </p>
+                <div style="text-align: center; margin: 28px 0;">
+                  <a href="{PLATFORM_URL}/employee/dashboard" style="display: inline-block; background: #E8612A; color: white; padding: 14px 28px; border-radius: 10px; text-decoration: none; font-weight: bold;">Continue Your Journey</a>
+                </div>
+              </div>
+              <p style="color: #475569; font-size: 12px; text-align: center; margin-top: 24px;">
+                Endevo Life — Protecting families through digital legacy planning.
+              </p>
+            </body>
+            </html>
+            """
+            try:
+                ses.send_email(
+                    Source=SES_FROM,
+                    Destination={"ToAddresses": [u["email"]]},
+                    Message={
+                        "Subject": {"Data": "We miss you! Continue your Legacy Readiness journey", "Charset": "UTF-8"},
+                        "Body": {
+                            "Html": {"Data": html_body, "Charset": "UTF-8"},
+                            "Text": {
+                                "Data": f"Hi {first_name}, we noticed you haven't logged in for a while. Continue your Legacy Readiness journey at {PLATFORM_URL}/employee/dashboard",
+                                "Charset": "UTF-8",
+                            },
+                        },
+                    },
+                )
+                sent += 1
+            except Exception as e:
+                print(f"RE_ENGAGE_SES_ERROR for {u['email']}: {e}")
+                failed += 1
+
+        audit("SYSTEM", caller_email, "RE_ENGAGE_SENT",
+              f"Re-engagement emails: {sent} sent, {failed} failed out of {len(inactive_users)} inactive users",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "attempted": len(inactive_users),
+            "sent": sent,
+            "failed": failed,
+            "inactiveDays": INACTIVE_DAYS,
+        })
+
+    # ── POST /api/admin/tenants/import — Bulk import tenants ────────────
+    if path.endswith("/tenants/import") and method == "POST":
+        try:
+            tenants_list = body.get("tenants")
+            if not isinstance(tenants_list, list) or len(tenants_list) == 0:
+                return err(400, "Request must contain a non-empty 'tenants' array")
+            if len(tenants_list) > 500:
+                return err(400, "Maximum 500 tenants per import batch")
+
+            imported = 0
+            failed = 0
+            errors = []
+
+            # Pre-fetch current tenant count for sequential IDs
+            seq = count_items(TENANTS_T) + 1
+
+            for idx, t_data in enumerate(tenants_list):
+                try:
+                    name = sanitize(t_data.get("name") or "", 100)
+                    plan = sanitize(t_data.get("plan") or "basic", 50)
+                    max_seats = t_data.get("maxSeats", 50)
+                    hr_email = sanitize((t_data.get("hrEmail") or "").lower().strip(), 254)
+
+                    if not name or len(name) < 2:
+                        errors.append(f"Row {idx}: Tenant name required (min 2 chars)")
+                        failed += 1
+                        continue
+                    if plan not in ("basic", "premium"):
+                        errors.append(f"Row {idx}: Invalid plan '{plan}'")
+                        failed += 1
+                        continue
+                    if hr_email and not validate_email(hr_email):
+                        errors.append(f"Row {idx}: Invalid email '{hr_email}'")
+                        failed += 1
+                        continue
+
+                    try:
+                        max_seats = int(max_seats)
+                    except (TypeError, ValueError):
+                        max_seats = 50
+
+                    # Generate sequential tenant ID
+                    tenant_id = f"tenant-{seq:05d}"
+                    while TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item"):
+                        seq += 1
+                        tenant_id = f"tenant-{seq:05d}"
+
+                    now = datetime.now(timezone.utc).isoformat()
+                    TENANTS_T.put_item(Item={
+                        "tenantId": tenant_id, "name": name, "plan": plan,
+                        "status": "active", "hrEmail": hr_email,
+                        "createdAt": now, "createdBy": caller_email,
+                        "maxSeats": max_seats, "employeeCount": 0,
+                        "tenantCode": tenant_id, "importedAt": now,
+                    })
+                    seq += 1
+                    imported += 1
+                except Exception as row_err:
+                    errors.append(f"Row {idx}: {str(row_err)[:100]}")
+                    failed += 1
+
+            audit("SYSTEM", caller_email, "TENANTS_BULK_IMPORT",
+                  f"Imported {imported} tenants, {failed} failed",
+                  ip=ip, device=device, severity="WARNING")
+
+            return resp(200, {"imported": imported, "failed": failed, "errors": errors})
+        except Exception as e:
+            print(f"TENANTS_IMPORT_ERROR: {e}")
+            return err(500, f"Tenant import failed: {str(e)}")
+
+    # ── POST /api/admin/employees/import — Bulk import employees ─────────
+    if path.endswith("/employees/import") and method == "POST":
+        try:
+            tenant_id = sanitize(body.get("tenantId") or "", 50)
+            employees_list = body.get("employees")
+
+            if not tenant_id:
+                return err(400, "tenantId is required")
+            if not isinstance(employees_list, list) or len(employees_list) == 0:
+                return err(400, "Request must contain a non-empty 'employees' array")
+            if len(employees_list) > 1000:
+                return err(400, "Maximum 1000 employees per import batch")
+
+            # Verify tenant exists
+            tenant = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+            if not tenant:
+                return err(404, f"Tenant '{tenant_id}' not found")
+
+            imported = 0
+            failed = 0
+            errors = []
+            now = datetime.now(timezone.utc).isoformat()
+
+            for idx, emp in enumerate(employees_list):
+                try:
+                    email = sanitize((emp.get("email") or "").lower().strip(), 254)
+                    name = sanitize(emp.get("name") or "", 100)
+                    role = sanitize(emp.get("role") or "EMPLOYEE", 20).upper()
+                    first_name = sanitize(emp.get("firstName") or "", 50)
+                    last_name = sanitize(emp.get("lastName") or "", 50)
+                    department = sanitize(emp.get("department") or "", 100)
+                    job_title = sanitize(emp.get("jobTitle") or "", 100)
+
+                    if not email:
+                        errors.append(f"Row {idx}: Email required")
+                        failed += 1
+                        continue
+                    if not validate_email(email):
+                        errors.append(f"Row {idx}: Invalid email '{email}'")
+                        failed += 1
+                        continue
+                    if role not in ("EMPLOYEE", "HR_ADMIN"):
+                        errors.append(f"Row {idx}: Invalid role '{role}' (must be EMPLOYEE or HR_ADMIN)")
+                        failed += 1
+                        continue
+
+                    # Parse name into first/last if not provided separately
+                    if name and not first_name:
+                        parts = name.split()
+                        first_name = parts[0] if parts else ""
+                        last_name = " ".join(parts[1:]) if len(parts) > 1 else last_name
+
+                    # Check for duplicate email
+                    existing = USERS_T.query(
+                        IndexName="email-index",
+                        KeyConditionExpression=Key("email").eq(email),
+                    )
+                    if existing.get("Items"):
+                        errors.append(f"duplicate: {email}")
+                        failed += 1
+                        continue
+
+                    user_id = str(uuid.uuid4())
+                    USERS_T.put_item(Item={
+                        "userId": user_id, "tenantId": tenant_id,
+                        "email": email, "firstName": first_name,
+                        "lastName": last_name, "role": role,
+                        "status": "pending", "department": department,
+                        "jobTitle": job_title, "createdBy": caller_email,
+                        "createdAt": now, "importedAt": now,
+                    })
+                    imported += 1
+                except Exception as row_err:
+                    errors.append(f"Row {idx}: {str(row_err)[:100]}")
+                    failed += 1
+
+            # Update tenant employee count
+            try:
+                new_count = count_items(USERS_T, Attr("tenantId").eq(tenant_id))
+                TENANTS_T.update_item(
+                    Key={"tenantId": tenant_id},
+                    UpdateExpression="SET employeeCount = :c",
+                    ExpressionAttributeValues={":c": new_count},
+                )
+            except Exception:
+                pass
+
+            audit(tenant_id, caller_email, "EMPLOYEES_BULK_IMPORT",
+                  f"Imported {imported} employees to {tenant_id}, {failed} failed",
+                  ip=ip, device=device, severity="WARNING")
+
+            return resp(200, {"imported": imported, "failed": failed, "errors": errors})
+        except Exception as e:
+            print(f"EMPLOYEES_IMPORT_ERROR: {e}")
+            return err(500, f"Employee import failed: {str(e)}")
+
+    # ── GET /api/admin/employees/export — Export employees ────────────────
+    if path.endswith("/employees/export") and method == "GET":
+        try:
+            tenant_filter = qs.get("tenantId")
+            fexpr = Attr("tenantId").eq(tenant_filter) if tenant_filter else None
+            all_employees = scan_all(USERS_T, fexpr)
+            # Strip sensitive fields
+            safe = [{k: v for k, v in u.items() if k not in ("inviteToken", "sessionToken", "sessionExpiresAt")} for u in all_employees]
+            now = datetime.now(timezone.utc).isoformat()
+
+            audit("SYSTEM", caller_email, "EMPLOYEES_EXPORTED",
+                  f"Exported {len(safe)} employees" + (f" for tenant {tenant_filter}" if tenant_filter else ""),
+                  ip=ip, device=device)
+
+            return resp(200, {
+                "employees": safe,
+                "count": len(safe),
+                "exportedAt": now,
+            })
+        except Exception as e:
+            print(f"EMPLOYEES_EXPORT_ERROR: {e}")
+            return err(500, f"Employee export failed: {str(e)}")
+
+    # ── GET /api/admin/features — Get feature flags ──────────────────────
+    if path.endswith("/features") and method == "GET":
+        _FEATURE_DEFAULTS = {
+            "jesse_ai": True,
+            "lms_v2": True,
+            "mfa_required": False,
+            "sms_otp": True,
+            "email_otp": True,
+            "csv_export": True,
+            "bulk_import": True,
+        }
+        try:
+            item = CONFIG_T.get_item(Key={"configKey": "FEATURE_FLAGS", "sk": "v1"}).get("Item")
+            if item and "configValue" in item:
+                flags = json.loads(json.dumps(item["configValue"], default=str))
+                # Merge with defaults so new flags are always present
+                merged = {**_FEATURE_DEFAULTS, **flags}
+                return resp(200, {"flags": merged, "source": "dynamodb"})
+            return resp(200, {"flags": _FEATURE_DEFAULTS, "source": "defaults"})
+        except Exception as e:
+            print(f"FEATURE_FLAGS_GET_ERROR: {e}")
+            return resp(200, {"flags": _FEATURE_DEFAULTS, "source": "defaults"})
+
+    # ── PUT /api/admin/features — Update feature flags ───────────────────
+    if path.endswith("/features") and method == "PUT":
+        try:
+            if not isinstance(body, dict) or len(body) == 0:
+                return err(400, "Request body must be a non-empty object of feature flags")
+
+            # Validate all values are boolean
+            for key, val in body.items():
+                if not isinstance(val, bool):
+                    return err(400, f"Feature flag '{key}' must be a boolean (true/false)")
+
+            now = datetime.now(timezone.utc).isoformat()
+            CONFIG_T.put_item(Item={
+                "configKey": "FEATURE_FLAGS",
+                "sk": "v1",
+                "configValue": body,
+                "updatedAt": now,
+                "updatedBy": caller_email,
+            })
+
+            audit("SYSTEM", caller_email, "FEATURE_FLAGS_UPDATED",
+                  f"Feature flags updated: {json.dumps(body)}",
+                  ip=ip, device=device, severity="WARNING")
+
+            return resp(200, {"message": "Feature flags updated", "flags": body})
+        except Exception as e:
+            print(f"FEATURE_FLAGS_PUT_ERROR: {e}")
+            return err(500, f"Failed to update feature flags: {str(e)}")
+
+    # ── GET /api/admin/system/status — Full system health dashboard ──────
+    if "/system/" in path and path.endswith("/status") and method == "GET":
+        try:
+            dynamo_client = boto3.client("dynamodb", region_name=REGION)
+            lambda_client = boto3.client("lambda", region_name=REGION)
+
+            TABLE_NAMES = [
+                "endevo-uat-users", "endevo-uat-tenants", "endevo-uat-audit",
+                "endevo-uat-certificates", "endevo-uat-training",
+                "endevo-uat-video-progress", "endevo-uat-config",
+                "endevo-uat-subscriptions", "endevo-uat-sessions",
+                "endevo-uat-lms-modules", "endevo-uat-lms-questions",
+                "endevo-uat-lms-progress", "endevo-uat-quiz-results",
+                "endevo-uat-lms-lessons", "endevo-uat-lms-lesson-progress",
+                "endevo-uat-lms-lesson-quiz-results", "endevo-uat-chat-history",
+                "endevo-uat-jesse-access",
+            ]
+
+            tables_status = []
+            for tbl_name in TABLE_NAMES:
+                try:
+                    desc = dynamo_client.describe_table(TableName=tbl_name)["Table"]
+                    tables_status.append({
+                        "name": tbl_name,
+                        "status": desc.get("TableStatus", "UNKNOWN"),
+                        "itemCount": desc.get("ItemCount", 0),
+                        "sizeBytes": desc.get("TableSizeBytes", 0),
+                    })
+                except dynamo_client.exceptions.ResourceNotFoundException:
+                    tables_status.append({
+                        "name": tbl_name, "status": "NOT_FOUND",
+                        "itemCount": 0, "sizeBytes": 0,
+                    })
+                except Exception as tbl_err:
+                    tables_status.append({
+                        "name": tbl_name, "status": f"ERROR: {str(tbl_err)[:80]}",
+                        "itemCount": 0, "sizeBytes": 0,
+                    })
+
+            # Lambda functions status
+            LAMBDA_NAMES = [
+                "endevo-uat-auth", "endevo-uat-admin", "endevo-uat-hr",
+                "endevo-uat-employee", "endevo-uat-lms",
+            ]
+            lambdas_status = []
+            for fn_name in LAMBDA_NAMES:
+                try:
+                    fn_info = lambda_client.get_function(FunctionName=fn_name)
+                    cfg = fn_info.get("Configuration", {})
+                    lambdas_status.append({
+                        "name": fn_name,
+                        "status": cfg.get("State", "UNKNOWN"),
+                        "runtime": cfg.get("Runtime", ""),
+                        "memoryMB": cfg.get("MemorySize", 0),
+                        "timeoutSec": cfg.get("Timeout", 0),
+                        "lastModified": cfg.get("LastModified", ""),
+                    })
+                except Exception as fn_err:
+                    lambdas_status.append({
+                        "name": fn_name,
+                        "status": f"ERROR: {str(fn_err)[:80]}",
+                    })
+
+            # SES status
+            ses_status = "unknown"
+            try:
+                ses_identity = ses.get_account_sending_enabled()
+                ses_status = "enabled" if ses_identity.get("Enabled") else "disabled"
+            except Exception:
+                ses_status = "error"
+
+            now = datetime.now(timezone.utc).isoformat()
+            total_tables = len(tables_status)
+            active_tables = sum(1 for t in tables_status if t["status"] == "ACTIVE")
+
+            audit("SYSTEM", caller_email, "SYSTEM_STATUS_CHECKED",
+                  f"System status checked: {active_tables}/{total_tables} tables active",
+                  ip=ip, device=device)
+
+            return resp(200, {
+                "checkedAt": now,
+                "overall": "healthy" if active_tables == total_tables else "degraded",
+                "dynamodb": {
+                    "tables": tables_status,
+                    "totalTables": total_tables,
+                    "activeTables": active_tables,
+                },
+                "lambda": {
+                    "functions": lambdas_status,
+                    "totalFunctions": len(lambdas_status),
+                },
+                "ses": {"status": ses_status},
+            })
+        except Exception as e:
+            print(f"SYSTEM_STATUS_ERROR: {e}")
+            return err(500, f"System status check failed: {str(e)}")
+
+    # ── POST /api/admin/upload-url ─────────────────────────────────────────
+    if path.endswith("/upload-url") and method == "POST":
+        ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "pdf"}
+        ALLOWED_TYPES = {"logo", "photo", "branding", "document"}
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+        upload_type = sanitize(body.get("type", ""), 20).lower()
+        filename = sanitize(body.get("filename", ""), 255)
+        target_tenant = sanitize(body.get("tenantId", ""), 100)
+
+        if not upload_type or upload_type not in ALLOWED_TYPES:
+            return err(400, f"Invalid type. Allowed: {', '.join(sorted(ALLOWED_TYPES))}")
+        if not filename:
+            return err(400, "filename is required")
+        if not target_tenant:
+            return err(400, "tenantId is required")
+
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in ALLOWED_EXTENSIONS:
+            return err(400, f"File extension '{ext}' not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+        s3_key = f"uploads/{upload_type}/{target_tenant}/{uuid.uuid4()}_{safe_filename}"
+
+        content_type_map = {
+            "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+            "gif": "image/gif", "webp": "image/webp",
+            "pdf": "application/pdf",
+        }
+        content_type = content_type_map.get(ext, "application/octet-stream")
+
+        try:
+            upload_url = s3_client.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": UPLOAD_BUCKET,
+                    "Key": s3_key,
+                    "ContentType": content_type,
+                },
+                ExpiresIn=300,
+            )
+        except Exception as e:
+            print(f"PRESIGNED_URL_ERROR: {e}")
+            return err(500, "Failed to generate upload URL")
+
+        return resp(200, {
+            "uploadUrl": upload_url,
+            "key": s3_key,
+            "expiresIn": 300,
+        })
+
+    # ── POST /api/admin/tenants/{tenantId}/branding ──────────────────────
+    if "/tenants/" in path and path.endswith("/branding") and method == "POST":
+        parts = path.split("/")
+        # /api/admin/tenants/{tenantId}/branding
+        target_tenant = parts[-2] if len(parts) >= 3 else ""
+        if not target_tenant:
+            return err(400, "tenantId is required")
+
+        logo_url = sanitize(body.get("logoUrl", ""), 500)
+        primary_color = sanitize(body.get("primaryColor", ""), 20)
+        company_name = sanitize(body.get("companyName", ""), 200)
+
+        if not any([logo_url, primary_color, company_name]):
+            return err(400, "At least one branding field required (logoUrl, primaryColor, companyName)")
+
+        # Validate logoUrl is HTTPS
+        if logo_url and not logo_url.startswith("https://"):
+            return err(400, "logoUrl must be an HTTPS URL")
+
+        # Validate color format if provided
+        if primary_color and not re.match(r'^#[0-9A-Fa-f]{3,8}$', primary_color):
+            return err(400, "Invalid color format. Use hex (e.g. #2BBFC5)")
+
+        # Build update expression
+        updates = {}
+        if logo_url:
+            updates["logoUrl"] = logo_url
+        if primary_color:
+            updates["primaryColor"] = primary_color
+        if company_name:
+            updates["companyName"] = company_name
+        updates["brandingUpdatedAt"] = datetime.now(timezone.utc).isoformat()
+
+        expr = "SET " + ", ".join([f"#{k} = :{k}" for k in updates])
+        names = {f"#{k}": k for k in updates}
+        vals = {f":{k}": v for k, v in updates.items()}
+
+        try:
+            TENANTS_T.update_item(
+                Key={"tenantId": target_tenant},
+                UpdateExpression=expr,
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=vals,
+            )
+        except Exception as e:
+            print(f"BRANDING_UPDATE_ERROR: {e}")
+            return err(500, "Failed to update branding")
+
+        audit("SYSTEM", caller_email, "TENANT_BRANDING_UPDATED",
+              f"Updated branding for tenant {target_tenant}: {json.dumps(updates, default=str)}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "message": "Branding updated successfully",
+            "tenantId": target_tenant,
+            "branding": updates,
+        })
 
     return err(404, f"Route not found: {method} {path}")
