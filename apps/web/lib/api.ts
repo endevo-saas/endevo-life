@@ -1,6 +1,6 @@
 import Cookies from 'js-cookie'
 
-const BASE = process.env.NEXT_PUBLIC_API_URL || ''
+const BASE = process.env.NEXT_PUBLIC_API_URL || 'https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com'
 
 function authHeaders(): HeadersInit {
   const token = Cookies.get('access_token') || ''
