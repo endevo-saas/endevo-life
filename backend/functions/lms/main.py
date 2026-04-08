@@ -34,6 +34,10 @@ def handler(event: dict, context) -> dict:  # noqa: ANN001
     if method == "OPTIONS":
         return cors()
 
+    # Health check — no auth required
+    if path.endswith("/lms/health") and method == "GET":
+        return ok({"status": "ok", "service": "lms"})
+
     logger.info({"method": method, "path": path})
 
     try:
