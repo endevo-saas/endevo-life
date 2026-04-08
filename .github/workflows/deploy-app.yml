@@ -27,7 +27,7 @@ jobs:
         id: amplify
         run: |
           APP_ID=$(aws amplify list-apps --region ${{ secrets.AWS_REGION }} \
-            --query 'apps[?name==`endevo-uat-frontend`].appId' \
+            --query 'apps[?starts_with(name, `endevo-uat`)].appId' \
             --output text)
           echo "app_id=$APP_ID" >> $GITHUB_OUTPUT
           echo "Amplify App ID: $APP_ID"
