@@ -2,8 +2,8 @@
 export const dynamic = 'force-dynamic'
 
 import { useEffect, useState } from 'react'
-import { Award, Download, Loader2, AlertCircle, RefreshCw, Trophy, BookOpen, ExternalLink } from 'lucide-react'
-import { api, Certificate } from '@/lib/api'
+import { Award, Download, Loader2, AlertCircle, RefreshCw, Trophy, BookOpen, ExternalLink, ShieldCheck } from 'lucide-react'
+import { api, Certificate, CertificateCheckResult } from '@/lib/api'
 import Link from 'next/link'
 
 interface LmsCertificate {
@@ -20,24 +20,23 @@ export default function CertificatesPage() {
   const [lmsCerts, setLmsCerts] = useState<LmsCertificate[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [checking, setChecking] = useState(false)
+  const [checkResult, setCheckResult] = useState<CertificateCheckResult | null>(null)
 
   async function load() {
     setLoading(true)
     setError('')
+    setCheckResult(null)
     try {
       // Load v1 training certs
       const d = await api.employeeCertificates()
       setCerts(d.certificates)
 
-      // Load LMS completion certs via user progress endpoint
+      // Load LMS completion certs via employee progress summary endpoint
       try {
-        const me = await api.me() as { user_id?: string; userId?: string }
-        const userId = me?.user_id || me?.userId
-        if (userId) {
-          const prog = await api.lmsAdminGetUserProgress(userId) as { certificate?: LmsCertificate }
-          if (prog?.certificate && prog.certificate.type === 'lms_completion') {
-            setLmsCerts([prog.certificate])
-          }
+        const summary = await api.employeeProgressSummary() as Record<string, unknown> & { certificate?: LmsCertificate }
+        if (summary?.certificate && (summary.certificate as LmsCertificate).type === 'lms_completion') {
+          setLmsCerts([summary.certificate as LmsCertificate])
         }
       } catch {
         // Non-fatal — LMS certs may not exist yet
@@ -46,6 +45,22 @@ export default function CertificatesPage() {
       setError(e instanceof Error ? e.message : 'Failed to load certificates')
     } finally {
       setLoading(false)
+    }
+  }
+
+  async function checkEligibility() {
+    setChecking(true)
+    setCheckResult(null)
+    try {
+      const result = await api.employeeCertificateCheck()
+      setCheckResult(result)
+      if (result.eligible) {
+        await load()
+      }
+    } catch (e: unknown) {
+      setCheckResult({ eligible: false, message: e instanceof Error ? e.message : 'Check failed' })
+    } finally {
+      setChecking(false)
     }
   }
 
@@ -101,6 +116,38 @@ export default function CertificatesPage() {
           </div>
         )}
 
+        {/* Certificate Eligibility Check */}
+        {!loading && (
+          <div className="glass p-6 mb-6 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <ShieldCheck className="w-6 h-6 text-teal-400" />
+              <div>
+                <div className="text-white font-medium">Legacy Readiness Certificate</div>
+                <div className="text-sm text-slate-400">Complete all 6 modules to earn your certificate</div>
+              </div>
+            </div>
+            <button
+              onClick={checkEligibility}
+              disabled={checking}
+              className="px-4 py-2 rounded-xl bg-teal-500/10 border border-teal-500/30 text-teal-400 hover:bg-teal-500/20 transition-all text-sm font-medium disabled:opacity-50 flex items-center gap-2"
+            >
+              {checking ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+              {checking ? 'Checking...' : 'Check Eligibility'}
+            </button>
+          </div>
+        )}
+
+        {checkResult && (
+          <div className={`mb-4 p-3 rounded-xl text-sm flex items-center gap-2 ${
+            checkResult.eligible
+              ? 'bg-green-500/10 border border-green-500/30 text-green-400'
+              : 'bg-amber-500/10 border border-amber-500/30 text-amber-400'
+          }`}>
+            {checkResult.eligible ? <Award className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
+            {checkResult.message}
+          </div>
+        )}
+
         {loading ? (
           <div className="glass p-12 flex items-center justify-center">
             <Loader2 className="w-8 h-8 animate-spin text-yellow-400" />
@@ -109,7 +156,7 @@ export default function CertificatesPage() {
           <div className="glass p-12 text-center">
             <Trophy className="w-16 h-16 text-slate-700 mx-auto mb-4" />
             <div className="text-slate-400 text-lg font-medium">No certificates yet</div>
-            <div className="text-sm text-slate-500 mt-2">Complete the 6-module LMS program or a training assessment to earn certificates</div>
+            <div className="text-sm text-slate-500 mt-2">Complete all 6 modules to earn your Legacy Readiness Certificate</div>
           </div>
         ) : (
           <div className="space-y-8">

@@ -200,7 +200,9 @@ export default function SubscriptionsPage() {
       const d = await api.adminTenants()
       setTenants(d.tenants.filter(t => t.status !== 'deleted'))
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load subscriptions')
+      setError(e instanceof Error ? e.message : 'Failed to load subscriptions. Showing cached data if available.')
+      // Keep previous tenants data if available so cards don't go blank
+      setTenants(prev => prev.length > 0 ? prev : [])
     } finally {
       setLoading(false)
     }
@@ -327,20 +329,7 @@ export default function SubscriptionsPage() {
       setInvoiceModal(null)
       showSuccess(`Invoice created for ${invoiceModal.tenant.name}`)
     } catch (e: unknown) {
-      // If API not ready, still create local draft
-      const newInvoice: Invoice = {
-        invoiceId: `INV-${Date.now().toString(36).toUpperCase()}`,
-        tenantId: invoiceModal.tenant.tenantId,
-        tenantName: invoiceModal.tenant.name,
-        amount: parseFloat(invoiceModal.amount),
-        status: 'draft',
-        date: new Date().toISOString(),
-        plan: invoiceModal.tenant.plan,
-        seats: invoiceModal.tenant.maxSeats || 1,
-      }
-      setInvoices(prev => [newInvoice, ...prev])
-      setInvoiceModal(null)
-      showSuccess(`Invoice draft created locally for ${invoiceModal.tenant.name}`)
+      setInvoiceModal(prev => prev ? { ...prev, saving: false, error: e instanceof Error ? e.message : 'Failed to create invoice' } : null)
     }
   }
 

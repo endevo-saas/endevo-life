@@ -11,6 +11,7 @@ import { CloudFrontLmsStack } from '../lib/07-cloudfront-lms-stack'
 import { LmsInfraStack } from '../lib/08-lms-infra-stack'
 import { SubscriptionStack } from '../lib/09-subscription-stack'
 import { JesseStack } from '../lib/10-jesse-stack'
+import { FeaturesStack } from '../lib/11-features-stack'
 
 const app = new cdk.App()
 
@@ -67,3 +68,6 @@ new SubscriptionStack(app, 'EndevoUatSubscriptions', { env, tags })
 
 // Stack 10 — Jesse AI (chat history table)
 new JesseStack(app, 'EndevoUatJesse', { env, tags })
+
+// Stack 11 — Plan Features + Notifications
+new FeaturesStack(app, 'EndevoUatFeatures', { env, tags })

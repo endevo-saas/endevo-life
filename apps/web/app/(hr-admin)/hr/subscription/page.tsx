@@ -73,6 +73,18 @@ export default function HrSubscriptionPage() {
       setTenant(d as TenantInfo)
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load tenant info')
+      // Set fallback tenant so plan cards still render
+      setTenant(prev => prev ?? {
+        tenantId: '',
+        name: 'Your Organisation',
+        plan: 'basic',
+        status: 'active',
+        maxSeats: 0,
+        user_count: 0,
+        active_count: 0,
+        employee_count: 0,
+        hr_count: 0,
+      })
     } finally { setLoading(false) }
   }
 
@@ -408,7 +420,15 @@ export default function HrSubscriptionPage() {
             </div>
 
           </div>
-        ) : null}
+        ) : (
+          <div className="glass p-8 text-center">
+            <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-3" />
+            <p className="text-sm text-slate-400 mb-3">Unable to load subscription data</p>
+            <button onClick={load} className="px-4 py-2 rounded-xl bg-[#2BBFC5]/10 text-[#2BBFC5] border border-[#2BBFC5]/30 text-sm font-medium hover:bg-[#2BBFC5]/20 transition-all">
+              <RefreshCw className="w-4 h-4 inline mr-2" />Retry
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

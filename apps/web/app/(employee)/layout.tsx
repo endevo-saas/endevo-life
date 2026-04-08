@@ -7,9 +7,11 @@ import {
   MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera, Zap, BookOpen, CreditCard
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
+import { api } from '@/lib/api'
 import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 import { JesseChatWindow } from '@/components/jesse'
+import { CopilotWidget } from '@/components/copilot'
 
 const navGroups = [
   {
@@ -40,29 +42,101 @@ function SessionPanel() {
   const [geo, setGeo]         = useState<GeoInfo | null>(null)
   const [expanded, setExpanded] = useState(false)
   const [avatar, setAvatar]   = useState<string | null>(null)
+  const [uploading, setUploading] = useState(false)
   const email    = Cookies.get('user_email') || 'Employee'
   const initials = email.split('@')[0].slice(0, 2).toUpperCase()
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : ''
 
   useEffect(() => {
+    // Load avatar from localStorage as fallback/cache
     const saved = localStorage.getItem('emp_avatar')
     if (saved) setAvatar(saved)
+    // Load avatar from profile if available
+    api.employeeProfile().then((profile: Record<string, unknown>) => {
+      const key = profile?.avatarKey as string | undefined
+      const cfDomain = process.env.NEXT_PUBLIC_CF_DOMAIN || ''
+      if (key && cfDomain) {
+        const url = `https://${cfDomain}/${key}`
+        setAvatar(url)
+        localStorage.setItem('emp_avatar', url)
+      }
+    }).catch(() => {})
     fetch('https://ipapi.co/json/').then(r => r.json()).then(setGeo).catch(() => {})
   }, [])
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]; if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => { const d = ev.target?.result as string; setAvatar(d); localStorage.setItem('emp_avatar', d) }
-    reader.readAsDataURL(file)
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file size (10MB)
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File too large. Maximum size is 10MB.')
+      return
+    }
+
+    // Validate extension
+    const ext = file.name.split('.').pop()?.toLowerCase() || ''
+    if (!['jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext)) {
+      alert('Invalid file type. Allowed: jpg, jpeg, png, gif, webp')
+      return
+    }
+
+    setUploading(true)
+    try {
+      // 1. Get presigned upload URL
+      const { uploadUrl, key } = await api.employeeGetUploadUrl(file.name)
+
+      // 2. Upload file directly to S3
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: { 'Content-Type': file.type || 'application/octet-stream' },
+        body: file,
+      })
+      if (!uploadRes.ok) throw new Error('Upload failed')
+
+      // 3. Save avatar key to user record
+      const result = await api.employeeUpdateAvatar(key)
+
+      // 4. Update UI with new avatar
+      const avatarUrl = result.avatarUrl || ''
+      if (avatarUrl) {
+        setAvatar(avatarUrl)
+        localStorage.setItem('emp_avatar', avatarUrl)
+      } else {
+        // Fallback: use base64 for immediate display
+        const reader = new FileReader()
+        reader.onload = ev => {
+          const d = ev.target?.result as string
+          setAvatar(d)
+          localStorage.setItem('emp_avatar', d)
+        }
+        reader.readAsDataURL(file)
+      }
+    } catch (err) {
+      // Fallback to localStorage on failure
+      const reader = new FileReader()
+      reader.onload = ev => {
+        const d = ev.target?.result as string
+        setAvatar(d)
+        localStorage.setItem('emp_avatar', d)
+      }
+      reader.readAsDataURL(file)
+    } finally {
+      setUploading(false)
+    }
   }
 
   return (
     <div style={{ borderTop: '1px solid var(--border-subtle)' }}>
       <div className="p-3 flex items-center gap-2">
         <div className="relative flex-shrink-0">
-          <div className="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center"
+          <div className="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center relative"
             style={{ background: 'var(--gradient-card)', border: '1px solid var(--border)' }}>
+            {uploading && (
+              <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-10">
+                <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              </div>
+            )}
             {avatar
               ? <img src={avatar} alt="avatar" className="w-full h-full object-cover" />
               : <span className="text-xs font-black text-white">{initials}</span>}
@@ -167,6 +241,7 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
       </aside>
       <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>
         {children}
+        <CopilotWidget />
         <JesseChatWindow />
         <footer className="px-6 py-4 text-center border-t" style={{ borderColor: 'var(--border-subtle)' }}>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>

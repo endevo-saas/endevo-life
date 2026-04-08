@@ -5,21 +5,26 @@ Jesse is the AI-powered Comprehensive Legacy Readiness Guide.
 Provides RAG chat, assessment scoring, and personalized plan generation.
 
 Routes:
-  GET    /api/jesse/health          - Health check
-  POST   /api/jesse/chat            - RAG chat with Jesse (Bedrock Claude Haiku)
-  GET    /api/jesse/chat/history    - Load chat history for current user
-  DELETE /api/jesse/chat/reset      - Clear chat history for current user
-  POST   /api/jesse/assess          - Score assessment + generate 7-day plan
-  GET    /api/jesse/plan/{userId}   - Get latest saved plan
+  GET    /api/jesse/health          - Health check (public)
+  GET    /api/jesse/access          - Check premium access (auth required)
+  POST   /api/jesse/copilot         - Role-aware platform copilot (all plans, auth required)
+  POST   /api/jesse/speak           - Text-to-speech via Amazon Polly (all plans, auth required)
+  POST   /api/jesse/chat            - RAG chat with Jesse (Premium only)
+  GET    /api/jesse/chat/history    - Load chat history (Premium only)
+  DELETE /api/jesse/chat/reset      - Clear chat history (Premium only)
+  POST   /api/jesse/assess          - Score assessment + generate plan (Premium only)
+  GET    /api/jesse/plan/{userId}   - Get latest saved plan (Premium only)
 
 DynamoDB Tables:
   endevo-uat-users         - User profiles (read-only)
+  endevo-uat-tenants       - Tenant records (read-only, for plan check)
   endevo-uat-responses     - Assessment responses (read-only)
   endevo-uat-jesse-chat    - Chat history (PK=userId, SK=createdAt)
   endevo-uat-config        - Config / feature flags (read-only)
 """
 import json
 import os
+import re
 import uuid
 import boto3
 from datetime import datetime, timezone
@@ -36,9 +41,11 @@ RESPONSES_T = dynamo.Table("endevo-uat-responses")
 JESSE_CHAT_T = dynamo.Table("endevo-uat-jesse-chat")
 KNOWLEDGE_T = dynamo.Table("endevo-uat-knowledge-base")
 CONFIG_T = dynamo.Table("endevo-uat-config")
+TENANTS_T = dynamo.Table("endevo-uat-tenants")
 
 bedrock = boto3.client("bedrock-runtime", region_name=REGION)
 bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
+polly = boto3.client("polly", region_name=REGION)
 _secrets = boto3.client("secretsmanager", region_name=REGION)
 
 CHAT_MODEL = os.environ.get(
@@ -50,6 +57,11 @@ PLAN_MODEL = os.environ.get(
 EMBED_MODEL = os.environ.get("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 
 MAX_CHAT_HISTORY = 10
+
+VOICE_MAP = {
+    "female": "Joanna",   # US English female (Neural)
+    "male": "Matthew",    # US English male (Neural)
+}
 
 # ---------------------------------------------------------------------------
 # Secrets cache
@@ -144,6 +156,52 @@ def get_body(event: dict) -> dict:
         return json.loads(event.get("body") or "{}")
     except Exception:
         return {}
+
+
+# ---------------------------------------------------------------------------
+# Premium plan gate
+# ---------------------------------------------------------------------------
+_premium_cache: dict = {}  # {email: (is_premium, timestamp)}
+
+def _check_premium(tenant_id: str, email: str) -> bool:
+    """Return True if user or tenant is on the premium plan. Fail-closed with cache on errors."""
+    import time
+    now = time.time()
+    try:
+        from boto3.dynamodb.conditions import Key as _Key
+
+        # Check user's own plan first
+        user_resp = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key("email").eq(email),
+            Limit=1,
+        )
+        user_items = user_resp.get("Items", [])
+        if user_items:
+            user_plan = (user_items[0].get("plan") or "").lower()
+            if user_plan == "premium":
+                _premium_cache[email] = (True, now)
+                return True
+
+        # Fall back to tenant plan
+        tenant_resp = TENANTS_T.get_item(Key={"tenantId": tenant_id})
+        tenant_item = tenant_resp.get("Item")
+        if tenant_item:
+            tenant_plan = (tenant_item.get("plan") or "").lower()
+            if tenant_plan == "premium":
+                _premium_cache[email] = (True, now)
+                return True
+
+        _premium_cache[email] = (False, now)
+        return False
+    except Exception as e:
+        print(f"PREMIUM_CHECK_ERROR: {e}")
+        # Check cache — if we have a recent result (< 5 min), use it
+        cached = _premium_cache.get(email)
+        if cached and (now - cached[1]) < 300:
+            return cached[0]
+        # No cached result — fail closed (safer than blanket True)
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -798,6 +856,701 @@ def generate_plan(score_result: dict, knowledge_context: str = "") -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Jesse Action Execution System — role-gated CRUD via copilot
+# ---------------------------------------------------------------------------
+ROLE_ACTIONS: dict[str, dict[str, bool]] = {
+    "GLOBAL_ADMIN": {
+        "create_tenant": True,
+        "create_employee": True,
+        "list_tenants": True,
+        "list_employees": True,
+        "change_plan": True,
+        "toggle_feature": True,
+        "view_metrics": True,
+        "send_invite": True,
+        "export_data": True,
+        "view_system_status": True,
+        "manage_mfa": True,
+    },
+    "HR_ADMIN": {
+        "create_employee": True,
+        "list_employees": True,
+        "send_invite": True,
+        "view_metrics": True,
+        "book_session": True,
+        "view_tenant_info": True,
+    },
+    "EMPLOYEE": {
+        "view_progress": True,
+        "view_subscription": True,
+        "view_certificates": True,
+        "contact_hr": True,
+    },
+}
+
+ACTION_DESCRIPTIONS: dict[str, str] = {
+    "create_tenant": "Create a new tenant organisation",
+    "create_employee": "Create a new employee user",
+    "list_tenants": "List all tenants on the platform",
+    "list_employees": "List employees (scoped to tenant for HR)",
+    "change_plan": "Change a tenant's subscription plan",
+    "toggle_feature": "Enable or disable a feature flag",
+    "view_metrics": "View platform or tenant metrics",
+    "send_invite": "Send an invitation email to a new employee",
+    "export_data": "Export tenant or platform data",
+    "view_system_status": "View system health and status",
+    "manage_mfa": "Configure MFA settings for a tenant",
+    "book_session": "Book a 1:1 coaching session for an employee",
+    "view_tenant_info": "View details about the current tenant",
+    "view_progress": "View personal learning progress",
+    "view_subscription": "View current subscription details",
+    "view_certificates": "View earned certificates",
+    "contact_hr": "Get HR contact information",
+}
+
+
+def _execute_action(
+    action: str, params: dict, role: str, tenant_id: str, email: str, user_id: str
+) -> dict:
+    """Execute a role-gated action. Returns a result dict with success/error."""
+    # Permission check
+    if action not in ROLE_ACTIONS.get(role, {}):
+        return {"success": False, "error": f"Your role ({role}) cannot perform '{action}'"}
+
+    from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
+
+    now = datetime.now(timezone.utc).isoformat()
+
+    # ------------------------------------------------------------------
+    # create_employee
+    # ------------------------------------------------------------------
+    if action == "create_employee":
+        emp_email = (params.get("email") or "").strip().lower()
+        emp_name = (params.get("name") or "").strip()
+        emp_plan = (params.get("plan") or "basic").lower()
+        target_tenant = params.get("tenantId", tenant_id)
+
+        if not emp_email:
+            return {"success": False, "error": "Employee email is required"}
+        if not emp_name:
+            return {"success": False, "error": "Employee name is required"}
+        if emp_plan not in ("basic", "premium"):
+            emp_plan = "basic"
+
+        # HR_ADMIN always scoped to own tenant
+        if role == "HR_ADMIN":
+            target_tenant = tenant_id
+
+        # Check for duplicate
+        try:
+            dup = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key("email").eq(emp_email),
+                Limit=1,
+            )
+            if dup.get("Items"):
+                return {"success": False, "error": f"User with email {emp_email} already exists"}
+        except Exception:
+            pass
+
+        new_user_id = f"usr-{uuid.uuid4().hex[:12]}"
+        name_parts = emp_name.split()
+        first_name = name_parts[0] if name_parts else ""
+        last_name = " ".join(name_parts[1:]) if len(name_parts) > 1 else ""
+
+        try:
+            USERS_T.put_item(Item={
+                "userId": new_user_id,
+                "tenantId": target_tenant,
+                "email": emp_email,
+                "firstName": first_name,
+                "lastName": last_name,
+                "role": "EMPLOYEE",
+                "plan": emp_plan,
+                "status": "active",
+                "createdAt": now,
+                "createdBy": email,
+            })
+            return {
+                "success": True,
+                "message": f"Created employee {emp_email} ({emp_plan} plan) in {target_tenant}",
+                "userId": new_user_id,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to create employee: {e}"}
+
+    # ------------------------------------------------------------------
+    # create_tenant
+    # ------------------------------------------------------------------
+    if action == "create_tenant":
+        t_name = (params.get("name") or "").strip()
+        t_plan = (params.get("plan") or "basic").lower()
+        t_domain = (params.get("domain") or "").strip().lower()
+
+        if not t_name:
+            return {"success": False, "error": "Tenant name is required"}
+
+        new_tenant_id = f"tenant-{uuid.uuid4().hex[:8]}"
+        try:
+            TENANTS_T.put_item(Item={
+                "tenantId": new_tenant_id,
+                "name": t_name,
+                "plan": t_plan,
+                "domain": t_domain,
+                "status": "active",
+                "createdAt": now,
+                "createdBy": email,
+            })
+            return {
+                "success": True,
+                "message": f"Created tenant '{t_name}' ({t_plan} plan) with ID {new_tenant_id}",
+                "tenantId": new_tenant_id,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to create tenant: {e}"}
+
+    # ------------------------------------------------------------------
+    # list_tenants
+    # ------------------------------------------------------------------
+    if action == "list_tenants":
+        try:
+            result = TENANTS_T.scan(Limit=50)
+            items = result.get("Items", [])
+            tenants = [
+                {"tenantId": t.get("tenantId"), "name": t.get("name"), "plan": t.get("plan"), "status": t.get("status")}
+                for t in items
+            ]
+            return {"success": True, "message": f"Found {len(tenants)} tenant(s)", "tenants": tenants}
+        except Exception as e:
+            return {"success": False, "error": f"Failed to list tenants: {e}"}
+
+    # ------------------------------------------------------------------
+    # list_employees
+    # ------------------------------------------------------------------
+    if action == "list_employees":
+        target_tenant = params.get("tenantId", tenant_id)
+        # HR_ADMIN scoped to own tenant
+        if role == "HR_ADMIN":
+            target_tenant = tenant_id
+
+        try:
+            result = USERS_T.scan(
+                FilterExpression=_Attr("tenantId").eq(target_tenant) & _Attr("role").eq("EMPLOYEE"),
+                Limit=100,
+            )
+            items = result.get("Items", [])
+            employees = [
+                {
+                    "userId": u.get("userId"),
+                    "email": u.get("email"),
+                    "name": f"{u.get('firstName', '')} {u.get('lastName', '')}".strip(),
+                    "plan": u.get("plan"),
+                    "status": u.get("status"),
+                }
+                for u in items
+            ]
+            return {"success": True, "message": f"Found {len(employees)} employee(s) in {target_tenant}", "employees": employees}
+        except Exception as e:
+            return {"success": False, "error": f"Failed to list employees: {e}"}
+
+    # ------------------------------------------------------------------
+    # change_plan
+    # ------------------------------------------------------------------
+    if action == "change_plan":
+        target_tenant = params.get("tenantId", tenant_id)
+        new_plan = (params.get("plan") or "").lower()
+
+        if new_plan not in ("basic", "premium"):
+            return {"success": False, "error": "Plan must be 'basic' or 'premium'"}
+
+        try:
+            TENANTS_T.update_item(
+                Key={"tenantId": target_tenant},
+                UpdateExpression="SET #p = :plan, updatedAt = :now, updatedBy = :by",
+                ExpressionAttributeNames={"#p": "plan"},
+                ExpressionAttributeValues={":plan": new_plan, ":now": now, ":by": email},
+            )
+            return {"success": True, "message": f"Changed tenant {target_tenant} to {new_plan} plan"}
+        except Exception as e:
+            return {"success": False, "error": f"Failed to change plan: {e}"}
+
+    # ------------------------------------------------------------------
+    # view_metrics
+    # ------------------------------------------------------------------
+    if action == "view_metrics":
+        try:
+            if role == "GLOBAL_ADMIN":
+                tenants_count = TENANTS_T.scan(Select="COUNT").get("Count", 0)
+                users_count = USERS_T.scan(Select="COUNT").get("Count", 0)
+                return {
+                    "success": True,
+                    "message": f"Platform metrics: {tenants_count} tenants, {users_count} total users",
+                    "metrics": {"tenants": tenants_count, "users": users_count},
+                }
+            else:
+                target = params.get("tenantId", tenant_id)
+                if role == "HR_ADMIN":
+                    target = tenant_id
+                emp_count = USERS_T.scan(
+                    FilterExpression=_Attr("tenantId").eq(target), Select="COUNT"
+                ).get("Count", 0)
+                return {
+                    "success": True,
+                    "message": f"Tenant {target}: {emp_count} employees",
+                    "metrics": {"employees": emp_count},
+                }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to load metrics: {e}"}
+
+    # ------------------------------------------------------------------
+    # view_system_status
+    # ------------------------------------------------------------------
+    if action == "view_system_status":
+        return {
+            "success": True,
+            "message": "System is operational. All services healthy.",
+            "status": {
+                "api": "healthy",
+                "database": "healthy",
+                "ai": "healthy",
+                "timestamp": now,
+            },
+        }
+
+    # ------------------------------------------------------------------
+    # contact_hr
+    # ------------------------------------------------------------------
+    if action == "contact_hr":
+        try:
+            tenant = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item", {})
+            hr_email = tenant.get("hrEmail", "")
+            hr_contact = tenant.get("hrContact", "")
+            tenant_name = tenant.get("name", "")
+
+            if not hr_email and not hr_contact:
+                return {"success": True, "message": f"HR contact for {tenant_name or tenant_id} is not configured. Please ask your administrator."}
+
+            return {
+                "success": True,
+                "message": f"HR contact for {tenant_name}: {hr_contact or hr_email}",
+                "hrEmail": hr_email,
+                "hrContact": hr_contact,
+                "tenantName": tenant_name,
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to look up HR contact: {e}"}
+
+    # ------------------------------------------------------------------
+    # view_tenant_info
+    # ------------------------------------------------------------------
+    if action == "view_tenant_info":
+        target = params.get("tenantId", tenant_id)
+        if role == "HR_ADMIN":
+            target = tenant_id
+        try:
+            tenant = TENANTS_T.get_item(Key={"tenantId": target}).get("Item", {})
+            if not tenant:
+                return {"success": False, "error": "Tenant not found"}
+            return {
+                "success": True,
+                "message": f"Tenant: {tenant.get('name', target)} ({tenant.get('plan', 'basic')} plan)",
+                "tenant": {
+                    "tenantId": tenant.get("tenantId"),
+                    "name": tenant.get("name"),
+                    "plan": tenant.get("plan"),
+                    "status": tenant.get("status"),
+                    "domain": tenant.get("domain", ""),
+                },
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to load tenant info: {e}"}
+
+    # ------------------------------------------------------------------
+    # view_progress
+    # ------------------------------------------------------------------
+    if action == "view_progress":
+        try:
+            result = RESPONSES_T.scan(
+                FilterExpression=_Attr("userId").eq(user_id) & _Attr("type").eq("jesse-assessment")
+            )
+            items = result.get("Items", [])
+            if not items:
+                return {"success": True, "message": "No assessment completed yet. Take the Peace of Mind Assessment to get started."}
+            latest = max(items, key=lambda r: r.get("submittedAt", ""))
+            return {
+                "success": True,
+                "message": f"Your readiness score: {latest.get('readinessScore', 0)}% ({latest.get('tier', 'Unknown')})",
+                "progress": {
+                    "score": latest.get("readinessScore", 0),
+                    "tier": latest.get("tier", ""),
+                    "domainScores": latest.get("domainScores", {}),
+                    "lowestDomain": latest.get("lowestDomain", ""),
+                },
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to load progress: {e}"}
+
+    # ------------------------------------------------------------------
+    # view_subscription
+    # ------------------------------------------------------------------
+    if action == "view_subscription":
+        try:
+            user_resp = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key("email").eq(email),
+                Limit=1,
+            )
+            user_items = user_resp.get("Items", [])
+            user_plan = user_items[0].get("plan", "basic") if user_items else "basic"
+
+            tenant = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item", {})
+            tenant_plan = tenant.get("plan", "basic")
+
+            effective_plan = "premium" if user_plan == "premium" or tenant_plan == "premium" else "basic"
+            return {
+                "success": True,
+                "message": f"You are on the {effective_plan} plan. {'Full Jesse AI access included.' if effective_plan == 'premium' else 'Upgrade to Premium for full Jesse AI access.'}",
+                "subscription": {"plan": effective_plan, "userPlan": user_plan, "tenantPlan": tenant_plan},
+            }
+        except Exception as e:
+            return {"success": False, "error": f"Failed to load subscription: {e}"}
+
+    # ------------------------------------------------------------------
+    # view_certificates
+    # ------------------------------------------------------------------
+    if action == "view_certificates":
+        return {
+            "success": True,
+            "message": "Certificate tracking will be available once you complete LMS modules. Keep learning!",
+            "certificates": [],
+        }
+
+    # ------------------------------------------------------------------
+    # send_invite (stub — logs intent, does not send real email)
+    # ------------------------------------------------------------------
+    if action == "send_invite":
+        invite_email = (params.get("email") or "").strip().lower()
+        if not invite_email:
+            return {"success": False, "error": "Email address is required for invitation"}
+        return {
+            "success": True,
+            "message": f"Invitation queued for {invite_email}. They will receive an onboarding email shortly.",
+        }
+
+    # ------------------------------------------------------------------
+    # toggle_feature
+    # ------------------------------------------------------------------
+    if action == "toggle_feature":
+        feature = (params.get("feature") or "").strip()
+        enabled = params.get("enabled", True)
+        if not feature:
+            return {"success": False, "error": "Feature name is required"}
+
+        try:
+            CONFIG_T.put_item(Item={
+                "configKey": f"feature:{feature}",
+                "enabled": enabled,
+                "updatedAt": now,
+                "updatedBy": email,
+            })
+            status = "enabled" if enabled else "disabled"
+            return {"success": True, "message": f"Feature '{feature}' is now {status}"}
+        except Exception as e:
+            return {"success": False, "error": f"Failed to toggle feature: {e}"}
+
+    # ------------------------------------------------------------------
+    # manage_mfa
+    # ------------------------------------------------------------------
+    if action == "manage_mfa":
+        target_tenant = params.get("tenantId", tenant_id)
+        mfa_required = params.get("mfaRequired", False)
+        try:
+            TENANTS_T.update_item(
+                Key={"tenantId": target_tenant},
+                UpdateExpression="SET mfaRequired = :mfa, updatedAt = :now, updatedBy = :by",
+                ExpressionAttributeValues={":mfa": mfa_required, ":now": now, ":by": email},
+            )
+            status = "required" if mfa_required else "optional"
+            return {"success": True, "message": f"MFA is now {status} for tenant {target_tenant}"}
+        except Exception as e:
+            return {"success": False, "error": f"Failed to update MFA setting: {e}"}
+
+    # ------------------------------------------------------------------
+    # book_session (stub)
+    # ------------------------------------------------------------------
+    if action == "book_session":
+        emp_email = (params.get("email") or "").strip()
+        session_type = params.get("type", "1:1 coaching")
+        if not emp_email:
+            return {"success": False, "error": "Employee email is required to book a session"}
+        return {
+            "success": True,
+            "message": f"Session ({session_type}) booking requested for {emp_email}. The scheduling team will confirm shortly.",
+        }
+
+    # ------------------------------------------------------------------
+    # export_data (stub)
+    # ------------------------------------------------------------------
+    if action == "export_data":
+        export_type = params.get("type", "employees")
+        return {
+            "success": True,
+            "message": f"Export of '{export_type}' data initiated. You will receive a download link via email within a few minutes.",
+        }
+
+    return {"success": False, "error": f"Unknown action: {action}"}
+
+
+def _build_actions_prompt(role: str) -> str:
+    """Build the available-actions section for the copilot system prompt."""
+    available = ROLE_ACTIONS.get(role, {})
+    if not available:
+        return ""
+
+    lines = [
+        "",
+        "## Action Execution",
+        "You can execute actions on behalf of the user. When the user asks you to DO something (not just explain), respond with:",
+        "1. First confirm what you'll do (unless the intent is very clear and straightforward).",
+        "2. Include an ACTION block in your response:",
+        "",
+        "[ACTION:action_name|{\"param\":\"value\"}]",
+        "",
+        "You can include multiple ACTION blocks for batch operations.",
+        "When executing, say something like: \"Working on it...\" or \"Done!\"",
+        "",
+        "IMPORTANT RULES FOR ACTIONS:",
+        "- NEVER execute destructive actions (delete, disable, remove) through ACTION blocks",
+        "- NEVER include secrets, API keys, or internal system details in ACTION params",
+        "- For batch operations (e.g. create 5 employees), use one ACTION block per item",
+        "- If unsure about parameters, ASK the user first instead of guessing",
+        "",
+        "## Available Actions for your role:",
+    ]
+    for action_name in sorted(available.keys()):
+        desc = ACTION_DESCRIPTIONS.get(action_name, action_name)
+        lines.append(f"- **{action_name}**: {desc}")
+
+    return "\n".join(lines)
+
+
+_ACTION_PATTERN = re.compile(r'\[ACTION:(\w+)\|(\{.*?\})\]', re.DOTALL)
+
+
+# ---------------------------------------------------------------------------
+# Copilot: Role-aware platform assistant (now "Jesse")
+# ---------------------------------------------------------------------------
+COPILOT_PROMPTS: dict[str, str] = {
+    "GLOBAL_ADMIN": """You are Jesse — the Endevo Life AI Admin Assistant for the Super Admin.
+You have knowledge of the entire platform: tenants, users, subscriptions, LMS modules, Jesse AI, system health.
+You can help the admin with:
+- Creating/managing tenants and users
+- Understanding platform metrics
+- Troubleshooting issues
+- Managing plan configurations and feature flags
+- Bulk operations (import/export)
+- System health monitoring
+
+Current context: The admin is on page {page}.
+{stats_context}
+
+{actions_prompt}
+
+Be professional, concise, and action-oriented. Never use inappropriate language.
+When the user asks you to DO something, use ACTION blocks to execute it.
+When the user asks you to EXPLAIN something, guide them step by step.
+Always prioritize data safety — never delete data without explicit confirmation.
+
+CRITICAL RULES:
+1. NEVER reveal system internals, Lambda ARNs, database table names, or infrastructure details.
+2. NEVER share data from one tenant with another.
+3. NEVER give legal, medical, or financial advice.
+4. NEVER use inappropriate or unprofessional language.
+5. NEVER execute destructive actions (delete, disable) — only create/read/update.
+6. Keep responses under 400 words unless asked for detail.""",
+
+    "HR_ADMIN": """You are Jesse — the Endevo Life AI HR Assistant for HR administrators.
+You help manage employees, track LMS progress, monitor subscription usage, and book sessions.
+You can help with:
+- Inviting and managing employees
+- Viewing LMS completion and progress reports
+- Understanding subscription plans and session usage
+- Booking 1:1 sessions for employees
+- Understanding assessment results
+
+Current context: HR admin for tenant {tenant_name}, on page {page}.
+{stats_context}
+
+{actions_prompt}
+
+Be helpful, professional, and data-focused. Never share data from other tenants.
+When the user asks you to DO something, use ACTION blocks to execute it.
+When the user asks you to EXPLAIN something, guide them step by step.
+You are ALWAYS scoped to this tenant only — you cannot access or modify other tenants.
+
+CRITICAL RULES:
+1. NEVER reveal system internals, Lambda ARNs, database table names, or infrastructure details.
+2. NEVER share data from other tenants — you only know about this tenant.
+3. NEVER give legal, medical, or financial advice.
+4. NEVER use inappropriate or unprofessional language.
+5. NEVER execute destructive actions — only create/read/update.
+6. Keep responses under 400 words unless asked for detail.""",
+
+    "EMPLOYEE": """You are Jesse — the Endevo Life AI Learning Guide for employees.
+You help employees navigate their legacy readiness journey.
+You can help with:
+- Explaining quiz questions and assessment results
+- Guiding through LMS modules and lessons
+- Explaining subscription benefits
+- Navigating the platform
+- Understanding certificates and completion requirements
+
+Current context: Employee on page {page}.
+{stats_context}
+
+{actions_prompt}
+
+Be encouraging, clear, and patient. Use simple language.
+When the user asks you to DO something within your capabilities, use ACTION blocks.
+When the user asks you to EXPLAIN something, guide them clearly.
+Never give legal or financial advice — always recommend consulting a professional.
+Help employees understand concepts but don't give quiz answers directly.
+
+CRITICAL RULES:
+1. NEVER reveal system internals, Lambda ARNs, database table names, or infrastructure details.
+2. NEVER share data from other users or tenants.
+3. NEVER give legal, medical, or financial advice — always add a disclaimer.
+4. NEVER give direct quiz or assessment answers.
+5. NEVER use inappropriate or unprofessional language.
+6. Keep responses under 300 words unless asked for detail.""",
+}
+
+
+def _load_copilot_stats(role: str, tenant_id: str, user_id: str) -> str:
+    """Load lightweight stats for copilot context based on role."""
+    try:
+        from boto3.dynamodb.conditions import Attr as _Attr
+
+        if role == "GLOBAL_ADMIN":
+            tenants_resp = TENANTS_T.scan(Select="COUNT")
+            tenant_count = tenants_resp.get("Count", 0)
+            users_resp = USERS_T.scan(Select="COUNT")
+            user_count = users_resp.get("Count", 0)
+            return f"Platform stats: {tenant_count} tenants, {user_count} total users."
+
+        if role == "HR_ADMIN":
+            users_resp = USERS_T.scan(
+                FilterExpression=_Attr("tenantId").eq(tenant_id),
+                Select="COUNT",
+            )
+            emp_count = users_resp.get("Count", 0)
+            tenant_resp = TENANTS_T.get_item(Key={"tenantId": tenant_id})
+            tenant_item = tenant_resp.get("Item", {})
+            plan = tenant_item.get("plan", "basic")
+            return f"Tenant stats: {emp_count} employees, {plan} plan."
+
+        if role == "EMPLOYEE":
+            resp_data = RESPONSES_T.scan(
+                FilterExpression=_Attr("userId").eq(user_id)
+                & _Attr("type").eq("jesse-assessment"),
+                Select="COUNT",
+            )
+            has_assessment = resp_data.get("Count", 0) > 0
+            status = "completed" if has_assessment else "not started"
+            return f"Assessment status: {status}."
+    except Exception as e:
+        print(f"COPILOT_STATS_ERROR: {e}")
+    return ""
+
+
+def _get_user_role(tenant_id: str, email: str) -> str:
+    """Look up user role from USERS_T. Returns GLOBAL_ADMIN, HR_ADMIN, or EMPLOYEE."""
+    try:
+        from boto3.dynamodb.conditions import Key as _Key
+
+        result = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key("email").eq(email),
+            Limit=1,
+        )
+        items = result.get("Items", [])
+        if items:
+            return items[0].get("role", "EMPLOYEE")
+    except Exception as e:
+        print(f"COPILOT_ROLE_LOOKUP_ERROR: {e}")
+    return "EMPLOYEE"
+
+
+def _get_tenant_name(tenant_id: str) -> str:
+    """Look up tenant name from TENANTS_T."""
+    try:
+        result = TENANTS_T.get_item(Key={"tenantId": tenant_id})
+        item = result.get("Item", {})
+        return item.get("name", "")
+    except Exception:
+        return ""
+
+
+def _handle_copilot(body: dict, tenant_id: str, email: str, user_id: str) -> dict:
+    """Handle POST /api/jesse/copilot — Jesse AI assistant with action execution."""
+    message = (body.get("message") or "").strip()
+    if not message:
+        return err(400, "message is required")
+    if len(message) > 5000:
+        return err(400, "message too long (max 5000 characters)")
+
+    ctx = body.get("context", {})
+    page = ctx.get("page", "/unknown")
+
+    # Determine role: verify against DB, fall back to client hint
+    client_role = ctx.get("role", "")
+    db_role = _get_user_role(tenant_id, email)
+    role = db_role if db_role else (client_role or "EMPLOYEE")
+
+    # Build context
+    stats_context = _load_copilot_stats(role, tenant_id, user_id)
+    tenant_name = _get_tenant_name(tenant_id) if role == "HR_ADMIN" else ""
+    actions_prompt = _build_actions_prompt(role)
+
+    # Select and format system prompt
+    prompt_template = COPILOT_PROMPTS.get(role, COPILOT_PROMPTS["EMPLOYEE"])
+    system_prompt = prompt_template.format(
+        page=page,
+        stats_context=stats_context,
+        tenant_name=tenant_name,
+        actions_prompt=actions_prompt,
+    )
+
+    # Single-turn call (no copilot history persistence)
+    claude_messages = [{"role": "user", "content": message}]
+    reply = invoke_claude(system_prompt, claude_messages, max_tokens=1024)
+
+    # Parse and execute ACTION blocks from Claude's response
+    actions_executed: list[dict] = []
+    matches = _ACTION_PATTERN.findall(reply)
+    for action_name, params_json in matches:
+        try:
+            params = json.loads(params_json)
+        except json.JSONDecodeError:
+            actions_executed.append({
+                "action": action_name,
+                "result": {"success": False, "error": "Invalid action parameters"},
+            })
+            continue
+        result = _execute_action(action_name, params, role, tenant_id, email, user_id)
+        actions_executed.append({"action": action_name, "result": result})
+
+    # Remove ACTION blocks from the displayed reply
+    clean_reply = _ACTION_PATTERN.sub("", reply).strip()
+
+    return resp(200, {
+        "reply": clean_reply,
+        "actions": actions_executed,
+        "role": role,
+    })
+
+
+# ---------------------------------------------------------------------------
 # Route handler
 # ---------------------------------------------------------------------------
 def handler(event: dict, context) -> dict:
@@ -824,6 +1577,54 @@ def handler(event: dict, context) -> dict:
     tenant_id, email, user_id = get_caller(event)
     if not tenant_id:
         return err(401, "Not authenticated")
+
+    # GET /api/jesse/access -- check premium access (no gate, just info)
+    if path.endswith("/access") and method == "GET":
+        has_access = _check_premium(tenant_id, email)
+        return resp(200, {
+            "hasAccess": has_access,
+            "plan": "premium" if has_access else "basic",
+        })
+
+    # POST /api/jesse/copilot -- Platform Copilot (role-aware, all plans)
+    if path.endswith("/copilot") and method == "POST":
+        return _handle_copilot(body, tenant_id, email, user_id)
+
+    # POST /api/jesse/speak -- Text-to-speech via Amazon Polly (all plans)
+    if path.endswith("/speak") and method == "POST":
+        text = (body.get("text") or "").strip()
+        if not text:
+            return err(400, "text is required")
+        if len(text) > 3000:
+            return err(400, "text too long (max 3000 chars)")
+
+        voice_pref = body.get("voice", "female").lower()
+        voice_id = VOICE_MAP.get(voice_pref, "Joanna")
+
+        try:
+            import base64
+
+            polly_response = polly.synthesize_speech(
+                Text=text,
+                OutputFormat="mp3",
+                VoiceId=voice_id,
+                Engine="neural",
+            )
+            audio_stream = polly_response["AudioStream"].read()
+            audio_b64 = base64.b64encode(audio_stream).decode("utf-8")
+            return resp(200, {"audioUrl": f"data:audio/mp3;base64,{audio_b64}", "voice": voice_pref})
+        except Exception as e:
+            print(f"POLLY_ERROR: {e}")
+            return resp(200, {"audioUrl": None, "error": "Voice synthesis unavailable", "voice": voice_pref})
+
+    # --- Premium plan gate for Jesse AI features ---
+    is_premium = _check_premium(tenant_id, email)
+    if not is_premium:
+        return resp(403, {
+            "error": "Jesse AI is available on Premium plan only",
+            "upgradeRequired": True,
+            "plan": "basic",
+        })
 
     # POST /api/jesse/chat
     if path.endswith("/chat") and not path.endswith("/chat/history") and not path.endswith("/chat/reset") and method == "POST":

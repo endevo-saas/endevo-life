@@ -1,7 +1,7 @@
 """
 Endevo Life — Employee Lambda (pure boto3, no pip needed)
 Routes: dashboard, profile, training list, video progress, assessment, certificates,
-        subscription, sessions, progress-summary
+        certificate/check, subscription, sessions, progress-summary, upload-url, avatar
 """
 import json, os, uuid, boto3
 from datetime import datetime, timezone
@@ -9,6 +9,9 @@ from botocore.exceptions import ClientError
 
 REGION   = os.environ.get("AWS_REGION", "us-east-1")
 dynamo   = boto3.resource("dynamodb", region_name=REGION)
+s3_client = boto3.client("s3", region_name=REGION)
+UPLOAD_BUCKET = os.environ.get("S3_UPLOAD_BUCKET", "endevo-uat-uploads")
+CF_DOMAIN = os.environ.get("CF_DOMAIN", "")
 USERS_T  = dynamo.Table("endevo-uat-users")
 TRAIN_T  = dynamo.Table("endevo-uat-training")
 PROG_T   = dynamo.Table("endevo-uat-video-progress")
@@ -19,6 +22,7 @@ SUBSCRIPTIONS_T = dynamo.Table("endevo-uat-subscriptions")
 SESSIONS_T = dynamo.Table("endevo-uat-sessions")
 TENANTS_T  = dynamo.Table("endevo-uat-tenants")
 MODULES_T  = dynamo.Table("endevo-uat-lms-user-modules")
+CONFIG_T   = dynamo.Table("endevo-uat-config")
 
 ALLOWED_ORIGINS = [
     "https://uat.endevo.life",
@@ -41,6 +45,67 @@ def err(status, msg): return resp(status, {"detail": msg})
 def get_body(event):
     try: return json.loads(event.get("body") or "{}")
     except: return {}
+
+# ── Plan Config (DynamoDB-driven with fallback) ──────────────────────────────
+
+_DEFAULT_PLAN_CONFIG = {
+    "basic": {
+        "planLabel": "Endevo Basic",
+        "priceYearly": 299,
+        "priceMonthly": 24.92,
+        "sessionsTotal": 2,
+        "features": [
+            "Readiness Assessment",
+            "6 Learning Modules",
+            "2x 30-min 1:1 Sessions per year",
+            "AI Guide (Jesse)",
+        ],
+    },
+    "premium": {
+        "planLabel": "Endevo Premium",
+        "priceYearly": 499,
+        "priceMonthly": 41.58,
+        "sessionsTotal": 6,
+        "features": [
+            "Readiness Assessment",
+            "6 Learning Modules",
+            "6x 30-min 1:1 Sessions per year",
+            "AI Guide (Jesse)",
+            "Priority scheduling",
+            "Extended session recordings",
+        ],
+    },
+    "premiumFeatures": [
+        "Everything in Basic",
+        "6x 30-min 1:1 Sessions per year",
+        "AI Guide (Jesse)",
+        "Priority scheduling",
+        "Extended session recordings",
+    ],
+}
+
+_plan_config_cache: dict = {"data": None, "ts": 0.0}
+
+def _get_plan_config() -> dict:
+    """Load plan config from DynamoDB with 5-minute cache, fallback to defaults."""
+    import time
+    now = time.time()
+    if _plan_config_cache["data"] is not None and (now - _plan_config_cache["ts"]) < 300:
+        return _plan_config_cache["data"]
+    try:
+        item = CONFIG_T.get_item(Key={"configKey": "PLAN_CONFIG"}).get("Item")
+        if item and "configValue" in item:
+            cfg = item["configValue"]
+            # Convert Decimal to int/float for JSON safety
+            cfg = json.loads(json.dumps(cfg, default=str))
+            _plan_config_cache["data"] = cfg
+            _plan_config_cache["ts"] = now
+            return cfg
+    except Exception as e:
+        print(f"PLAN_CONFIG_LOAD_ERROR: {e}")
+    _plan_config_cache["data"] = _DEFAULT_PLAN_CONFIG
+    _plan_config_cache["ts"] = now
+    return _DEFAULT_PLAN_CONFIG
 
 def get_caller(event):
     """Extract (tenantId, email, userId) from Bearer token via session or WorkOS JWT."""
@@ -220,6 +285,79 @@ def handler(event, context):
             PROG_T.put_item(Item={"userId": user_sub, "videoId": course_id, "progressId": str(uuid.uuid4()), "tenantId": tenant_id, "courseId": course_id, "progressPct": 100, "completed": True, "updatedAt": now})
         return resp(200, {"score": score, "passed": passed, "correct": correct, "total": len(qs), "certificate_issued": passed})
 
+    # POST /api/employee/certificate/check — Check eligibility and generate certificate
+    if path.endswith("/certificate/check") and method == "POST":
+        from boto3.dynamodb.conditions import Attr as _Attr
+        now = datetime.now(timezone.utc).isoformat()
+
+        # 1. Query all user modules
+        mod_result = MODULES_T.scan(
+            FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id)
+        )
+        mod_items = mod_result.get("Items", [])
+
+        # 2. Check if module 6 is completed (lockStatus == "complete" or status == "completed")
+        module_6_complete = any(
+            (str(m.get("moduleNum", "")) == "6") and
+            (m.get("lockStatus") == "complete" or m.get("status") == "completed" or m.get("completed"))
+            for m in mod_items
+        )
+        if not module_6_complete:
+            completed_count = len([
+                m for m in mod_items
+                if m.get("lockStatus") == "complete" or m.get("status") == "completed" or m.get("completed")
+            ])
+            return resp(200, {
+                "eligible": False,
+                "message": f"Complete all 6 modules to earn your certificate. {completed_count}/6 completed.",
+                "modulesCompleted": completed_count,
+                "modulesTotal": 6,
+            })
+
+        # 3. Check if certificate already exists (idempotent)
+        existing_certs = CERT_T.scan(
+            FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id) & _Attr("type").eq("legacy-readiness")
+        )
+        if existing_certs.get("Items"):
+            cert = existing_certs["Items"][0]
+            return resp(200, {"eligible": True, "certificate": cert, "message": "Certificate already issued"})
+
+        # 4. Calculate average score from responses
+        score = None
+        try:
+            resp_result = RESP_T.scan(FilterExpression=_Attr("userId").eq(user_sub))
+            responses = resp_result.get("Items", [])
+            if responses:
+                scores = [int(r.get("score", 0)) for r in responses if r.get("score") is not None]
+                if scores:
+                    score = round(sum(scores) / len(scores))
+        except Exception as e:
+            print(f"CERT_CHECK_SCORE_ERROR: {e}")
+
+        # 5. Create certificate
+        cert_id = f"CERT-{str(uuid.uuid4())[:8]}"
+        cert_item = {
+            "userId": user_sub,
+            "certificateId": cert_id,
+            "tenantId": tenant_id,
+            "email": email,
+            "type": "legacy-readiness",
+            "title": "Legacy Readiness Certification",
+            "issuedAt": now,
+            "status": "issued",
+            "completedModules": 6,
+        }
+        if score is not None:
+            cert_item["score"] = score
+
+        try:
+            CERT_T.put_item(Item=cert_item)
+        except ClientError as e:
+            print(f"CERT_CREATE_ERROR: {e}")
+            return err(500, "Failed to create certificate")
+
+        return resp(200, {"eligible": True, "certificate": cert_item, "message": "Certificate issued"})
+
     # GET /api/employee/certificates
     if path.endswith("/certificates") and method == "GET":
         from boto3.dynamodb.conditions import Attr as _Attr
@@ -231,40 +369,9 @@ def handler(event, context):
         from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
         from decimal import Decimal
 
-        PLAN_CONFIG = {
-            "basic": {
-                "planLabel": "Endevo Basic",
-                "priceYearly": 299,
-                "priceMonthly": 24.92,
-                "sessionsTotal": 2,
-                "features": [
-                    "Readiness Assessment",
-                    "6 Learning Modules",
-                    "2x 30-min 1:1 Sessions per year",
-                    "AI Guide (Jesse)",
-                ],
-            },
-            "premium": {
-                "planLabel": "Endevo Premium",
-                "priceYearly": 499,
-                "priceMonthly": 41.58,
-                "sessionsTotal": 6,
-                "features": [
-                    "Readiness Assessment",
-                    "6 Learning Modules",
-                    "6x 30-min 1:1 Sessions per year",
-                    "AI Guide (Jesse)",
-                    "Priority scheduling",
-                    "Extended session recordings",
-                ],
-            },
-        }
-        PREMIUM_FEATURES = [
-            "Everything in Basic",
-            "6x 30-min 1:1 Sessions per year",
-            "Priority scheduling",
-            "Extended session recordings",
-        ]
+        plan_cfg = _get_plan_config()
+        PLAN_CONFIG = {k: v for k, v in plan_cfg.items() if k in ("basic", "premium")}
+        PREMIUM_FEATURES = plan_cfg.get("premiumFeatures", _DEFAULT_PLAN_CONFIG["premiumFeatures"])
 
         # Determine user plan
         plan = "basic"
@@ -432,6 +539,107 @@ def handler(event, context):
             "modulesTotal": modules_total,
             "overallProgress": overall_progress,
             "lastActivity": last_activity,
+        })
+
+    # ── POST /api/employee/upload-url ──────────────────────────────────────
+    if path.endswith("/upload-url") and method == "POST":
+        import re as _re
+        ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp"}
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+        upload_type = (body.get("type", "") or "").strip().lower()
+        filename = (body.get("filename", "") or "").strip()[:255]
+
+        if upload_type != "photo":
+            return err(400, "Only type 'photo' is allowed for employees")
+        if not filename:
+            return err(400, "filename is required")
+
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in ALLOWED_EXTENSIONS:
+            return err(400, f"File extension '{ext}' not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+
+        safe_filename = _re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+        s3_key = f"uploads/photo/{tenant_id}/{user_sub}_{safe_filename}"
+
+        content_type_map = {
+            "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+            "gif": "image/gif", "webp": "image/webp",
+        }
+        content_type = content_type_map.get(ext, "application/octet-stream")
+
+        try:
+            upload_url = s3_client.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": UPLOAD_BUCKET,
+                    "Key": s3_key,
+                    "ContentType": content_type,
+                },
+                ExpiresIn=300,
+            )
+        except Exception as e:
+            print(f"PRESIGNED_URL_ERROR: {e}")
+            return err(500, "Failed to generate upload URL")
+
+        return resp(200, {
+            "uploadUrl": upload_url,
+            "key": s3_key,
+            "expiresIn": 300,
+        })
+
+    # ── PUT /api/employee/avatar ─────────────────────────────────────────
+    if path.endswith("/avatar") and method == "PUT":
+        import re as _re
+        avatar_key = (body.get("avatarKey", "") or "").strip()
+
+        if not avatar_key:
+            return err(400, "avatarKey is required")
+
+        # Validate the key looks like a valid upload path
+        if not avatar_key.startswith("uploads/photo/"):
+            return err(400, "Invalid avatar key format")
+
+        # Validate extension
+        ext = avatar_key.rsplit(".", 1)[-1].lower() if "." in avatar_key else ""
+        if ext not in {"jpg", "jpeg", "png", "gif", "webp"}:
+            return err(400, "Invalid avatar file type")
+
+        # Look up user record
+        from boto3.dynamodb.conditions import Key as _Key
+        result = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key("email").eq(email),
+        )
+        items = [i for i in result.get("Items", []) if i.get("tenantId") == tenant_id]
+        if not items:
+            return err(404, "User not found")
+
+        user_id = items[0]["userId"]
+
+        try:
+            USERS_T.update_item(
+                Key={"userId": user_id},
+                UpdateExpression="SET #ak = :ak, #uat = :uat",
+                ExpressionAttributeNames={"#ak": "avatarKey", "#uat": "avatarUpdatedAt"},
+                ExpressionAttributeValues={
+                    ":ak": avatar_key,
+                    ":uat": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+        except Exception as e:
+            print(f"AVATAR_UPDATE_ERROR: {e}")
+            return err(500, "Failed to update avatar")
+
+        # Build display URL
+        avatar_url = ""
+        if CF_DOMAIN:
+            avatar_url = f"https://{CF_DOMAIN}/{avatar_key}"
+
+        return resp(200, {
+            "message": "Avatar updated",
+            "avatarKey": avatar_key,
+            "avatarUrl": avatar_url,
         })
 
     return err(404, f"Route not found: {method} {path}")

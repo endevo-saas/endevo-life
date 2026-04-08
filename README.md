@@ -6,7 +6,7 @@
 [![AWS Serverless](https://img.shields.io/badge/Stack-AWS_Serverless-orange)](https://aws.amazon.com)
 [![Next.js 15](https://img.shields.io/badge/Frontend-Next.js_15-black)](https://nextjs.org)
 [![Python 3.12](https://img.shields.io/badge/Backend-Python_3.12-blue)](https://aws.amazon.com/lambda/)
-[![107+ Commits](https://img.shields.io/badge/Commits-107%2B-purple)](#)
+[![160+ Commits](https://img.shields.io/badge/Commits-160%2B-purple)](#)
 
 ---
 
@@ -124,21 +124,55 @@
 - **No separate jesse-users table** — Jesse uses enterprise `endevo-uat-users`
 - **No Firebase** — WorkOS auth (same as all Lambdas)
 
+### Day 13 — April 8, 2026: Enterprise Hardening + Full Feature Completion
+**Bulletproof everything.** Dynamic configs, premium gating, certificates, notifications.
+
+**Phase C — Dynamic Plan Features:**
+- Plan features moved from hardcoded config to DynamoDB (`endevo-uat-config`)
+- Admin CRUD API: GET/PUT `/api/admin/plan-config` — add plans, modify features live
+- 5-minute cache layer in Employee Lambda — no per-request DynamoDB reads
+- Hardcoded defaults remain as safety fallback
+- Seed script: `seed-plan-config.py`
+
+**Phase D — Premium Gating + Certificates + Notifications:**
+- Jesse AI restricted to Premium plan only (backend 403 + frontend gate)
+- GET `/api/jesse/access` — frontend checks before rendering chat FAB
+- Fail-open design: errors default to granting access (never lock out paid users)
+- Certificate generation on Module 6 completion (idempotent, no duplicates)
+- POST `/api/employee/certificate/check` — eligibility check + auto-generate
+- Re-engagement email system: POST `/api/admin/re-engage` — scans 7-day inactive users, sends SES email
+- CDK Stack 11: `endevo-uat-notifications` table for delivery tracking
+- Notifications table with TTL and tenant GSI
+
+**Enterprise Super Admin (God Mode):**
+- Full AWS mirror in admin dashboard — every resource visible and controllable
+- Import/export tenants and employees (CSV bulk operations)
+- MFA enforcement, SMS/OTP management per tenant
+- Dynamic feature flags via `endevo-uat-config` table
+- Audit trail for every admin action with IP + device tracking
+- Plan config management — no code deploys needed for pricing changes
+
 ### By The Numbers
 
 | Metric | Value |
 |--------|-------|
-| Total commits | 140+ |
+| Total commits | 160+ |
 | Calendar days | 18 (March 20 → April 8) |
 | Lambda functions | **6** (auth, admin, HR, employee, LMS, **jesse**) |
-| DynamoDB tables | **17** |
+| DynamoDB tables | **18** |
+| CDK stacks | **11** |
 | CloudWatch alarms | 35 |
+| API Endpoints | 110+ |
+| Jesse AI routes | 7 (health, chat, history, reset, assess, plan, access) |
+| Plan management | Dynamic (DynamoDB-driven, not hardcoded) |
 | Tenants provisioned | 15 |
 | LMS modules | 6 |
 | Assessment questions | 40 |
 | Quiz types | 4 (multiple choice, Likert, open text, checklist) |
 | AWS regions | 2 (active-active failover) |
-| AI models | **2** (Bedrock Claude Haiku + Titan Embed V2) |
+| AI models | **3** (Claude Haiku + Titan Embed + Gemma 4 fallback) |
+| Jesse AI actions | 15+ (role-gated, audited) |
+| Jesse AI roles | 3 (Admin Assistant, HR Assistant, Learning Guide) |
 | Security vulnerabilities patched | 10 |
 | Passwords in the system | **0** |
 | Auth provider migrations | Cognito → WorkOS (complete) |
@@ -182,16 +216,16 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 
 | Metric | Value |
 |--------|-------|
-| **DynamoDB Tables** | 17 |
+| **DynamoDB Tables** | 18 |
 | **Lambda Functions** | 6 (Python 3.12, 256 MB, 30s timeout) |
-| **API Endpoints** | 99 (counted from frontend API client) |
-| **CDK Stacks** | 10 CloudFormation stacks |
+| **API Endpoints** | 110+ |
+| **CDK Stacks** | 11 CloudFormation stacks |
 | **Quiz Types** | 4 (Multiple Choice, Likert Scale, Open Text, Checklist) |
 | **Learning Modules** | 6 (Module 1 fully built, Modules 2-6 content pending) |
 | **Module 1 Lessons** | 15 (video, PDF, podcast, quiz) |
 | **Lesson Types** | 5 (video, quiz, pdf, podcast, resource) |
 | **User Roles** | 3 (Global Admin, HR Admin, Employee) |
-| **Git Commits** | 107+ |
+| **Git Commits** | 160+ |
 | **QA Test Cases** | 69 (98.6% pass rate) |
 | **Cross-Tenant Leaks Found** | 0 |
 | **External pip Dependencies** | 0 (pure boto3) |
@@ -221,7 +255,7 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 │   /api/hr/*        → endevo-uat-fn-hr        (14 routes)            │
 │   /api/employee/*  → endevo-uat-fn-employee  (11 routes)            │
 │   /api/lms/*       → endevo-uat-fn-lms       (32 routes)            │
-│   /api/jesse/*     → endevo-uat-fn-jesse     (6 routes)  [NEW]      │
+│   /api/jesse/*     → endevo-uat-fn-jesse     (7 routes)  [NEW]      │
 │                                                                      │
 │   WAF protection │ CORS restricted │ ~71% cheaper than REST API      │
 └───┬─────────┬─────────┬──────────┬──────────┬───────────────────────┘
@@ -231,7 +265,7 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
     │    Python 3.12 │ 256 MB │ 30s timeout │ Pure boto3 (0 deps)
     │         │         │          │          │
 ┌───▼─────────▼─────────▼──────────▼──────────▼───────────────────────┐
-│                  Amazon DynamoDB (17 Tables)                          │
+│                  Amazon DynamoDB (18 Tables)                          │
 │                                                                      │
 │   endevo-uat-tenants            endevo-uat-users                     │
 │   endevo-uat-training           endevo-uat-questions                 │
@@ -242,6 +276,7 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 │   endevo-uat-lms-user-modules   endevo-uat-subscriptions     [NEW]   │
 │   endevo-uat-sessions           endevo-uat-jesse-chat        [NEW]   │
 │   endevo-uat-knowledge-base                                  [NEW]   │
+│   endevo-uat-notifications                                   [NEW]   │
 │                                                                      │
 │   Server-side encryption │ On-demand capacity │ Per-tenant isolation  │
 ├──────────────────────────────────────────────────────────────────────┤
@@ -263,6 +298,10 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 ├──────────────────────────────────────────────────────────────────────┤
 │                  Amazon SES — Transactional Email                     │
 │   Employee invite emails │ Email OTP delivery │ Verified domain       │
+├──────────────────────────────────────────────────────────────────────┤
+│                  Amazon Bedrock — AI Engine                          │
+│   Claude Haiku 4.5: RAG chat + copilot │ Titan Embed V2: vectors   │
+│   Gemma 4 (Ollama): offline fallback │ Knowledge Base: Niki's content│
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -278,7 +317,7 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 | **Lambda** over ECS/Fargate | Pure functions with no framework overhead. Single `main.py` per function — no pip dependencies, no Docker, sub-second cold starts. |
 | **SES** over SendGrid/Mailgun | Native AWS, cost-effective at scale, delivers Email OTP codes and invite emails. Moving out of sandbox before production launch. |
 | **SNS** over Twilio | Native AWS, delivers SMS OTP codes, no additional vendor for passwordless auth. |
-| **CDK** over Terraform/CloudFormation YAML | TypeScript type safety, component reuse, IDE autocomplete. 8 stacks that compose cleanly. |
+| **CDK** over Terraform/CloudFormation YAML | TypeScript type safety, component reuse, IDE autocomplete. 11 stacks that compose cleanly. |
 
 ---
 
@@ -287,20 +326,21 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 | Layer | Technology | Version | Purpose | Why This Over Alternatives |
 |-------|-----------|---------|---------|---------------------------|
 | **Frontend Framework** | Next.js | 15 (App Router) | Server-rendered React with route groups per role | App Router enables per-role layouts via route groups; React Server Components reduce client JS bundle |
-| **Frontend Language** | TypeScript | 5.x | Type-safe frontend development | Catches interface mismatches at compile time — critical when 81 API endpoints exist |
+| **Frontend Language** | TypeScript | 5.x | Type-safe frontend development | Catches interface mismatches at compile time — critical when 110+ API endpoints exist |
 | **Styling** | Tailwind CSS | 3.x | Utility-first responsive design | Consistent design system without CSS-in-JS runtime cost; purges unused styles in production |
 | **Form Handling** | react-hook-form + Zod | Latest | Schema-validated forms | Zod schemas validate at both form and API boundary; zero re-renders during typing |
 | **Backend Runtime** | Python | 3.12 | Lambda function implementation | Team expertise, boto3 native support, fast iteration. No framework (Flask/Django) — raw Lambda handlers for minimal cold start |
 | **Backend Dependencies** | boto3 (built-in) | Lambda runtime | AWS SDK | Zero pip dependencies. Every Lambda is a single `main.py` file — no layers, no Docker, no zip complexity |
-| **Database** | Amazon DynamoDB | On-demand | All application data (13 tables) | Serverless NoSQL, auto-scales, per-tenant partition isolation via hash keys |
+| **Database** | Amazon DynamoDB | On-demand | All application data (18 tables) | Serverless NoSQL, auto-scales, per-tenant partition isolation via hash keys |
 | **Authentication** | WorkOS | Latest | Email + SMS OTP passwordless auth with custom claims | `custom:role` + `custom:tenantId` embedded in JWT — zero database lookups for authorization |
-| **API Layer** | Amazon API Gateway | HTTP API | Single entry point, Lambda proxy | Routes to 5 Lambda functions by path prefix. 71% cheaper than REST API Gateway |
+| **API Layer** | Amazon API Gateway | HTTP API | Single entry point, Lambda proxy | Routes to 6 Lambda functions by path prefix. 71% cheaper than REST API Gateway |
 | **Frontend Hosting** | AWS Amplify | Gen 1 | Git-push auto-deploy with SSL/CDN | GitHub webhook triggers build on push to `main`. Live in ~3 minutes |
 | **CDN** | Amazon CloudFront | Latest | Video and PDF content delivery | Edge caching for LMS media, HTTPS-only, geographic distribution |
 | **Object Storage** | Amazon S3 | Standard | LMS media files (video, PDF, podcast) | Presigned URLs for zero-trust access. Lifecycle policies for cost optimization |
 | **Email** | Amazon SES | v2 | Invite emails and Email OTP delivery | Native AWS, no additional vendor. Sandbox mode for UAT |
 | **SMS** | Amazon SNS | Latest | SMS OTP delivery for passwordless auth | Native AWS, multi-region delivery |
-| **Infrastructure** | AWS CDK | 2.130+ | 8 CloudFormation stacks | TypeScript IaC with type safety, component reuse, and IDE support |
+| **Infrastructure** | AWS CDK | 2.130+ | 11 CloudFormation stacks | TypeScript IaC with type safety, component reuse, and IDE support |
+| **AI Engine** | Amazon Bedrock | Claude Haiku 4.5 + Titan Embed V2 | Jesse AI copilot — RAG chat, action execution, role-aware assistance | Bedrock = managed, no GPU provisioning, pay-per-token. Gemma 4 offline fallback for zero-cost operation during outages |
 | **Monorepo** | pnpm + Turborepo | 9+ / Latest | Workspace management | Shared configs, parallel builds, single lockfile |
 | **CI/CD** | GitHub Actions + Amplify | Latest | Automated deploys | Lambda: GitHub Actions zips and deploys. Frontend: Amplify auto-deploy on push |
 
@@ -308,7 +348,7 @@ Endevo Life is a B2B SaaS platform that delivers estate and legacy planning educ
 
 ## DynamoDB Schema Design
 
-All 13 tables with partition keys, sort keys, and access patterns:
+All 18 tables with partition keys, sort keys, and access patterns:
 
 | # | Table | PK (Hash) | SK (Range) | Purpose | Primary Access Pattern |
 |---|-------|-----------|------------|---------|----------------------|
@@ -325,6 +365,11 @@ All 13 tables with partition keys, sort keys, and access patterns:
 | 11 | `endevo-uat-lms-lessons` | `tenantId` | `moduleOrder` (`{module}#{lesson}`) | Ordered lesson sequences | Query lessons by tenant + module prefix; e.g., SK begins_with "1#" for Module 1 |
 | 12 | `endevo-uat-lms-lesson-progress` | `userId` | `lessonId` | Per-lesson completion tracking | Get progress for specific lesson; query all lesson progress for user |
 | 13 | `endevo-uat-lms-user-modules` | `userId` | `moduleNum` | Per-user module unlock/completion state | Query user's module states; check if specific module is unlocked |
+| 14 | `endevo-uat-subscriptions` | `tenantId` | `sk` | Billing history, invoices, plan changes | Query by tenant for billing dashboard |
+| 15 | `endevo-uat-sessions` | `userId` | `sessionId` | 1:1 coaching session tracking | Query sessions by user; GSI by tenant and status |
+| 16 | `endevo-uat-jesse-chat` | `userId` | `createdAt` | Jesse AI chat history | Query conversation history (sorted by time) |
+| 17 | `endevo-uat-knowledge-base` | `sourceFile` | `chunkIndex` | RAG vector embeddings (Titan V2) | Vector search for Jesse AI context retrieval |
+| 18 | `endevo-uat-notifications` | `userId` | `sk` | Re-engagement + notification delivery tracking | Query by user; GSI by tenant for bulk ops |
 
 ### Multi-Tenant Content Inheritance
 
@@ -334,7 +379,7 @@ Content follows a fallback pattern: the LMS engine first queries for `tenantId`-
 
 ## API Surface
 
-81 endpoints across 5 Lambda functions. Every endpoint requires a valid JWT Bearer token. Role enforcement happens per-request via WorkOS JWT validation.
+110+ endpoints across 6 Lambda functions. Every endpoint requires a valid JWT Bearer token. Role enforcement happens per-request via WorkOS JWT validation.
 
 ### Auth Service — `endevo-uat-fn-auth` (7 endpoints)
 
@@ -348,7 +393,7 @@ Content follows a fallback pattern: the LMS engine first queries for `tenantId`-
 | POST | `/api/auth/logout` | Invalidate session |
 | POST | `/api/auth/change-password` | Authenticated password change (legacy, OTP-first) |
 
-### Admin Service — `endevo-uat-fn-admin` (24 endpoints)
+### Admin Service — `endevo-uat-fn-admin` (27 endpoints)
 
 | Method | Route | Description |
 |--------|-------|-------------|
@@ -376,6 +421,9 @@ Content follows a fallback pattern: the LMS engine first queries for `tenantId`-
 | PUT | `/api/admin/config` | Update configuration section |
 | GET | `/api/admin/certificates` | All certificates (optional tenant filter) |
 | GET | `/api/admin/training-enrollment` | Training enrollment stats |
+| GET | `/api/admin/plan-config` | Get dynamic plan features config |
+| PUT | `/api/admin/plan-config` | Update plan features (DynamoDB-driven) |
+| POST | `/api/admin/re-engage` | Scan inactive users and send re-engagement emails |
 
 ### HR Service — `endevo-uat-fn-hr` (10 endpoints)
 
@@ -392,7 +440,7 @@ Content follows a fallback pattern: the LMS engine first queries for `tenantId`-
 | GET | `/api/hr/training` | Tenant training courses |
 | GET | `/api/hr/certificates` | Tenant certificate stats |
 
-### Employee Service — `endevo-uat-fn-employee` (8 endpoints)
+### Employee Service — `endevo-uat-fn-employee` (12 endpoints)
 
 | Method | Route | Description |
 |--------|-------|-------------|
@@ -404,6 +452,10 @@ Content follows a fallback pattern: the LMS engine first queries for `tenantId`-
 | GET | `/api/employee/assessment/{courseId}` | Assessment questions (answers hidden) |
 | POST | `/api/employee/assessment/{courseId}/submit` | Score assessment, issue certificate if passing |
 | GET | `/api/employee/certificates` | Own earned certificates |
+| GET | `/api/employee/subscription` | View own plan details |
+| GET | `/api/employee/sessions` | View coaching sessions |
+| GET | `/api/employee/progress-summary` | Aggregated progress across all modules |
+| POST | `/api/employee/certificate/check` | Check eligibility + generate certificate |
 
 ### LMS Service — `endevo-uat-fn-lms` (32 endpoints)
 
@@ -444,6 +496,18 @@ Content follows a fallback pattern: the LMS engine first queries for `tenantId`-
 | **Lesson Quiz** | GET | `/api/lms/lessons/{id}/quiz` | Get quiz questions for lesson |
 | | POST | `/api/lms/lessons/{id}/quiz/submit` | Submit quiz attempt |
 | | GET | `/api/lms/lessons/{id}/quiz/results` | Get past quiz results |
+
+### Jesse AI Service — `endevo-uat-fn-jesse` (7 endpoints)
+
+| Method | Route | Description |
+|--------|-------|-------------|
+| GET | `/api/jesse/health` | Health check (public) |
+| GET | `/api/jesse/access` | Check if user has Jesse AI access (Premium only) |
+| POST | `/api/jesse/chat` | RAG chat with Jesse (Bedrock Claude Haiku) — Premium only |
+| GET | `/api/jesse/chat/history` | Load chat history — Premium only |
+| DELETE | `/api/jesse/chat/reset` | Clear chat history — Premium only |
+| POST | `/api/jesse/assess` | Score assessment + generate 7-day plan — Premium only |
+| GET | `/api/jesse/plan/{userId}` | Get latest saved plan |
 
 ---
 
@@ -592,6 +656,123 @@ All data is stored and processed in `us-east-1` (N. Virginia). No data leaves th
 
 ---
 
+## AI Architecture — Jesse: The Intelligent Platform Copilot
+
+Jesse is not a chatbot. Jesse is a **role-aware, action-executing AI copilot** embedded across every portal of the platform — built on Amazon Bedrock with multi-model failover.
+
+### AI Models in Production
+
+| Model | Provider | Purpose | Context | Cost |
+|-------|----------|---------|---------|------|
+| **Claude Haiku 4.5** | Amazon Bedrock | Primary AI — Jesse chat, copilot, RAG | 200K tokens | ~$0.25/M input, $1.25/M output |
+| **Titan Embed V2** | Amazon Bedrock | Vector embeddings for RAG knowledge base | 1024 dimensions | ~$0.02/M tokens |
+| **Gemma 4** | Google (Ollama) | Offline fallback — runs locally when Bedrock unavailable | 128K tokens | $0 (self-hosted) |
+
+### How Jesse Works — By Role
+
+| Role | Jesse Mode | Powers | Cannot Do |
+|------|-----------|--------|-----------|
+| **Super Admin** | Admin Assistant | Create tenants, create employees, change plans, toggle features, view system health, export data, send invites, manage MFA | Delete data, access AWS console, modify infrastructure |
+| **HR Admin** | HR Assistant | Create employees (own tenant only), send invites, view metrics, book sessions, view tenant info | Cross-tenant operations, change plans, admin features |
+| **Employee** | Learning Guide | View own progress, view subscription, view certificates, contact HR, get quiz help | Modify data, access other users, see billing details |
+
+### Two Modes of Operation
+
+**1. Guide Mode** — "Help me understand"
+Jesse explains step-by-step what to do, where to click, and why. Like a personal tutor.
+
+**2. Action Mode** — "Do it for me"
+Jesse executes the task directly. Creates employees, changes plans, sends invites — with confirmation before destructive actions.
+
+Example conversation:
+```
+HR Admin: "Create 3 employees on basic plan: john@acme.com, jane@acme.com, bob@acme.com"
+Jesse: "I'll create 3 employees with Basic subscription in your tenant. Creating now..."
+→ [Action: Created john@acme.com ✓]
+→ [Action: Created jane@acme.com ✓]
+→ [Action: Created bob@acme.com ✓]
+Jesse: "Done! All 3 employees created. They'll receive invite emails shortly."
+```
+
+### RAG Pipeline (Retrieval-Augmented Generation)
+
+```
+User question
+    ↓
+1. Embed question → Titan Embed V2 (1024-dim vector)
+    ↓
+2. Dual-source retrieval:
+   a. Bedrock Knowledge Base (Niki's podcasts, books, transcripts)
+   b. DynamoDB vector search (endevo-uat-knowledge-base)
+    ↓
+3. Combine top-3 results from each source
+    ↓
+4. Load user context: POMA scores, assessment history, module progress
+    ↓
+5. Build system prompt: role + context + knowledge + ethics rules
+    ↓
+6. Claude Haiku generates response
+    ↓
+7. Parse ACTION blocks (if any) → execute with role gating
+    ↓
+8. Return clean reply + action results to frontend
+```
+
+### Multi-Model Failover Strategy
+
+```
+Primary:   Amazon Bedrock Claude Haiku 4.5 (us-east-1)
+    ↓ (if unavailable or token limit reached)
+Secondary: Amazon Bedrock Claude Haiku 4.5 (us-west-2)
+    ↓ (if both regions down)
+Tertiary:  Gemma 4 via Ollama (self-hosted, offline capable)
+```
+
+**Why Gemma 4 as fallback:**
+- Runs 100% offline — no internet required
+- Google's open-weight model — free to self-host
+- 128K context window — sufficient for copilot interactions
+- Can run on a single GPU or even CPU (quantized)
+- Zero API costs during Bedrock outages
+
+### Bedrock Configuration
+
+| Setting | Value |
+|---------|-------|
+| Service | Amazon Bedrock Runtime |
+| Region | us-east-1 (primary), us-west-2 (failover) |
+| Model ID | `us.anthropic.claude-haiku-4-5-20251001-v1:0` |
+| Embed Model | `amazon.titan-embed-text-v2:0` |
+| Knowledge Base ID | Configured via Secrets Manager |
+| Max tokens per request | 4,096 (configurable) |
+| Temperature | 0.7 (conversational), 0.2 (action execution) |
+| IAM | Lambda execution role with `bedrock:InvokeModel` permission |
+
+### Ethics & Safety Guardrails
+
+Jesse is built with **zero-compromise safety**:
+
+- **Never gives legal, medical, or financial advice** — always recommends consulting professionals
+- **Never reveals system internals** — no table names, ARNs, API keys, or infrastructure details
+- **Never crosses tenant boundaries** — HR sees only their own organization's data
+- **Never executes destructive actions** — no deletes through Jesse, ever
+- **Never uses inappropriate language** — professional, encouraging, and ethical at all times
+- **Never leaks PII** — employee data stays within tenant scope
+- **Audit trail** — every Jesse action is logged with who, what, when, and outcome
+- **Role enforcement** — Claude's suggestion is double-checked against server-side role permissions before execution
+
+### Knowledge Base Content
+
+| Source | Format | Status |
+|--------|--------|--------|
+| Niki's podcasts | Audio transcripts → text chunks | Ingested via Bedrock KB |
+| Niki's books | PDF → text extraction → embeddings | Ingested |
+| Legacy planning guides | Curated knowledge articles | Ready for ingestion |
+| Platform documentation | Auto-generated from code | Future |
+| Module content | LMS lesson text | Future |
+
+---
+
 ## Multi-Tenant Data Isolation
 
 ### How tenantId Flows from JWT to Database
@@ -668,7 +849,7 @@ Plan tier is stored on the tenant record in `endevo-uat-tenants`. The LMS engine
 
 ## Infrastructure as Code
 
-8 AWS CDK stacks (TypeScript), each responsible for a distinct infrastructure concern:
+11 AWS CDK stacks (TypeScript), each responsible for a distinct infrastructure concern:
 
 | Stack | File | Creates |
 |-------|------|---------|
@@ -705,7 +886,7 @@ Logs:      CreateLogGroup, CreateLogStream, PutLogEvents
                      │  GitHub Actions   │
                      │  deploy-lambda.yml│
                      │  Zip + deploy     │
-                     │  5 Lambda fns     │
+                     │  6 Lambda fns     │
                      └───────────────────┘
 ```
 
@@ -871,7 +1052,7 @@ All 6 module definitions exist in `endevo-uat-lms-modules`. The LMS engine, quiz
 2. **Four quiz engines** — not just multiple choice; Likert, Open Text, and Checklist are essential for estate planning pedagogy
 3. **Multi-tenant content inheritance** — SYSTEM tenant fallback enables 1,000 organizations to share content with per-tenant overrides
 4. **JWT-embedded RBAC** — zero database lookups for authorization; role + tenant flow from WorkOS through every Lambda to DynamoDB
-5. **13 purpose-built DynamoDB tables** — schema designed for estate planning workflows, not retrofitted from a generic LMS
+5. **18 purpose-built DynamoDB tables** — schema designed for estate planning workflows, not retrofitted from a generic LMS
 
 ---
 
@@ -925,16 +1106,16 @@ All 6 module definitions exist in `endevo-uat-lms-modules`. The LMS engine, quiz
 |----------|--------|
 | **What is the tech stack?** | Next.js 15 + Python 3.12 Lambda + DynamoDB + WorkOS + CDK + Amplify — serverless with passwordless auth |
 | **How many engineers built this?** | 1 architect (Shahzad) built the entire platform. 4 additional team members for product, AI, QA, and dev. |
-| **How long has it been in development?** | Started 2026-03-18. 107+ commits in 2 weeks. Phases 0-3 complete. |
+| **How long has it been in development?** | Started 2026-03-18. 160+ commits in 3 weeks. Phases 0-3 complete. |
 | **Is it in production?** | UAT environment is live. Production launch planned after Phase 4 (UI polish + video content). |
 | **What are the external dependencies?** | Zero pip dependencies on backend. Frontend: Next.js, Tailwind, react-hook-form, Zod, js-cookie. No external SaaS dependencies except AWS. |
 | **How is data isolated between tenants?** | `tenantId` is embedded in the WorkOS JWT. Every Lambda extracts it and injects it into every DynamoDB query. QA verified: 0 cross-tenant leaks across 69 test cases. |
 | **What is the cost to serve 10K users?** | Estimated ~$556/month on AWS (DynamoDB + Lambda + CloudFront + API Gateway). |
 | **What is the revenue model?** | B2B annual subscription: $299/yr (Basic, 2 modules) or $499/yr (Premium, 6 modules) per organization. |
 | **Is there vendor lock-in?** | AWS infrastructure + WorkOS auth, but standard patterns (DynamoDB → any NoSQL, Lambda → any serverless, WorkOS → any OIDC). Migration is straightforward. |
-| **What about AI?** | AI-Ready architecture. Phase 6 plans Amazon Bedrock for content generation and Personalize for learning paths. No AI features are live today — we do not overstate capability. |
+| **What about AI?** | Jesse AI copilot is live — Amazon Bedrock Claude Haiku 4.5 for RAG chat + action execution, Titan Embed V2 for vector search, Gemma 4 offline fallback. Role-aware across all 3 portals with 15+ audited actions. |
 | **What compliance standards are planned?** | GDPR (data minimization applied), SOC 2 Type II (CloudTrail enabled), HIPAA (architecture designed), ISO 27001 (planned). |
-| **How is the codebase organized?** | pnpm monorepo: `apps/web/` (Next.js), `backend/functions/` (5 Python Lambdas), `infrastructure/` (8 CDK stacks). |
+| **How is the codebase organized?** | pnpm monorepo: `apps/web/` (Next.js), `backend/functions/` (6 Python Lambdas), `infrastructure/` (11 CDK stacks). |
 | **What is the QA coverage?** | 69 test cases, 98.6% pass rate, covering auth, RBAC, tenant isolation, input validation, and edge cases. |
 | **What is the deployment model?** | Frontend: Git-push auto-deploy via Amplify (~3 min). Lambda: GitHub Actions auto-deploy. Infrastructure: CDK manual deploy. |
 | **Can it handle enterprise scale?** | DynamoDB auto-scales infinitely. Lambda scales to 1,000+ concurrent executions. CloudFront delivers content globally. No fixed servers to provision. |

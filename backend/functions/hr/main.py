@@ -13,6 +13,8 @@ Routes:
   GET  /api/hr/subscription          — tenant subscription & seat info
   GET  /api/hr/sessions              — 1:1 session overview for tenant
   POST /api/hr/sessions/book         — book a 1:1 session for an employee
+  POST /api/hr/upload-url            — get S3 presigned upload URL (scoped to tenant)
+  POST /api/hr/branding              — update own tenant branding
 """
 import json, os, uuid, base64, re
 import boto3
@@ -22,7 +24,10 @@ from boto3.dynamodb.conditions import Attr
 REGION    = os.environ.get("AWS_REGION", "us-east-1")
 dynamo    = boto3.resource("dynamodb", region_name=REGION)
 ses       = boto3.client("ses", region_name=REGION)
+s3_client = boto3.client("s3", region_name=REGION)
 _secrets  = boto3.client("secretsmanager", region_name=REGION)
+UPLOAD_BUCKET = os.environ.get("S3_UPLOAD_BUCKET", "endevo-uat-uploads")
+CF_DOMAIN = os.environ.get("CF_DOMAIN", "")
 USERS_T        = dynamo.Table("endevo-uat-users")
 AUDIT_T        = dynamo.Table("endevo-uat-audit")
 SUBSCRIPTIONS_T = dynamo.Table("endevo-uat-subscriptions")
@@ -763,6 +768,104 @@ def handler(event, context):
             "userId":      user_id,
             "scheduledAt": scheduled_at,
             "status":      "scheduled",
+        })
+
+    # ── POST /api/hr/upload-url ────────────────────────────────────────────
+    if path.endswith("/upload-url") and method == "POST":
+        ALLOWED_EXTENSIONS = {"jpg", "jpeg", "png", "gif", "webp", "pdf"}
+        ALLOWED_TYPES = {"logo", "photo", "document"}
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+
+        upload_type = sanitize(body.get("type", ""), 20).lower()
+        filename = sanitize(body.get("filename", ""), 255)
+
+        if not upload_type or upload_type not in ALLOWED_TYPES:
+            return err(400, f"Invalid type. Allowed: {', '.join(sorted(ALLOWED_TYPES))}")
+        if not filename:
+            return err(400, "filename is required")
+
+        ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+        if ext not in ALLOWED_EXTENSIONS:
+            return err(400, f"File extension '{ext}' not allowed. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+
+        safe_filename = re.sub(r'[^a-zA-Z0-9._-]', '_', filename)
+        s3_key = f"uploads/{upload_type}/{tenant_id}/{uuid.uuid4()}_{safe_filename}"
+
+        content_type_map = {
+            "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+            "gif": "image/gif", "webp": "image/webp",
+            "pdf": "application/pdf",
+        }
+        content_type = content_type_map.get(ext, "application/octet-stream")
+
+        try:
+            upload_url = s3_client.generate_presigned_url(
+                "put_object",
+                Params={
+                    "Bucket": UPLOAD_BUCKET,
+                    "Key": s3_key,
+                    "ContentType": content_type,
+                },
+                ExpiresIn=300,
+            )
+        except Exception as e:
+            print(f"PRESIGNED_URL_ERROR: {e}")
+            return err(500, "Failed to generate upload URL")
+
+        return resp(200, {
+            "uploadUrl": upload_url,
+            "key": s3_key,
+            "expiresIn": 300,
+        })
+
+    # ── POST /api/hr/branding ────────────────────────────────────────────
+    if path.endswith("/branding") and method == "POST":
+        logo_url = sanitize(body.get("logoUrl", ""), 500)
+        primary_color = sanitize(body.get("primaryColor", ""), 20)
+        company_name = sanitize(body.get("companyName", ""), 200)
+
+        if not any([logo_url, primary_color, company_name]):
+            return err(400, "At least one branding field required (logoUrl, primaryColor, companyName)")
+
+        # Validate logoUrl is HTTPS
+        if logo_url and not logo_url.startswith("https://"):
+            return err(400, "logoUrl must be an HTTPS URL")
+
+        if primary_color and not re.match(r'^#[0-9A-Fa-f]{3,8}$', primary_color):
+            return err(400, "Invalid color format. Use hex (e.g. #2BBFC5)")
+
+        updates = {}
+        if logo_url:
+            updates["logoUrl"] = logo_url
+        if primary_color:
+            updates["primaryColor"] = primary_color
+        if company_name:
+            updates["companyName"] = company_name
+        updates["brandingUpdatedAt"] = datetime.now(timezone.utc).isoformat()
+
+        expr = "SET " + ", ".join([f"#{k} = :{k}" for k in updates])
+        names = {f"#{k}": k for k in updates}
+        vals = {f":{k}": v for k, v in updates.items()}
+
+        try:
+            TENANTS_T.update_item(
+                Key={"tenantId": tenant_id},
+                UpdateExpression=expr,
+                ExpressionAttributeNames=names,
+                ExpressionAttributeValues=vals,
+            )
+        except Exception as e:
+            print(f"BRANDING_UPDATE_ERROR: {e}")
+            return err(500, "Failed to update branding")
+
+        audit(tenant_id, caller_email, "TENANT_BRANDING_UPDATED",
+              f"HR updated branding for tenant {tenant_id}: {json.dumps(updates, default=str)}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "message": "Branding updated successfully",
+            "tenantId": tenant_id,
+            "branding": updates,
         })
 
     return err(404, f"Route not found: {method} {path}")

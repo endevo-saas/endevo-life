@@ -109,6 +109,32 @@ export const api = {
   hrReactivateEmployee: (id: string) =>
     apiFetch(`/api/hr/employees/${id}/reactivate`, { method: 'POST' }),
 
+  // File Upload — Admin
+  adminGetUploadUrl: (type: string, filename: string, tenantId?: string) =>
+    apiFetch<{ uploadUrl: string; key: string; expiresIn: number }>('/api/admin/upload-url', {
+      method: 'POST', body: JSON.stringify({ type, filename, tenantId })
+    }),
+  adminUpdateBranding: (tenantId: string, branding: { logoUrl?: string; primaryColor?: string; companyName?: string }) =>
+    apiFetch(`/api/admin/tenants/${tenantId}/branding`, { method: 'POST', body: JSON.stringify(branding) }),
+
+  // File Upload — HR
+  hrGetUploadUrl: (type: string, filename: string) =>
+    apiFetch<{ uploadUrl: string; key: string; expiresIn: number }>('/api/hr/upload-url', {
+      method: 'POST', body: JSON.stringify({ type, filename })
+    }),
+  hrUpdateBranding: (branding: { logoUrl?: string; primaryColor?: string; companyName?: string }) =>
+    apiFetch('/api/hr/branding', { method: 'POST', body: JSON.stringify(branding) }),
+
+  // File Upload — Employee
+  employeeGetUploadUrl: (filename: string) =>
+    apiFetch<{ uploadUrl: string; key: string; expiresIn: number }>('/api/employee/upload-url', {
+      method: 'POST', body: JSON.stringify({ type: 'photo', filename })
+    }),
+  employeeUpdateAvatar: (avatarKey: string) =>
+    apiFetch<{ message: string; avatarKey: string; avatarUrl: string }>('/api/employee/avatar', {
+      method: 'PUT', body: JSON.stringify({ avatarKey })
+    }),
+
   // Employee
   employeeDashboard: () => apiFetch('/api/employee/dashboard'),
   employeeProfile: () => apiFetch('/api/employee/profile'),
@@ -122,6 +148,7 @@ export const api = {
   employeeSubmitAssessment: (courseId: string, answers: Record<string, string>) =>
     apiFetch(`/api/employee/assessment/${courseId}/submit`, { method: 'POST', body: JSON.stringify({ answers }) }),
   employeeCertificates: () => apiFetch<{ certificates: Certificate[]; count: number }>('/api/employee/certificates'),
+  employeeCertificateCheck: () => apiFetch<CertificateCheckResult>('/api/employee/certificate/check', { method: 'POST' }),
 
   // LMS — Assessment
   lmsGetAssessmentQuestions: () => apiFetch('/api/lms/assessment/questions'),
@@ -204,6 +231,12 @@ export const api = {
   adminChangePlan: (tenantId: string, body: { plan: string; seats?: number }) =>
     apiFetch(`/api/admin/subscriptions/${tenantId}/plan`, { method: 'PUT', body: JSON.stringify(body) }),
   adminMetricsOverview: () => apiFetch<PlatformMetrics>('/api/admin/metrics/overview'),
+  adminReEngage: () => apiFetch<ReEngageResult>('/api/admin/re-engage', { method: 'POST' }),
+
+  // Admin — Plan Config
+  adminGetPlanConfig: () => apiFetch<PlanConfigResponse>('/api/admin/plan-config'),
+  adminUpdatePlanConfig: (config: PlanConfig) =>
+    apiFetch('/api/admin/plan-config', { method: 'PUT', body: JSON.stringify(config) }),
 
   // HR — Metrics & Subscriptions
   hrMetrics: () => apiFetch<HrMetrics>('/api/hr/metrics'),
@@ -217,11 +250,47 @@ export const api = {
   employeeSessions: () => apiFetch<EmployeeSessionOverview>('/api/employee/sessions'),
   employeeProgressSummary: () => apiFetch<ProgressSummary>('/api/employee/progress-summary'),
 
+  // Bulk Import/Export
+  adminImportTenants: (tenants: ImportTenant[]) =>
+    apiFetch<BulkImportResult>('/api/admin/tenants/import', { method: 'POST', body: JSON.stringify({ tenants }) }),
+  adminExportTenants: () =>
+    apiFetch<{ tenants: Tenant[]; count: number; exportedAt: string }>('/api/admin/tenants/export'),
+  adminImportEmployees: (tenantId: string, employees: ImportEmployee[]) =>
+    apiFetch<BulkImportResult>('/api/admin/employees/import', { method: 'POST', body: JSON.stringify({ tenantId, employees }) }),
+  adminExportEmployees: (tenantId?: string) =>
+    apiFetch<{ employees: User[]; count: number; exportedAt: string }>(`/api/admin/employees/export${tenantId ? `?tenantId=${tenantId}` : ''}`),
+
+  // Feature Flags
+  adminGetFeatures: () =>
+    apiFetch<{ flags: Record<string, boolean>; source: string }>('/api/admin/features'),
+  adminUpdateFeatures: (flags: Record<string, boolean>) =>
+    apiFetch<{ message: string; flags: Record<string, boolean> }>('/api/admin/features', { method: 'PUT', body: JSON.stringify(flags) }),
+
+  // System Status
+  adminSystemStatus: () =>
+    apiFetch<SystemStatus>('/api/admin/system/status'),
+
+  // MFA Management
+  adminSetTenantMfa: (tenantId: string, config: { mfaRequired: boolean; allowedMethods: string[] }) =>
+    apiFetch<{ message: string; tenantId: string; mfaRequired: boolean; allowedMethods: string[] }>(
+      `/api/admin/tenants/${tenantId}/mfa`, { method: 'POST', body: JSON.stringify(config) }),
+
+  // Copilot AI
+  copilotChat: (message: string, context: { role: string; page: string; tenantId?: string }) =>
+    apiFetch<CopilotChatResponse>('/api/jesse/copilot', {
+      method: 'POST', body: JSON.stringify({ message, context })
+    }),
+
   // Jesse AI
+  jesseSpeakText: (text: string, voice?: 'female' | 'male') =>
+    apiFetch<{ audioUrl: string | null; voice: string }>('/api/jesse/speak', {
+      method: 'POST', body: JSON.stringify({ text, voice: voice || 'female' })
+    }),
   jesseChat: (message: string) =>
     apiFetch<JesseChatResponse>('/api/jesse/chat', { method: 'POST', body: JSON.stringify({ message }) }),
   jesseChatHistory: () => apiFetch<JesseChatHistory>('/api/jesse/chat/history'),
   jesseHealth: () => apiFetch('/api/jesse/health'),
+  jesseAccess: () => apiFetch<{ hasAccess: boolean; plan: string }>('/api/jesse/access'),
 }
 
 // Types
@@ -291,9 +360,29 @@ export interface Question {
 
 export interface Certificate {
   certId: string
-  courseId: string
-  score: number
+  certificateId?: string
+  courseId?: string
+  title?: string
+  type?: string
+  score?: number
   issuedAt: string
+  status?: string
+  completedModules?: number
+}
+
+export interface CertificateCheckResult {
+  eligible: boolean
+  certificate?: Certificate
+  message: string
+  modulesCompleted?: number
+  modulesTotal?: number
+}
+
+export interface ReEngageResult {
+  attempted: number
+  sent: number
+  failed: number
+  inactiveDays: number
 }
 
 export interface AssessmentAnswer {
@@ -403,6 +492,25 @@ export interface EmployeeSubscription {
   managedBy: string
 }
 
+export interface PlanConfigEntry {
+  planLabel: string
+  priceYearly: number
+  priceMonthly: number
+  sessionsTotal: number
+  features: string[]
+}
+
+export interface PlanConfig {
+  basic: PlanConfigEntry
+  premium: PlanConfigEntry
+  premiumFeatures: string[]
+}
+
+export interface PlanConfigResponse {
+  config: PlanConfig
+  source: 'dynamodb' | 'defaults'
+}
+
 export interface EmployeeSessionOverview {
   sessions: SessionRecord[]
   total: number
@@ -419,6 +527,22 @@ export interface ProgressSummary {
   lastActivity?: string
 }
 
+export interface CopilotActionResult {
+  action: string
+  result: {
+    success: boolean
+    message?: string
+    error?: string
+    [key: string]: unknown
+  }
+}
+
+export interface CopilotChatResponse {
+  reply: string
+  role: string
+  actions?: CopilotActionResult[]
+}
+
 export interface JesseChatResponse {
   reply: string
   history: JesseChatMessage[]
@@ -432,4 +556,62 @@ export interface JesseChatMessage {
   role: 'user' | 'assistant'
   content: string
   createdAt: string
+}
+
+// Bulk Import/Export Types
+export interface ImportTenant {
+  name: string
+  plan?: 'basic' | 'premium'
+  maxSeats?: number
+  hrEmail?: string
+}
+
+export interface ImportEmployee {
+  email: string
+  name?: string
+  firstName?: string
+  lastName?: string
+  role?: 'EMPLOYEE' | 'HR_ADMIN'
+  department?: string
+  jobTitle?: string
+}
+
+export interface BulkImportResult {
+  imported: number
+  failed: number
+  errors: string[]
+}
+
+// System Status Types
+export interface SystemStatus {
+  checkedAt: string
+  overall: 'healthy' | 'degraded'
+  dynamodb: {
+    tables: TableStatus[]
+    totalTables: number
+    activeTables: number
+  }
+  lambda: {
+    functions: LambdaStatus[]
+    totalFunctions: number
+  }
+  ses: {
+    status: string
+  }
+}
+
+export interface TableStatus {
+  name: string
+  status: string
+  itemCount: number
+  sizeBytes: number
+}
+
+export interface LambdaStatus {
+  name: string
+  status: string
+  runtime?: string
+  memoryMB?: number
+  timeoutSec?: number
+  lastModified?: string
 }

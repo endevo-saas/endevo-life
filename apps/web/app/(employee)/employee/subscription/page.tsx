@@ -199,20 +199,21 @@ export default function EmployeeSubscriptionPage() {
       apiFetch<SessionsData>('/api/employee/sessions'),
     ])
 
-    if (subResult.status === 'fulfilled') {
+    const mockSub = getMockSubscription(fallbackPlan)
+
+    if (subResult.status === 'fulfilled' && subResult.value) {
       setSubscription(subResult.value)
     } else {
-      setSubscription(getMockSubscription(fallbackPlan))
+      setSubscription(mockSub)
     }
 
-    if (sessResult.status === 'fulfilled') {
+    if (sessResult.status === 'fulfilled' && sessResult.value) {
       setSessions(sessResult.value)
     } else {
-      const mock = getMockSubscription(fallbackPlan)
       setSessions({
         ...getMockSessions(),
-        total: mock.sessionsTotal,
-        remaining: mock.sessionsRemaining,
+        total: mockSub.sessionsTotal,
+        remaining: mockSub.sessionsRemaining,
       })
     }
 
@@ -257,7 +258,15 @@ export default function EmployeeSubscriptionPage() {
 
         {loading ? (
           <LoadingSkeleton />
-        ) : subscription && sessions ? (
+        ) : !subscription || !sessions ? (
+          <div className="glass p-8 text-center">
+            <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-3" />
+            <p className="text-sm text-slate-400 mb-3">Unable to load subscription data</p>
+            <button onClick={load} className="px-4 py-2 rounded-xl bg-[#2BBFC5]/10 text-[#2BBFC5] border border-[#2BBFC5]/30 text-sm font-medium hover:bg-[#2BBFC5]/20 transition-all">
+              <RefreshCw className="w-4 h-4 inline mr-2" />Retry
+            </button>
+          </div>
+        ) : (
           <div className="space-y-6">
 
             {/* ═══════════════════════════════════════════════════════════
@@ -566,7 +575,7 @@ export default function EmployeeSubscriptionPage() {
             </div>
 
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   )

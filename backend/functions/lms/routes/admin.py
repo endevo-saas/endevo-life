@@ -562,24 +562,40 @@ def _manual_unlock(event: dict, target_user_id: str, tenant_id: str) -> dict:
 
 # ── Video / PDF upload pipeline ───────────────────────────────────────────────
 
+ALLOWED_LMS_EXTENSIONS: frozenset[str] = frozenset(
+    {"mp4", "mov", "webm", "pdf", "jpg", "jpeg", "png", "gif", "webp"}
+)
+
+_LMS_CONTENT_TYPE_MAP: dict[str, str] = {
+    "mp4": "video/mp4", "mov": "video/quicktime", "webm": "video/webm",
+    "pdf": "application/pdf",
+    "jpg": "image/jpeg", "jpeg": "image/jpeg", "png": "image/png",
+    "gif": "image/gif", "webp": "image/webp",
+}
+
 def _get_upload_url(event: dict, module_num: str) -> dict:
     """POST /api/lms/admin/modules/{moduleNum}/upload-url
 
-    Body: {fileName, fileType, contentType}
+    Body: {fileName, fileType}
     fileType = "video" | "pdf"
     Returns: {uploadUrl, key, bucket, expiresIn}
     """
     body = get_body(event)
     file_name: str = str(body.get("fileName", "")).strip()
     file_type: str = str(body.get("fileType", "")).strip()
-    content_type: str = str(body.get("contentType", "")).strip()
 
     if not file_name:
         return err(400, "fileName is required")
     if file_type not in ("video", "pdf"):
         return err(400, "fileType must be 'video' or 'pdf'")
-    if not content_type:
-        return err(400, "contentType is required")
+
+    # Validate file extension
+    ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else ""
+    if ext not in ALLOWED_LMS_EXTENSIONS:
+        return err(400, f"File extension '{ext}' not allowed. Allowed: {', '.join(sorted(ALLOWED_LMS_EXTENSIONS))}")
+
+    # Derive content type server-side from extension
+    content_type = _LMS_CONTENT_TYPE_MAP.get(ext, "application/octet-stream")
 
     if file_type == "video":
         bucket = VIDEOS_BUCKET

@@ -125,7 +125,23 @@ function CloseIcon() {
   )
 }
 
+function CrownIcon() {
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 24 24"
+      fill="currentColor"
+      className="w-7 h-7"
+      aria-hidden="true"
+    >
+      <path d="M2 19h20v2H2v-2zm1.5-7.5L6 14l4.5-6L12 11l1.5-3L18 14l2.5-2.5L19 18H5l-1.5-6.5z" />
+    </svg>
+  )
+}
+
 export default function JesseChatWindow() {
+  const [hasAccess, setHasAccess] = useState<boolean | null>(null)
+  const [showUpgradeTooltip, setShowUpgradeTooltip] = useState(false)
   const [isOpen, setIsOpen] = useState(false)
   const [messages, setMessages] = useState<JesseChatMessage[]>([])
   const [input, setInput] = useState('')
@@ -136,6 +152,26 @@ export default function JesseChatWindow() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Check premium access on mount
+  useEffect(() => {
+    let cancelled = false
+    async function checkAccess() {
+      try {
+        const data = await api.jesseAccess()
+        if (!cancelled) {
+          setHasAccess(data.hasAccess)
+        }
+      } catch {
+        // Fail-open: if we can't check, assume access
+        if (!cancelled) {
+          setHasAccess(true)
+        }
+      }
+    }
+    checkAccess()
+    return () => { cancelled = true }
+  }, [])
 
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -238,6 +274,49 @@ export default function JesseChatWindow() {
     setIsOpen((prev) => !prev)
   }, [])
 
+  // Loading state — render nothing
+  if (hasAccess === null) {
+    return null
+  }
+
+  // No access — show upgrade FAB
+  if (!hasAccess) {
+    return (
+      <>
+        {showUpgradeTooltip && (
+          <div className="fixed bottom-20 right-4 w-72 rounded-xl shadow-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 p-4 z-50">
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-8 h-8 rounded-full bg-gradient-to-br from-purple-500 to-indigo-600 flex items-center justify-center">
+                <span className="text-white text-sm font-bold">J</span>
+              </div>
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100">
+                Jesse AI — Premium Feature
+              </h3>
+            </div>
+            <p className="text-xs text-gray-500 dark:text-gray-400 leading-relaxed">
+              Jesse AI is available on the Premium plan. Ask your employer to upgrade.
+            </p>
+            <button
+              onClick={() => setShowUpgradeTooltip(false)}
+              className="mt-3 w-full text-xs text-center text-purple-600 dark:text-purple-400 hover:underline"
+            >
+              Dismiss
+            </button>
+          </div>
+        )}
+
+        <button
+          onClick={() => setShowUpgradeTooltip((prev) => !prev)}
+          className="fixed bottom-4 right-4 w-14 h-14 rounded-full shadow-lg flex items-center justify-center transition-all duration-300 z-50 bg-gradient-to-br from-purple-500 to-indigo-600 hover:from-purple-600 hover:to-indigo-700 text-white"
+          aria-label="Jesse AI — Premium plan required"
+        >
+          <CrownIcon />
+        </button>
+      </>
+    )
+  }
+
+  // Has access — render full chat
   return (
     <>
       {/* Chat Panel */}
