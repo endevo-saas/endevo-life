@@ -274,6 +274,9 @@ def _converse(model_id: str, system_prompt: str, messages: list[dict], max_token
             if isinstance(content, list):
                 content = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
             converse_messages.append({"role": role, "content": [{"text": content}]})
+        # Nova requires first message to be 'user' — prepend if needed
+        if not converse_messages or converse_messages[0]["role"] != "user":
+            converse_messages.insert(0, {"role": "user", "content": [{"text": "Hello Jesse"}]})
         response = bedrock.converse(
             modelId=model_id,
             system=[{"text": system_prompt}],
