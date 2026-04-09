@@ -1216,9 +1216,9 @@ npx cdk deploy --all
 
 | Metric | Value |
 |--------|-------|
-| **Total git commits** | 184+ |
-| **Total source files** | 187 (Python + TypeScript + config + docs + knowledge) |
-| **Total lines of code** | 43,000+ |
+| **Total git commits** | 187+ |
+| **Total source files** | 190+ (Python + TypeScript + config + docs + knowledge) |
+| **Total lines of code** | 44,000+ |
 | **Python files (backend)** | 40 |
 | **TypeScript/TSX files (frontend)** | 85 |
 | **Folders** | 100 |
@@ -1682,6 +1682,15 @@ Every archived record contains: `status='archived'`, `archivedAt`, `archivedBy`,
 - **IAM fixes:** Bedrock cross-region inference + Polly permissions added to Lambda role.
 - **Amplify fix:** API URL not reaching Next.js build — added .env.production + api.ts fallback.
 - **Speaker fix:** Audio stops on panel minimize, ref cleanup on ended.
+- **JWT security:** Removed unverified JWT path from all 6 Lambdas. Session token via GSI is ONLY auth path now.
+- **CloudFront + WAF:** Distribution E20X6Y5BOAC1EM deployed with CommonRuleSet + SQLi + RateLimit protecting API.
+- **sessionToken GSI:** ACTIVE — eliminated 6 CRITICAL full-table scans (90-95% RCU reduction).
+- **Bedrock KB activated:** MUJXTOAKSR with semantic search replacing 25K token prompt dump.
+- **Brute-force hardened:** fail-closed + OTP verify rate limiting.
+- **Assessment idempotency:** 5-second duplicate check prevents double-clicks.
+- **Aurora stopped:** Both clusters in us-east-2 paused ($100/mo saved).
+- **SMS toll-free:** +18446919187 provisioned (pending verification).
+- **Lambda concurrency:** 5000 requested (AWS reviewing).
 
 **What we built in 20 calendar days (170 commits, 37,625 lines):**
 A complete enterprise SaaS platform with 6 Lambda functions, 18 DynamoDB tables, 120+ API endpoints, 42+ frontend pages, an AI employee (Jesse v2) with voice I/O and action execution, multi-region failover, zero-trust auth, multi-model AI failover (Gemini → Bedrock → Ollama), pre-compiled knowledge engine (192 sources, 7,228 chunks, 198KB compressed), soft-delete recycle bin, and full CI/CD automation — with 2 people and AI.
