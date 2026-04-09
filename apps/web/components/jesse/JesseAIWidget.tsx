@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent } from 'react'
 import { usePathname } from 'next/navigation'
 import Cookies from 'js-cookie'
-import { api, type JesseChatMessage, type CopilotActionResult, type JesseActionProposal } from '@/lib/api'
+import { api, type JesseChatMessage, type CopilotActionResult } from '@/lib/api'
 import HITLActionCard from './ActionCard'
 import type { JesseAction } from './ActionCard'
 
@@ -334,8 +334,8 @@ function JesseBubble({
 }: {
   message: JesseMessage
   gradient: string
-  onApproveAction: (actionId: string) => void
-  onRejectAction: (actionId: string) => void
+  onApproveAction?: (actionId: string) => void
+  onRejectAction?: (actionId: string) => void
 }) {
   return (
     <div className="flex justify-start mb-3 gap-2">
@@ -625,6 +625,47 @@ export default function JesseAIWidget() {
     }
   }, [input, isLoading, role, pathname, tenantId, speakReply, isOpen, stopSpeaking])
 
+  /* ---- HITL approve/reject handlers ---- */
+  const handleApproveAction = useCallback(async (actionId: string) => {
+    // Mark action as executing
+    setMessages(prev => prev.map(m => ({
+      ...m,
+      hitlActions: m.hitlActions?.map(a =>
+        a.actionId === actionId ? { ...a, status: 'executing' as const } : a
+      )
+    })))
+
+    // Find the action details
+    const action = messages.flatMap(m => m.hitlActions || []).find(a => a.actionId === actionId)
+    if (!action) return
+
+    try {
+      const result = await api.jesseAgentExecute(action.type, action.params)
+      setMessages(prev => prev.map(m => ({
+        ...m,
+        hitlActions: m.hitlActions?.map(a =>
+          a.actionId === actionId ? { ...a, status: 'completed' as const, result: result.result } : a
+        )
+      })))
+    } catch {
+      setMessages(prev => prev.map(m => ({
+        ...m,
+        hitlActions: m.hitlActions?.map(a =>
+          a.actionId === actionId ? { ...a, status: 'failed' as const, result: 'Action failed' } : a
+        )
+      })))
+    }
+  }, [messages])
+
+  const handleRejectAction = useCallback((actionId: string) => {
+    setMessages(prev => prev.map(m => ({
+      ...m,
+      hitlActions: m.hitlActions?.map(a =>
+        a.actionId === actionId ? { ...a, status: 'rejected' as const } : a
+      )
+    })))
+  }, [])
+
   /* ---- keyboard ---- */
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -750,6 +791,8 @@ export default function JesseAIWidget() {
                   key={`${msg.createdAt}-${idx}`}
                   message={msg}
                   gradient={config.gradient}
+                  onApproveAction={handleApproveAction}
+                  onRejectAction={handleRejectAction}
                 />
               )
             )}
