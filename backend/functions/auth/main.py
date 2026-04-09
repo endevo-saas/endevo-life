@@ -66,6 +66,8 @@ def _get_cors_origin():
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 def resp(status, body):
+    if "success" not in body:
+        body = {**body, "success": True}
     return {
         "statusCode": status,
         "headers": {
@@ -78,7 +80,7 @@ def resp(status, body):
     }
 
 def err(status, msg):
-    return resp(status, {"detail": msg})
+    return resp(status, {"success": False, "detail": msg})
 
 def get_body(event):
     try:

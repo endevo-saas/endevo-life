@@ -17,6 +17,7 @@ import { FinOpsStack } from '../lib/13-finops-stack'
 import { KmsStack } from '../lib/14-kms-stack'
 import { CloudFrontApiStack } from '../lib/15-cloudfront-api-stack'
 import { EmailQueueStack } from '../lib/16-email-queue-stack'
+import { ObservabilityStack } from '../lib/17-observability-stack'
 
 const app = new cdk.App()
 
@@ -103,3 +104,6 @@ new EmailQueueStack(app, 'EndevoUatEmailQueue', {
   env, tags,
   lambdaRole: iam.lambdaRole,
 })
+
+// Stack 17 — Observability (CloudWatch error alarms for all Lambdas)
+new ObservabilityStack(app, 'EndevoUatObservability', { env, tags })

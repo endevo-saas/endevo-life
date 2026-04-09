@@ -1,4 +1,5 @@
 import Cookies from 'js-cookie'
+import { showToast } from '@/components/ToastContainer'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com'
 
@@ -8,6 +9,12 @@ function authHeaders(): HeadersInit {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
   }
+}
+
+/** Returns true if the HTTP method is a mutation (POST/PUT/DELETE/PATCH) */
+function isMutation(options: RequestInit): boolean {
+  const method = (options.method || 'GET').toUpperCase()
+  return ['POST', 'PUT', 'DELETE', 'PATCH'].includes(method)
 }
 
 export async function apiFetch<T = unknown>(
@@ -21,18 +28,67 @@ export async function apiFetch<T = unknown>(
       headers: { ...authHeaders(), ...(options.headers || {}) },
     })
   } catch {
-    throw new Error('Network error — check your connection or try again')
+    const msg = 'Network error — check your connection or try again'
+    if (isMutation(options)) {
+      throw new Error(msg)
+    }
+    showToast(msg, 'error')
+    return null as T
   }
+
+  // Handle 401 — redirect to login
+  if (res.status === 401) {
+    showToast('Session expired — redirecting to login', 'warning')
+    if (typeof window !== 'undefined') {
+      window.location.href = '/login'
+    }
+    throw new Error('Unauthorized — session expired')
+  }
+
+  // Handle 429 — rate limited
+  if (res.status === 429) {
+    showToast('Too many requests — please wait a moment and try again', 'warning')
+    if (isMutation(options)) {
+      throw new Error('Rate limited — please slow down and try again')
+    }
+    return null as T
+  }
+
   let data: unknown
   try {
     data = await res.json()
   } catch {
-    throw new Error(`Server error ${res.status} — invalid response`)
+    const msg = `Server error ${res.status} — invalid response`
+    if (isMutation(options)) {
+      throw new Error(msg)
+    }
+    showToast(msg, 'error')
+    return null as T
   }
+
   if (!res.ok) {
     const d = data as Record<string, string>
-    throw new Error(d?.detail || d?.error || d?.message || `API error ${res.status}`)
+    const errorMsg = d?.detail || d?.error || d?.message || `API error ${res.status}`
+
+    // Handle 500 — server error
+    if (res.status >= 500) {
+      showToast(`Server error — ${errorMsg}`, 'error')
+      if (isMutation(options)) {
+        throw new Error(errorMsg)
+      }
+      return null as T
+    }
+
+    // All other errors: mutations always throw so forms can catch them
+    if (isMutation(options)) {
+      throw new Error(errorMsg)
+    }
+
+    // GET request failures show toast and return null
+    showToast(errorMsg, 'error')
+    return null as T
   }
+
   return data as T
 }
 

@@ -14,6 +14,8 @@ import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 import { JesseAIWidget } from '@/components/jesse'
 import AmbientMesh from '@/components/AmbientMesh'
+import ErrorBoundary from '@/components/ErrorBoundary'
+import ToastContainer from '@/components/ToastContainer'
 
 const navGroups = [
   {
@@ -274,8 +276,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
       {/* Main content */}
       <main className="flex-1 overflow-auto relative z-10">
-        {children}
+        <ErrorBoundary>
+          {children}
+        </ErrorBoundary>
         <JesseAIWidget />
+        <ToastContainer />
         <footer className="px-6 py-4 text-center border-t" style={{ borderColor: 'var(--border-subtle)' }}>
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
             Legacy Readiness OS — Powered by <span className="font-semibold" style={{ color: 'var(--text-secondary)' }}>Endevo.life</span>

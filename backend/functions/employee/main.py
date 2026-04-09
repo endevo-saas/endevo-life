@@ -39,9 +39,11 @@ def _get_cors_origin():
     return ALLOWED_ORIGINS[0]
 
 def resp(status, body):
+    if "success" not in body:
+        body = {**body, "success": True}
     return {"statusCode": status, "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": _get_cors_origin(), "Access-Control-Allow-Headers": "Content-Type,Authorization", "Access-Control-Allow-Methods": "GET,POST,PUT,OPTIONS"}, "body": json.dumps(body, default=str)}
 
-def err(status, msg): return resp(status, {"detail": msg})
+def err(status, msg): return resp(status, {"success": False, "detail": msg})
 def get_body(event):
     try: return json.loads(event.get("body") or "{}")
     except: return {}
@@ -147,13 +149,14 @@ def get_caller(event):
 def handler(event, context):
     global _current_event
     _current_event = event
+    try:
 
-    method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
-    path   = event.get("rawPath", "")
-    if method == "OPTIONS": return resp(200, {})
-    body = get_body(event)
-    tenant_id, email, user_sub = get_caller(event)
-    if not tenant_id: return err(401, "Not authenticated")
+        method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+        path   = event.get("rawPath", "")
+        if method == "OPTIONS": return resp(200, {})
+        body = get_body(event)
+        tenant_id, email, user_sub = get_caller(event)
+        if not tenant_id: return err(401, "Not authenticated")
 
     # GET /api/employee/dashboard
     if path.endswith("/dashboard") and method == "GET":
