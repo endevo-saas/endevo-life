@@ -13,6 +13,7 @@ import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 import { JesseAIWidget } from '@/components/jesse'
+import AmbientMesh from '@/components/AmbientMesh'
 
 const navGroups = [
   {
@@ -227,18 +228,19 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const path = usePathname()
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-base)' }}>
+      <AmbientMesh />
       {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 flex flex-col"
-        style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)' }}>
+      <aside className="w-64 flex-shrink-0 flex flex-col relative z-10"
+        style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)', backdropFilter: 'blur(16px)' }}>
         {/* Brand */}
-        <div className="p-5 border-b border-white/10">
+        <div className="p-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
           <div className="flex items-center gap-3">
             <img src="/jesse/logo.png" alt="ENDevo" className="w-12 h-12 rounded-xl object-contain" />
             <div>
-              <div className="text-sm font-semibold text-white">Legacy Readiness OS</div>
-              <div className="text-[10px] font-bold tracking-widest text-orange-400">PLAN. PROTECT. PEACE.</div>
-              <div className="text-[9px] text-emerald-400 flex items-center gap-1 mt-0.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" />
+              <div className="text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>Legacy Readiness OS</div>
+              <div className="text-[10px] font-bold tracking-widest" style={{ color: 'var(--accent-1)' }}>PLAN. PROTECT. PEACE.</div>
+              <div className="text-[9px] flex items-center gap-1 mt-0.5" style={{ color: 'var(--success)' }}>
+                <span className="w-1.5 h-1.5 rounded-full inline-block animate-pulse" style={{ background: 'var(--success)' }} />
                 Global Admin
               </div>
             </div>
@@ -271,7 +273,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>
+      <main className="flex-1 overflow-auto relative z-10">
         {children}
         <JesseAIWidget />
         <footer className="px-6 py-4 text-center border-t" style={{ borderColor: 'var(--border-subtle)' }}>

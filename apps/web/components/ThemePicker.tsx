@@ -2,53 +2,67 @@
 
 import { useEffect, useState } from 'react'
 
-export type Theme = 'eclipse' | 'canvas' | 'neon' | 'navy-neon' | 'compassion'
+export type Theme = 'luminous' | 'enterprise' | 'horizon' | 'sanctuary'
 
-const THEMES: { id: Theme; label: string; desc: string; preview: string }[] = [
+const THEMES: { id: Theme; label: string; desc: string; preview: string; light: boolean }[] = [
   {
-    id: 'eclipse',
-    label: 'Eclipse',
-    desc: 'Dark • Linear-style',
-    preview: 'linear-gradient(135deg, #0F0F10 50%, #5E6AD2 50%)',
+    id: 'luminous',
+    label: 'Luminous AI',
+    desc: 'Modern • Gemini-inspired',
+    preview: 'linear-gradient(135deg, #FAFAFA 30%, #8B5CF6 60%, #3B82F6 100%)',
+    light: true,
   },
   {
-    id: 'canvas',
-    label: 'Canvas',
-    desc: 'Light • Notion-style',
-    preview: 'linear-gradient(135deg, #FFFFFF 50%, #487CA5 50%)',
+    id: 'enterprise',
+    label: 'Enterprise',
+    desc: 'Professional • Stripe-grade',
+    preview: 'linear-gradient(135deg, #F8FAFC 50%, #2563EB 50%)',
+    light: true,
   },
   {
-    id: 'neon',
-    label: 'Neon',
-    desc: 'Vibrant • Duolingo-style',
-    preview: 'linear-gradient(135deg, #0A0A0A 40%, #58CC02 70%, #FF6B35 100%)',
+    id: 'horizon',
+    label: 'Horizon',
+    desc: 'Dark • Endevo brand',
+    preview: 'linear-gradient(135deg, #020617 40%, #F97316 70%, #3B82F6 100%)',
+    light: false,
   },
   {
-    id: 'navy-neon',
-    label: 'Navy Neon',
-    desc: 'Navy + Orange • Endevo',
-    preview: 'linear-gradient(135deg, #0A0E1A 40%, #FF8C00 70%, #3B82F6 100%)',
-  },
-  {
-    id: 'compassion',
-    label: 'Compassion',
-    desc: 'Calming • Bereavement',
-    preview: 'linear-gradient(135deg, #F5F0EB 50%, #8B7355 50%)',
+    id: 'sanctuary',
+    label: 'Sanctuary',
+    desc: 'Warm • Compassion mode',
+    preview: 'linear-gradient(135deg, #FAF7F2 50%, #78716C 50%)',
+    light: true,
   },
 ]
 
 export function useTheme() {
-  const [theme, setThemeState] = useState<Theme>('eclipse')
+  const [theme, setThemeState] = useState<Theme>('luminous')
 
   useEffect(() => {
-    const saved = (localStorage.getItem('endevo-theme') as Theme) || 'eclipse'
-    applyTheme(saved)
-    setThemeState(saved)
+    const saved = localStorage.getItem('endevo-theme') as Theme
+    // Migrate old theme names to new ones
+    const migrated = migrateTheme(saved)
+    applyTheme(migrated)
+    setThemeState(migrated)
   }, [])
 
+  function migrateTheme(t: string | null): Theme {
+    // Map old theme names to new ones
+    const map: Record<string, Theme> = {
+      'eclipse': 'horizon',
+      'canvas': 'enterprise',
+      'neon': 'luminous',
+      'navy-neon': 'horizon',
+      'compassion': 'sanctuary',
+    }
+    if (!t) return 'luminous'
+    return map[t] || (THEMES.find(th => th.id === t) ? t as Theme : 'luminous')
+  }
+
   function applyTheme(t: Theme) {
+    const themeObj = THEMES.find(th => th.id === t)
     document.documentElement.setAttribute('data-theme', t)
-    document.documentElement.classList.toggle('light-mode', t === 'canvas' || t === 'compassion')
+    document.documentElement.classList.toggle('light-mode', themeObj?.light ?? true)
   }
 
   function setTheme(t: Theme) {
@@ -60,7 +74,7 @@ export function useTheme() {
   return { theme, setTheme }
 }
 
-// Compact sidebar picker — 3 small squares, drag not needed, auto-applies
+// Compact sidebar picker — 4 swatches
 export function ThemePickerInline() {
   const { theme, setTheme } = useTheme()
 
@@ -76,20 +90,19 @@ export function ThemePickerInline() {
             title={`${t.label} — ${t.desc}`}
             className="flex flex-col items-center gap-1 group"
           >
-            {/* Square preview swatch */}
             <div
               className="w-8 h-8 rounded-lg transition-all duration-200"
               style={{
                 background: t.preview,
-                outline: theme === t.id ? '2px solid white' : '2px solid transparent',
+                outline: theme === t.id ? '2px solid var(--accent-1)' : '2px solid transparent',
                 outlineOffset: '2px',
                 transform: theme === t.id ? 'scale(1.1)' : 'scale(1)',
-                boxShadow: theme === t.id ? '0 0 12px rgba(255,255,255,0.25)' : 'none',
+                boxShadow: theme === t.id ? '0 0 12px var(--accent-glow)' : 'none',
               }}
             />
             <span className="text-[9px] font-medium transition-colors"
               style={{ color: theme === t.id ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-              {t.label}
+              {t.label.split(' ')[0]}
             </span>
           </button>
         ))}
@@ -103,19 +116,18 @@ export function ThemePickerFull() {
   const { theme, setTheme } = useTheme()
 
   return (
-    <div className="grid grid-cols-3 gap-4">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
       {THEMES.map(t => (
         <button
           key={t.id}
           onClick={() => setTheme(t.id)}
           className="relative rounded-2xl overflow-hidden transition-all duration-300 text-left"
           style={{
-            border: `2px solid ${theme === t.id ? 'white' : 'var(--border-subtle)'}`,
+            border: `2px solid ${theme === t.id ? 'var(--accent-1)' : 'var(--border-subtle)'}`,
             transform: theme === t.id ? 'scale(1.03)' : 'scale(1)',
-            boxShadow: theme === t.id ? '0 0 24px rgba(255,255,255,0.15)' : 'none',
+            boxShadow: theme === t.id ? '0 0 20px var(--accent-glow)' : 'none',
           }}
         >
-          {/* Big preview */}
           <div className="h-20 w-full" style={{ background: t.preview }} />
           <div className="p-3" style={{ background: 'var(--bg-elevated)' }}>
             <div className="flex items-center justify-between">
@@ -124,8 +136,9 @@ export function ThemePickerFull() {
                 <p className="text-xs" style={{ color: 'var(--text-muted)' }}>{t.desc}</p>
               </div>
               {theme === t.id && (
-                <div className="w-5 h-5 rounded-full bg-white flex items-center justify-center flex-shrink-0">
-                  <span className="text-black text-xs font-black">✓</span>
+                <div className="w-5 h-5 rounded-full flex items-center justify-center flex-shrink-0"
+                  style={{ background: 'var(--accent-1)' }}>
+                  <span className="text-white text-xs font-black">✓</span>
                 </div>
               )}
             </div>

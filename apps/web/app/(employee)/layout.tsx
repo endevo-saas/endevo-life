@@ -11,6 +11,7 @@ import { api } from '@/lib/api'
 import Cookies from 'js-cookie'
 import { ThemePickerInline, useTheme } from '@/components/ThemePicker'
 import { JesseAIWidget } from '@/components/jesse'
+import AmbientMesh from '@/components/AmbientMesh'
 
 const navGroups = [
   {
@@ -202,15 +203,16 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
   const tenantName = Cookies.get('tenant_name') || ''
   return (
     <div className="min-h-screen flex" style={{ background: 'var(--bg-base)' }}>
-      <aside className="w-64 flex-shrink-0 flex flex-col"
-        style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)' }}>
+      <AmbientMesh />
+      <aside className="w-64 flex-shrink-0 flex flex-col relative z-10"
+        style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)', backdropFilter: 'blur(16px)' }}>
         {/* Brand */}
         <div className="p-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
           <div className="flex items-center gap-3">
             <img src="/jesse/logo.png" alt="ENDevo" className="w-12 h-12 rounded-xl object-contain" />
             <div>
-              <div className="text-sm font-bold text-white">Legacy Readiness OS</div>
-              <div className="text-[10px] font-bold tracking-widest text-orange-400">PLAN. PROTECT. PEACE.</div>
+              <div className="text-sm font-bold" style={{ color: 'var(--text-primary)' }}>Legacy Readiness OS</div>
+              <div className="text-[10px] font-bold tracking-widest" style={{ color: 'var(--accent-1)' }}>PLAN. PROTECT. PEACE.</div>
               <div className="text-[9px] flex items-center gap-1 mt-0.5" style={{ color: 'var(--accent-1)' }}>
                 <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: 'var(--success)' }} />
                 {tenantName ? `${tenantName} · Employee` : 'Employee Portal'}
@@ -242,7 +244,7 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
         </nav>
         <SessionPanel />
       </aside>
-      <main className="flex-1 overflow-auto" style={{ background: 'var(--bg-base)' }}>
+      <main className="flex-1 overflow-auto relative z-10">
         {children}
         <JesseAIWidget />
         <footer className="px-6 py-4 text-center border-t" style={{ borderColor: 'var(--border-subtle)' }}>

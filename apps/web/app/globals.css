@@ -5,178 +5,157 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════════════════════════
-   ENDEVO LIFE — 5 THEMES
-   1. Eclipse    — Dark  (Linear/Vercel style)
-   2. Canvas     — Light (Notion/Apple style) — dark text on white
-   3. Neon       — Vibrant (Duolingo/Stripe style)
-   4. Navy Neon  — Navy blue + orange neon glow (Endevo signature)
-   5. Compassion — Calming bereavement mode (auto-activates for delegates)
+   ENDEVO LIFE — 4 THEMES (State-of-the-Art Glassmorphism)
+   1. Luminous AI   — Light (Gemini/Claude inspired, animated mesh gradients)
+   2. Enterprise    — Light (Stripe/Figma, hyper-professional, max data density)
+   3. Horizon       — Dark  (Endevo brand, navy + orange ambient glow)
+   4. Sanctuary     — Light (Bereavement/compassion, warm & completely static)
 ═══════════════════════════════════════════════════════════════════ */
 
-/* ── 1. ECLIPSE — Default dark theme ───────────────────────────── */
+/* ── 1. LUMINOUS AI — Default. Modern AI platform feel ────────── */
 :root,
-[data-theme="eclipse"] {
-  --bg-base:         #0F0F10;
-  --bg-card:         #151516;
-  --bg-elevated:     #1C1C1E;
-  --bg-hover:        rgba(94, 106, 210, 0.08);
-  --border:          rgba(94, 106, 210, 0.25);
-  --border-subtle:   #2D2D2D;
+[data-theme="luminous"] {
+  --bg-base:         #FAFAFA;
+  --bg-card:         rgba(255, 255, 255, 0.7);
+  --bg-elevated:     rgba(255, 255, 255, 0.85);
+  --bg-hover:        rgba(79, 70, 229, 0.05);
+  --border:          rgba(79, 70, 229, 0.2);
+  --border-subtle:   #E2E8F0;
 
-  --text-primary:    #EEEFF1;
-  --text-secondary:  #A3A3A7;
-  --text-muted:      #6B6B6F;
+  --text-primary:    #0F172A;
+  --text-secondary:  #475569;
+  --text-muted:      #94A3B8;
 
-  --accent-1:        #5E6AD2;
-  --accent-2:        #8B5CF6;
-  --accent-glow:     rgba(94, 106, 210, 0.35);
-  --accent-glow-2:   rgba(139, 92, 246, 0.2);
+  --accent-1:        #4F46E5;   /* Indigo — modern AI */
+  --accent-2:        #8B5CF6;   /* Violet complement */
+  --accent-glow:     rgba(79, 70, 229, 0.2);
+  --accent-glow-2:   rgba(139, 92, 246, 0.15);
 
-  --success:         #34D399;
-  --success-glow:    rgba(52, 211, 153, 0.3);
-  --gold:            #FBBF24;
-  --gold-glow:       rgba(251, 191, 36, 0.3);
-  --danger:          #F87171;
-  --danger-glow:     rgba(248, 113, 113, 0.3);
+  --success:         #059669;
+  --success-glow:    rgba(5, 150, 105, 0.15);
+  --gold:            #D97706;
+  --gold-glow:       rgba(217, 119, 6, 0.15);
+  --danger:          #DC2626;
+  --danger-glow:     rgba(220, 38, 38, 0.15);
 
-  --gradient-brand:  linear-gradient(135deg, #5E6AD2 0%, #8B5CF6 100%);
-  --gradient-card:   linear-gradient(145deg, rgba(94,106,210,0.1), rgba(139,92,246,0.05));
-  --gradient-hero:   radial-gradient(ellipse at 20% 50%, rgba(94,106,210,0.12) 0%, transparent 60%),
-                     radial-gradient(ellipse at 80% 20%, rgba(139,92,246,0.1) 0%, transparent 50%),
-                     #0F0F10;
-  --shimmer:         rgba(94, 106, 210, 0.15);
+  --gradient-brand:  linear-gradient(135deg, #4F46E5 0%, #8B5CF6 100%);
+  --gradient-card:   linear-gradient(145deg, rgba(79,70,229,0.03), rgba(139,92,246,0.02));
+  --gradient-hero:   #FAFAFA;
+  --shimmer:         rgba(79, 70, 229, 0.08);
+
+  /* Mesh gradient orbs — animated in @keyframes */
+  --mesh-1:          rgba(139, 92, 246, 0.15);   /* purple orb */
+  --mesh-2:          rgba(59, 130, 246, 0.12);   /* blue orb */
+  --mesh-3:          rgba(236, 72, 153, 0.08);   /* pink orb */
+  --mesh-animate:    1;
 }
 
-/* ── 2. CANVAS — Light theme (READABLE: dark text on white) ─────── */
-[data-theme="canvas"] {
-  --bg-base:         #F7F7F5;
+/* ── 2. ENTERPRISE — Stripe-grade professional ────────────────── */
+[data-theme="enterprise"] {
+  --bg-base:         #F8FAFC;
   --bg-card:         #FFFFFF;
-  --bg-elevated:     #F0EFEB;
-  --bg-hover:        rgba(72, 124, 165, 0.06);
-  --border:          rgba(72, 124, 165, 0.2);
-  --border-subtle:   #E3E3DF;
+  --bg-elevated:     #F1F5F9;
+  --bg-hover:        rgba(37, 99, 235, 0.04);
+  --border:          rgba(37, 99, 235, 0.15);
+  --border-subtle:   #E2E8F0;
 
-  --text-primary:    #37352F;    /* Notion's proven dark — 18:1 contrast on white */
-  --text-secondary:  #787774;   /* Notion secondary — 4.7:1 contrast ✓ WCAG AA */
-  --text-muted:      #ACACAA;   /* Borders, placeholders only */
+  --text-primary:    #1E293B;
+  --text-secondary:  #475569;
+  --text-muted:      #94A3B8;
 
-  --accent-1:        #2383E2;   /* Notion's blue — readable on white */
-  --accent-2:        #9065B0;   /* Notion's purple */
-  --accent-glow:     rgba(35, 131, 226, 0.2);
-  --accent-glow-2:   rgba(144, 101, 176, 0.15);
+  --accent-1:        #2563EB;   /* Trust Blue */
+  --accent-2:        #7C3AED;   /* Purple accent */
+  --accent-glow:     rgba(37, 99, 235, 0.12);
+  --accent-glow-2:   rgba(124, 58, 237, 0.08);
 
-  --success:         #0F7B6C;   /* Dark green — readable on white */
-  --success-glow:    rgba(15, 123, 108, 0.2);
-  --gold:            #CB912F;   /* Dark amber — readable */
-  --gold-glow:       rgba(203, 145, 47, 0.2);
-  --danger:          #C4554D;   /* Dark red — readable */
-  --danger-glow:     rgba(196, 85, 77, 0.2);
+  --success:         #059669;
+  --success-glow:    rgba(5, 150, 105, 0.12);
+  --gold:            #D97706;
+  --gold-glow:       rgba(217, 119, 6, 0.12);
+  --danger:          #DC2626;
+  --danger-glow:     rgba(220, 38, 38, 0.12);
 
-  --gradient-brand:  linear-gradient(135deg, #2383E2 0%, #9065B0 100%);
-  --gradient-card:   linear-gradient(145deg, rgba(35,131,226,0.06), rgba(144,101,176,0.03));
-  --gradient-hero:   radial-gradient(ellipse at 20% 50%, rgba(35,131,226,0.07) 0%, transparent 60%),
-                     #F7F7F5;
-  --shimmer:         rgba(35, 131, 226, 0.1);
+  --gradient-brand:  linear-gradient(135deg, #2563EB 0%, #7C3AED 100%);
+  --gradient-card:   linear-gradient(145deg, rgba(37,99,235,0.02), rgba(124,58,237,0.01));
+  --gradient-hero:   #F8FAFC;
+  --shimmer:         rgba(37, 99, 235, 0.06);
+
+  --mesh-1:          transparent;
+  --mesh-2:          transparent;
+  --mesh-3:          transparent;
+  --mesh-animate:    0;
 }
 
-/* ── 3. NEON — Vibrant Duolingo-style ──────────────────────────── */
-[data-theme="neon"] {
-  --bg-base:         #0A0A0A;
-  --bg-card:         #141414;
-  --bg-elevated:     #1E1E1E;
-  --bg-hover:        rgba(88, 204, 2, 0.08);
-  --border:          rgba(88, 204, 2, 0.3);
-  --border-subtle:   #2A2A2A;
+/* ── 3. HORIZON — Endevo dark brand (navy + orange glow) ──────── */
+[data-theme="horizon"] {
+  --bg-base:         #020617;
+  --bg-card:         rgba(15, 23, 42, 0.8);
+  --bg-elevated:     #1E293B;
+  --bg-hover:        rgba(249, 115, 22, 0.06);
+  --border:          rgba(249, 115, 22, 0.25);
+  --border-subtle:   #1E293B;
 
-  --text-primary:    #FFFFFF;
-  --text-secondary:  #B3B3B3;
-  --text-muted:      #666666;
+  --text-primary:    #F8FAFC;
+  --text-secondary:  #94A3B8;
+  --text-muted:      #475569;
 
-  --accent-1:        #58CC02;   /* Duolingo green */
-  --accent-2:        #FF6B35;   /* Vibrant coral-orange */
-  --accent-glow:     rgba(88, 204, 2, 0.4);
-  --accent-glow-2:   rgba(255, 107, 53, 0.3);
-
-  --success:         #58CC02;
-  --success-glow:    rgba(88, 204, 2, 0.35);
-  --gold:            #FFC715;   /* Duolingo gold */
-  --gold-glow:       rgba(255, 199, 21, 0.35);
-  --danger:          #FF4B4B;
-  --danger-glow:     rgba(255, 75, 75, 0.35);
-
-  --gradient-brand:  linear-gradient(135deg, #58CC02 0%, #FFC715 50%, #FF6B35 100%);
-  --gradient-card:   linear-gradient(145deg, rgba(88,204,2,0.1), rgba(255,107,53,0.06));
-  --gradient-hero:   radial-gradient(ellipse at 20% 60%, rgba(88,204,2,0.15) 0%, transparent 50%),
-                     radial-gradient(ellipse at 80% 20%, rgba(255,107,53,0.12) 0%, transparent 50%),
-                     radial-gradient(ellipse at 60% 80%, rgba(255,199,21,0.08) 0%, transparent 40%),
-                     #0A0A0A;
-  --shimmer:         rgba(88, 204, 2, 0.15);
-}
-
-/* ── 4. NAVY NEON — Endevo signature: navy blue + orange neon ──── */
-[data-theme="navy-neon"] {
-  --bg-base:         #0A0E1A;
-  --bg-card:         #0F1628;
-  --bg-elevated:     #151D33;
-  --bg-hover:        rgba(255, 140, 0, 0.08);
-  --border:          rgba(255, 140, 0, 0.3);
-  --border-subtle:   #1E2A45;
-
-  --text-primary:    #EAEEF6;
-  --text-secondary:  #8B98B5;
-  --text-muted:      #4A5575;
-
-  --accent-1:        #FF8C00;   /* Orange neon — Endevo signature */
-  --accent-2:        #3B82F6;   /* Bright blue complement */
-  --accent-glow:     rgba(255, 140, 0, 0.45);
-  --accent-glow-2:   rgba(59, 130, 246, 0.3);
+  --accent-1:        #F97316;   /* Vibrant Orange — Endevo brand */
+  --accent-2:        #3B82F6;   /* Blue complement */
+  --accent-glow:     rgba(249, 115, 22, 0.35);
+  --accent-glow-2:   rgba(59, 130, 246, 0.2);
 
   --success:         #22D3EE;   /* Cyan neon */
-  --success-glow:    rgba(34, 211, 238, 0.35);
-  --gold:            #FFB800;
-  --gold-glow:       rgba(255, 184, 0, 0.4);
-  --danger:          #FF4757;
-  --danger-glow:     rgba(255, 71, 87, 0.35);
+  --success-glow:    rgba(34, 211, 238, 0.25);
+  --gold:            #FBBF24;
+  --gold-glow:       rgba(251, 191, 36, 0.3);
+  --danger:          #EF4444;
+  --danger-glow:     rgba(239, 68, 68, 0.3);
 
-  --gradient-brand:  linear-gradient(135deg, #FF8C00 0%, #FF6B00 50%, #3B82F6 100%);
-  --gradient-card:   linear-gradient(145deg, rgba(255,140,0,0.08), rgba(59,130,246,0.04));
-  --gradient-hero:   radial-gradient(ellipse at 20% 50%, rgba(255,140,0,0.15) 0%, transparent 50%),
-                     radial-gradient(ellipse at 80% 30%, rgba(59,130,246,0.12) 0%, transparent 50%),
-                     radial-gradient(ellipse at 50% 80%, rgba(255,184,0,0.06) 0%, transparent 40%),
-                     #0A0E1A;
-  --shimmer:         rgba(255, 140, 0, 0.2);
+  --gradient-brand:  linear-gradient(135deg, #F97316 0%, #EA580C 50%, #3B82F6 100%);
+  --gradient-card:   linear-gradient(145deg, rgba(249,115,22,0.06), rgba(59,130,246,0.03));
+  --gradient-hero:   #020617;
+  --shimmer:         rgba(249, 115, 22, 0.15);
+
+  --mesh-1:          rgba(234, 88, 12, 0.12);   /* orange glow */
+  --mesh-2:          rgba(59, 130, 246, 0.08);   /* blue glow */
+  --mesh-3:          transparent;
+  --mesh-animate:    1;
 }
 
-/* ── 5. COMPASSION — Calming bereavement mode (auto-activates for delegates) */
-[data-theme="compassion"] {
-  --bg-base:         #F5F0EB;
-  --bg-card:         #FDFBF9;
-  --bg-elevated:     #EDE7E0;
-  --bg-hover:        rgba(139, 115, 85, 0.06);
-  --border:          rgba(139, 115, 85, 0.2);
-  --border-subtle:   #E0D8CF;
+/* ── 4. SANCTUARY — Bereavement/compassion mode ───────────────── */
+[data-theme="sanctuary"] {
+  --bg-base:         #FAF7F2;
+  --bg-card:         #FFFFFF;
+  --bg-elevated:     #F5F0EB;
+  --bg-hover:        rgba(120, 113, 108, 0.04);
+  --border:          rgba(120, 113, 108, 0.12);
+  --border-subtle:   #E7E5E4;
 
-  --text-primary:    #3D3530;
-  --text-secondary:  #7A6E63;
-  --text-muted:      #B0A598;
+  --text-primary:    #3F3E3A;
+  --text-secondary:  #78716C;
+  --text-muted:      #A8A29E;
 
-  --accent-1:        #8B7355;
-  --accent-2:        #6B8F71;
-  --accent-glow:     rgba(139, 115, 85, 0.15);
-  --accent-glow-2:   rgba(107, 143, 113, 0.12);
+  --accent-1:        #78716C;   /* Calming stone */
+  --accent-2:        #6B8F71;   /* Sage green — life/hope */
+  --accent-glow:     rgba(120, 113, 108, 0.1);
+  --accent-glow-2:   rgba(107, 143, 113, 0.08);
 
   --success:         #6B8F71;
-  --success-glow:    rgba(107, 143, 113, 0.15);
-  --gold:            #C4A265;
-  --gold-glow:       rgba(196, 162, 101, 0.15);
+  --success-glow:    rgba(107, 143, 113, 0.1);
+  --gold:            #B8A078;
+  --gold-glow:       rgba(184, 160, 120, 0.1);
   --danger:          #B07070;
-  --danger-glow:     rgba(176, 112, 112, 0.15);
+  --danger-glow:     rgba(176, 112, 112, 0.1);
 
-  --gradient-brand:  linear-gradient(135deg, #8B7355 0%, #6B8F71 100%);
-  --gradient-card:   linear-gradient(145deg, rgba(139,115,85,0.04), rgba(107,143,113,0.03));
-  --gradient-hero:   radial-gradient(ellipse at 30% 50%, rgba(139,115,85,0.06) 0%, transparent 60%),
-                     #F5F0EB;
-  --shimmer:         rgba(139, 115, 85, 0.08);
+  --gradient-brand:  linear-gradient(135deg, #78716C 0%, #6B8F71 100%);
+  --gradient-card:   none;
+  --gradient-hero:   #FAF7F2;
+  --shimmer:         rgba(120, 113, 108, 0.05);
+
+  --mesh-1:          transparent;
+  --mesh-2:          transparent;
+  --mesh-3:          transparent;
+  --mesh-animate:    0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -204,16 +183,22 @@ html, body {
 
 .glass {
   background: var(--bg-card);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--border-subtle);
   border-radius: 16px;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 8px 24px rgba(0,0,0,0.12);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 16px rgba(0,0,0,0.06);
 }
 
-/* Canvas light theme: stronger shadow, no dark tint */
-[data-theme="canvas"] .glass {
-  box-shadow: 0 1px 4px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.08);
+/* Sanctuary: extra soft, no visible borders */
+[data-theme="sanctuary"] .glass {
+  border-color: transparent;
+  box-shadow: 0 1px 2px rgba(0,0,0,0.03), 0 8px 24px rgba(0,0,0,0.04);
+}
+
+/* Horizon dark: subtle glassmorphism */
+[data-theme="horizon"] .glass {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 8px 24px rgba(0,0,0,0.15);
 }
 
 .glass-elevated {
@@ -268,10 +253,12 @@ html, body {
 .btn-primary:active { transform: scale(0.98); }
 .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
 
-/* Canvas: white text button must stay readable */
-[data-theme="canvas"] .btn-primary {
+/* Light themes: white text on gradient buttons */
+[data-theme="luminous"] .btn-primary,
+[data-theme="enterprise"] .btn-primary,
+[data-theme="sanctuary"] .btn-primary {
   color: white;
-  text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+  text-shadow: 0 1px 2px rgba(0,0,0,0.15);
 }
 
 .btn-secondary {
@@ -320,14 +307,18 @@ html, body {
   background: var(--bg-card);
 }
 
-/* Canvas: ensure dark text in inputs */
-[data-theme="canvas"] .input-field {
+/* Light themes: ensure dark text in inputs */
+[data-theme="luminous"] .input-field,
+[data-theme="enterprise"] .input-field,
+[data-theme="sanctuary"] .input-field {
   background: #FFFFFF;
-  border-color: #D9D9D6;
-  color: #37352F;
+  border-color: var(--border-subtle);
+  color: var(--text-primary);
 }
 
-[data-theme="canvas"] .input-field:focus {
+[data-theme="luminous"] .input-field:focus,
+[data-theme="enterprise"] .input-field:focus,
+[data-theme="sanctuary"] .input-field:focus {
   background: #FFFFFF;
   border-color: var(--accent-1);
 }
@@ -356,60 +347,129 @@ html, body {
   border-color: var(--border-subtle);
 }
 
-/* Canvas: active nav needs visible text */
-[data-theme="canvas"] .nav-active {
+/* Light themes: readable nav */
+[data-theme="luminous"] .nav-active,
+[data-theme="enterprise"] .nav-active {
   color: var(--accent-1) !important;
-  background: rgba(35, 131, 226, 0.08);
-  border-color: rgba(35, 131, 226, 0.25);
+  background: rgba(79, 70, 229, 0.06);
+  border-color: rgba(79, 70, 229, 0.2);
   box-shadow: none;
 }
-
-[data-theme="canvas"] .nav-inactive { color: #787774 !important; }
-[data-theme="canvas"] .nav-inactive:hover { color: #37352F !important; background: rgba(0,0,0,0.04); }
-
-/* Neon: green active state */
-[data-theme="neon"] .nav-active {
-  color: #FFFFFF !important;
-  box-shadow: 0 0 16px rgba(88,204,2,0.3);
+[data-theme="enterprise"] .nav-active {
+  background: rgba(37, 99, 235, 0.06);
+  border-color: rgba(37, 99, 235, 0.2);
 }
 
-/* Navy Neon: orange neon active state + glow effects */
-[data-theme="navy-neon"] .nav-active {
-  color: #FF8C00 !important;
-  box-shadow: 0 0 18px rgba(255,140,0,0.35);
-  border-color: rgba(255,140,0,0.4);
-}
+[data-theme="luminous"] .nav-inactive,
+[data-theme="enterprise"] .nav-inactive { color: #475569 !important; }
+[data-theme="luminous"] .nav-inactive:hover,
+[data-theme="enterprise"] .nav-inactive:hover { color: #1E293B !important; background: rgba(0,0,0,0.03); }
 
-[data-theme="navy-neon"] .btn-primary {
-  box-shadow: 0 4px 20px rgba(255,140,0,0.4), 0 0 40px rgba(255,140,0,0.15);
-}
-
-[data-theme="navy-neon"] .btn-primary:hover {
-  box-shadow: 0 8px 32px rgba(255,140,0,0.5), 0 0 60px rgba(255,140,0,0.2);
-}
-
-[data-theme="navy-neon"] .glass {
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 0 20px rgba(255,140,0,0.05);
-}
-
-[data-theme="navy-neon"] .input-field:focus {
-  box-shadow: 0 0 0 3px rgba(255,140,0,0.3), 0 0 16px rgba(255,140,0,0.15);
-}
-
-/* Compassion: gentle, no harsh shadows or animations */
-[data-theme="compassion"] .nav-active {
-  color: #8B7355 !important;
+/* Sanctuary: completely muted nav */
+[data-theme="sanctuary"] .nav-active {
+  color: #3F3E3A !important;
+  background: rgba(120, 113, 108, 0.06);
+  border-color: rgba(120, 113, 108, 0.15);
   box-shadow: none;
-  border-color: rgba(139, 115, 85, 0.25);
-  background: rgba(139, 115, 85, 0.08);
+}
+[data-theme="sanctuary"] .nav-inactive { color: #78716C !important; }
+[data-theme="sanctuary"] .nav-inactive:hover { color: #3F3E3A !important; background: rgba(0,0,0,0.02); }
+
+/* Horizon: orange neon active + glow effects */
+[data-theme="horizon"] .nav-active {
+  color: #F97316 !important;
+  box-shadow: 0 0 16px rgba(249,115,22,0.3);
+  border-color: rgba(249,115,22,0.35);
 }
 
-[data-theme="compassion"] .btn-primary {
-  box-shadow: 0 2px 8px rgba(139, 115, 85, 0.15);
+[data-theme="horizon"] .btn-primary {
+  box-shadow: 0 4px 20px rgba(249,115,22,0.35), 0 0 40px rgba(249,115,22,0.1);
 }
 
-[data-theme="compassion"] .glass {
-  box-shadow: 0 1px 4px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
+[data-theme="horizon"] .btn-primary:hover {
+  box-shadow: 0 8px 32px rgba(249,115,22,0.45), 0 0 60px rgba(249,115,22,0.15);
+}
+
+[data-theme="horizon"] .input-field:focus {
+  box-shadow: 0 0 0 3px rgba(249,115,22,0.25), 0 0 12px rgba(249,115,22,0.1);
+}
+
+/* Sanctuary: zero animation, pure calm */
+[data-theme="sanctuary"] .btn-primary {
+  box-shadow: 0 2px 6px rgba(120, 113, 108, 0.1);
+}
+[data-theme="sanctuary"] .btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(120, 113, 108, 0.12);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   AMBIENT MESH GRADIENT — Animated background for Luminous + Horizon
+═══════════════════════════════════════════════════════════════════ */
+
+.ambient-mesh {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  overflow: hidden;
+}
+
+.ambient-mesh::before,
+.ambient-mesh::after,
+.ambient-mesh .mesh-orb {
+  content: '';
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(80px);
+  will-change: transform;
+}
+
+.ambient-mesh::before {
+  width: 600px; height: 600px;
+  top: -10%; left: 15%;
+  background: var(--mesh-1);
+  animation: meshFloat1 20s ease-in-out infinite;
+}
+
+.ambient-mesh::after {
+  width: 500px; height: 500px;
+  bottom: 10%; right: 10%;
+  background: var(--mesh-2);
+  animation: meshFloat2 25s ease-in-out infinite;
+}
+
+.ambient-mesh .mesh-orb {
+  width: 400px; height: 400px;
+  top: 50%; left: 50%;
+  background: var(--mesh-3);
+  animation: meshFloat3 22s ease-in-out infinite;
+}
+
+@keyframes meshFloat1 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(60px, 40px) scale(1.1); }
+  66% { transform: translate(-30px, 60px) scale(0.95); }
+}
+
+@keyframes meshFloat2 {
+  0%, 100% { transform: translate(0, 0) scale(1); }
+  33% { transform: translate(-50px, -30px) scale(1.05); }
+  66% { transform: translate(40px, -50px) scale(0.9); }
+}
+
+@keyframes meshFloat3 {
+  0%, 100% { transform: translate(-50%, -50%) scale(1); }
+  50% { transform: translate(-40%, -60%) scale(1.1); }
+}
+
+/* Respect prefers-reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  .ambient-mesh::before,
+  .ambient-mesh::after,
+  .ambient-mesh .mesh-orb {
+    animation: none !important;
+  }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
