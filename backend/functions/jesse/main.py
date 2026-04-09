@@ -80,6 +80,38 @@ OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "120"))
 
 MAX_CHAT_HISTORY = 10
 
+# Pre-compiled knowledge files — loaded ONCE at Lambda cold start
+# These files contain all of Niki's content + platform state
+# Jesse reads them instantly instead of scanning DynamoDB per request
+_KNOWLEDGE_NIKI = ""
+_KNOWLEDGE_PLATFORM = ""
+
+def _load_knowledge_files():
+    """Load pre-compiled knowledge at Lambda cold start. Zero per-request cost."""
+    global _KNOWLEDGE_NIKI, _KNOWLEDGE_PLATFORM
+    import os
+    base = os.path.dirname(os.path.abspath(__file__))
+
+    # Load compressed Niki knowledge (if exists, else fall back to platform)
+    for fname in ["knowledge_compressed.txt", "knowledge_niki.txt"]:
+        fpath = os.path.join(base, fname)
+        if os.path.exists(fpath):
+            with open(fpath, "r", encoding="utf-8") as f:
+                content = f.read()
+                # Cap at 100K chars (~25K tokens) to fit in prompt
+                _KNOWLEDGE_NIKI = content[:100000]
+                print(f"KNOWLEDGE_LOADED: {fname} ({len(_KNOWLEDGE_NIKI)} chars)")
+                break
+
+    # Load platform context (small file, always fits)
+    ppath = os.path.join(base, "knowledge_platform.txt")
+    if os.path.exists(ppath):
+        with open(ppath, "r", encoding="utf-8") as f:
+            _KNOWLEDGE_PLATFORM = f.read()
+            print(f"PLATFORM_LOADED: ({len(_KNOWLEDGE_PLATFORM)} chars)")
+
+_load_knowledge_files()
+
 VOICE_MAP = {
     "female": "Joanna",   # US English female (Neural)
     "male": "Matthew",    # US English male (Neural)
@@ -520,60 +552,30 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
 
 
 def _search_knowledge_base(query_text: str, top_k: int = 5) -> str:
-    """Search DynamoDB knowledge-base using keyword matching (fast, no embeddings).
+    """Return pre-loaded knowledge context. Zero DynamoDB scans.
 
-    DynamoDB is NOT a vector database. Full cosine scan of 7K+ items with 1024-dim
-    embeddings is too slow for Lambda (>30s). Instead, we use DynamoDB text scan
-    with a contains filter on content — fast and reliable. For production at scale,
-    migrate to OpenSearch Serverless or Bedrock Knowledge Base.
+    Strategy: 99% pre-loaded context, 1% AI formatting.
+    Knowledge files are loaded at Lambda cold start (once).
+    Each warm invocation reads from memory — speed of light.
     """
-    if not query_text or not query_text.strip():
+    if not query_text:
         return ""
 
+    # For short/simple queries, return a relevant slice of the knowledge
+    # The AI model will find the relevant parts in the context
+    if _KNOWLEDGE_NIKI:
+        return _KNOWLEDGE_NIKI
+
+    # Fallback to DynamoDB keyword search if no file loaded
     try:
-        # Extract keywords from user query (top 3 meaningful words)
-        stop_words = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
-                      "do", "does", "did", "have", "has", "had", "will", "would",
-                      "can", "could", "should", "may", "might", "shall", "to", "of",
-                      "in", "for", "on", "with", "at", "by", "from", "as", "into",
-                      "about", "what", "how", "why", "when", "where", "who", "which",
-                      "that", "this", "it", "i", "me", "my", "we", "our", "you",
-                      "your", "he", "she", "they", "them", "and", "or", "but", "not",
-                      "if", "then", "so", "no", "yes", "hi", "hello", "hey", "tell",
-                      "please", "thanks", "thank"}
-        words = [w.lower().strip(".,!?;:'\"") for w in query_text.split()
-                 if len(w) > 2 and w.lower().strip(".,!?;:'\"") not in stop_words]
-        keywords = words[:3] if words else [query_text.strip()[:50]]
-
         from boto3.dynamodb.conditions import Attr
-        all_chunks: list[str] = []
-
-        for keyword in keywords:
-            if not keyword:
-                continue
-            result = KNOWLEDGE_T.scan(
-                FilterExpression=Attr("content").contains(keyword),
-                ProjectionExpression="content",
-                Limit=200,
-            )
-            for item in result.get("Items", []):
-                c = item.get("content", "")
-                if c and c not in all_chunks:
-                    all_chunks.append(c)
-            if len(all_chunks) >= top_k * 3:
-                break
-
-        if not all_chunks:
-            # Fallback: grab any 5 random chunks for context
-            result = KNOWLEDGE_T.scan(
-                ProjectionExpression="content",
-                Limit=top_k,
-            )
-            all_chunks = [item.get("content", "") for item in result.get("Items", []) if item.get("content")]
-
-        # Return top_k most relevant (longest matches tend to be most content-rich)
-        all_chunks.sort(key=len, reverse=True)
-        return "\n\n---\n\n".join(all_chunks[:top_k])
+        result = KNOWLEDGE_T.scan(
+            FilterExpression=Attr("content").contains(query_text.split()[0] if query_text.split() else "endevo"),
+            ProjectionExpression="content",
+            Limit=5,
+        )
+        chunks = [item.get("content", "") for item in result.get("Items", []) if item.get("content")]
+        return "\n\n---\n\n".join(chunks)
     except Exception as e:
         print(f"KNOWLEDGE_SEARCH_ERROR: {e}")
         return ""
@@ -1969,6 +1971,8 @@ def _handle_copilot(body: dict, tenant_id: str, email: str, user_id: str) -> dic
     knowledge_context = "\n\n---\n\n".join(
         part for part in [kb_context, dynamo_context] if part
     )
+    if _KNOWLEDGE_PLATFORM:
+        knowledge_context = _KNOWLEDGE_PLATFORM + "\n\n" + knowledge_context
 
     # --- 4. Load POMA context for employees ---
     poma_context = ""
@@ -2137,6 +2141,8 @@ def handler(event: dict, context) -> dict:
         knowledge_context = "\n\n---\n\n".join(
             part for part in [kb_context, dynamo_context] if part
         )
+        if _KNOWLEDGE_PLATFORM:
+            knowledge_context = _KNOWLEDGE_PLATFORM + "\n\n" + knowledge_context
 
         # 4. Build system prompt
         system_prompt = _build_system_prompt(poma_context, knowledge_context)
