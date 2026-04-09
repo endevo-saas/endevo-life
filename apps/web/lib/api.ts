@@ -351,9 +351,12 @@ export interface Tenant {
   status: string
   createdAt: string
   maxSeats: number
+  employeeCount?: number
   user_count?: number
+  employee_count?: number
   hr_count?: number
   active_count?: number
+  tenantType?: string
 }
 
 export interface TenantDetail extends Tenant {

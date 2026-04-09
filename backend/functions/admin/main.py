@@ -1348,18 +1348,18 @@ def handler(event, context):
             basic_count   = sum(1 for t in all_tenants if t.get("plan") == "basic")
             premium_count = sum(1 for t in all_tenants if t.get("plan") == "premium")
 
-            # Revenue calculation — count ALL users per tenant (HR admins + employees)
+            # Revenue calculation — use employeeCount stored on tenant (already maintained by CRUD)
             mrr = 0
             for t in all_tenants:
+                if t.get("status") != "active":
+                    continue
                 plan = t.get("plan", "basic")
-                tid = t.get("tenantId", "")
-                # Count all billable users (HR_ADMIN + EMPLOYEE), not just employeeCount
-                seats = count_items(USERS_T, Attr("tenantId").eq(tid) & Attr("status").eq("active"))
-                seats = max(seats, 1)  # minimum 1 seat
-                if plan == "premium":
-                    mrr += (premium_price / 12) * seats
-                else:
-                    mrr += (basic_price / 12) * seats
+                seats = int(t.get("employeeCount", 0) or 0)
+                if seats == 0:
+                    seats = int(t.get("user_count", 0) or 0)
+                seats = max(seats, 1)  # minimum 1 seat per active tenant
+                price = premium_price if plan == "premium" else basic_price
+                mrr += (price / 12) * seats
             arr = mrr * 12
 
             # Recent subscription changes (plan changes, invoices) — last 20
@@ -2540,7 +2540,9 @@ def handler(event, context):
             for t in all_tenants:
                 tid = t.get("tenantId", "")
                 plan = t.get("plan", "basic")
-                seats = count_items(USERS_T, Attr("tenantId").eq(tid) & Attr("status").eq("active"))
+                seats = int(t.get("employeeCount", 0) or 0)
+                if seats == 0:
+                    seats = int(t.get("user_count", 0) or 0)
                 seats = max(seats, 1)
                 annual_revenue = (premium_price if plan == "premium" else basic_price) * seats
                 monthly_revenue = round(annual_revenue / 12, 2)

@@ -215,7 +215,11 @@ export default function SubscriptionsPage() {
   const activeTenants = useMemo(() => tenants.filter(t => t.status === 'active'), [tenants])
 
   const mrr = useMemo(() =>
-    activeTenants.reduce((sum, t) => sum + computeMrr(t.maxSeats || 1, t.plan), 0),
+    activeTenants.reduce((sum, t) => {
+      // Use actual user count (user_count from API), NOT maxSeats (which is the limit)
+      const seats = (t as Record<string, unknown>).user_count as number || (t as Record<string, unknown>).employee_count as number || t.employeeCount || 1
+      return sum + computeMrr(seats, t.plan)
+    }, 0),
     [activeTenants]
   )
 
@@ -247,14 +251,14 @@ export default function SubscriptionsPage() {
             ? a.name.localeCompare(b.name)
             : b.name.localeCompare(a.name)
         case 'mrr': {
-          const mrrA = computeMrr(a.maxSeats || 1, a.plan)
-          const mrrB = computeMrr(b.maxSeats || 1, b.plan)
+          const mrrA = computeMrr((a as Record<string, unknown>).user_count as number || a.employeeCount || 1, a.plan)
+          const mrrB = computeMrr((b as Record<string, unknown>).user_count as number || b.employeeCount || 1, b.plan)
           return sortAsc ? mrrA - mrrB : mrrB - mrrA
         }
         case 'seats':
           return sortAsc
-            ? (a.maxSeats || 0) - (b.maxSeats || 0)
-            : (b.maxSeats || 0) - (a.maxSeats || 0)
+            ? (a.user_count || a.employeeCount || 0) - (b.user_count || b.employeeCount || 0)
+            : (b.user_count || b.employeeCount || 0) - (a.user_count || a.employeeCount || 0)
         default:
           return 0
       }
@@ -568,7 +572,7 @@ export default function SubscriptionsPage() {
                     {paginated.map(t => {
                       const plan = getPlan(t.plan)
                       const PlanIcon = plan.icon
-                      const tenantMrr = computeMrr(t.maxSeats || 1, t.plan)
+                      const tenantMrr = computeMrr(t.user_count || t.employeeCount || 1, t.plan)
                       const seatPct = Math.min(((t.user_count || 0) / (t.maxSeats || 1)) * 100, 100)
 
                       return (
