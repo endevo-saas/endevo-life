@@ -144,12 +144,11 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
         style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)' }}>
         <div className="p-5 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-green-600/20 border border-green-500/30 rounded-xl flex items-center justify-center">
-              <Users className="w-5 h-5 text-green-400" />
-            </div>
+            <img src="/jesse/logo.png" alt="ENDevo" className="w-9 h-9 rounded-xl object-contain" />
             <div>
               <div className="text-sm font-semibold text-white">Legacy Readiness OS</div>
-              <div className="text-xs text-green-400 flex items-center gap-1">
+              <div className="text-[10px] font-bold tracking-widest text-orange-400">PLAN. PROTECT. PEACE.</div>
+              <div className="text-[9px] text-green-400 flex items-center gap-1 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" />
                 {tenantName ? `${tenantName} · HR` : 'HR Admin'}
               </div>

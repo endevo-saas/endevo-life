@@ -202,13 +202,11 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
         {/* Brand */}
         <div className="p-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center"
-              style={{ background: 'var(--gradient-brand)', boxShadow: '0 0 16px var(--accent-glow)' }}>
-              <Zap className="w-5 h-5 text-white" />
-            </div>
+            <img src="/jesse/logo.png" alt="ENDevo" className="w-9 h-9 rounded-xl object-contain" />
             <div>
               <div className="text-sm font-bold text-white">Legacy Readiness OS</div>
-              <div className="text-xs flex items-center gap-1" style={{ color: 'var(--accent-1)' }}>
+              <div className="text-[10px] font-bold tracking-widest text-orange-400">PLAN. PROTECT. PEACE.</div>
+              <div className="text-[9px] flex items-center gap-1 mt-0.5" style={{ color: 'var(--accent-1)' }}>
                 <span className="w-1.5 h-1.5 rounded-full animate-pulse inline-block" style={{ background: 'var(--success)' }} />
                 {tenantName ? `${tenantName} · Employee` : 'Employee Portal'}
               </div>

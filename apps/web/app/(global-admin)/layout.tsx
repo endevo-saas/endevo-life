@@ -230,12 +230,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* Brand */}
         <div className="p-5 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 bg-brand-600/20 border border-brand-500/30 rounded-xl flex items-center justify-center">
-              <Shield className="w-5 h-5 text-brand-400" />
-            </div>
+            <img src="/jesse/logo.png" alt="ENDevo" className="w-9 h-9 rounded-xl object-contain" />
             <div>
               <div className="text-sm font-semibold text-white">Legacy Readiness OS</div>
-              <div className="text-xs text-brand-400 flex items-center gap-1">
+              <div className="text-[10px] font-bold tracking-widest text-orange-400">PLAN. PROTECT. PEACE.</div>
+              <div className="text-[9px] text-emerald-400 flex items-center gap-1 mt-0.5">
                 <span className="w-1.5 h-1.5 rounded-full bg-green-400 inline-block animate-pulse" />
                 Global Admin
               </div>
