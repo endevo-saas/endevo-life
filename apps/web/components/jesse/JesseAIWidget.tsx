@@ -666,15 +666,19 @@ export default function JesseAIWidget() {
               <button
                 type="button"
                 onClick={toggleListening}
-                className={`flex-shrink-0 w-9 h-9 rounded-xl flex items-center justify-center transition-all ${
+                className={`flex-shrink-0 w-10 h-10 rounded-full flex items-center justify-center transition-all shadow-md ${
                   isListening
-                    ? 'bg-red-100 dark:bg-red-900/30 text-red-500 animate-pulse'
-                    : 'text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
+                    ? 'bg-red-500 text-white animate-pulse shadow-red-300 dark:shadow-red-800 ring-2 ring-red-300'
+                    : `bg-gradient-to-r ${config.gradient} text-white hover:opacity-90 hover:shadow-lg`
                 }`}
-                title={isListening ? 'Stop listening' : 'Voice input'}
-                aria-label={isListening ? 'Stop listening' : 'Voice input'}
+                title={isListening ? 'Tap to stop' : 'Tap to talk to Jesse'}
+                aria-label={isListening ? 'Stop listening' : 'Talk to Jesse'}
               >
-                <MicIcon />
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                  <line x1="12" x2="12" y1="19" y2="22" />
+                </svg>
               </button>
               <button
                 onClick={handleSend}
