@@ -62,3 +62,4 @@ _keys/
 *.pem
 *.key
 credentials
+backend/functions/jesse/knowledge_niki.txt

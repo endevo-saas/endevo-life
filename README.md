@@ -1216,9 +1216,9 @@ npx cdk deploy --all
 
 | Metric | Value |
 |--------|-------|
-| **Total git commits** | 176 |
-| **Total source files** | 170+ (Python + TypeScript + config + docs + knowledge) |
-| **Total lines of code** | 38,000+ |
+| **Total git commits** | 183+ |
+| **Total source files** | 175+ (Python + TypeScript + config + docs + knowledge) |
+| **Total lines of code** | 39,000+ |
 | **Python files (backend)** | 40 |
 | **TypeScript/TSX files (frontend)** | 85 |
 | **Folders** | 100 |
@@ -1268,15 +1268,26 @@ Jesse is not a chatbot. Jesse is Endevo's AI employee — a coworker without sal
 
 ### Jesse AI Models — Multi-Model Failover Chain
 
-| Priority | Model | Provider | Purpose | Speed |
-|----------|-------|----------|---------|-------|
-| 1 (Primary) | **Gemini 2.5 Flash Lite** | Google AI | Chat — fastest, 1M context | **1-2 sec** |
-| 2 (Fallback) | Claude Haiku 4.5 | AWS Bedrock | Chat — reliable backup | 5-10 sec |
-| 3 (Offline) | Gemma 3 4B | Ollama (self-hosted) | Emergency offline fallback | Variable |
-| — | Titan Embed V2 | AWS Bedrock | 1024-dim vector embeddings (batch) | — |
-| — | Joanna/Matthew | Amazon Polly (Neural) | Text-to-speech (female/male) | <1 sec |
+| Priority | Model | Provider | Purpose | Speed | Cost |
+|----------|-------|----------|---------|-------|------|
+| 1 (Primary) | **Amazon Nova Lite** | AWS Bedrock | Chat — fastest on AWS, 300K context | **0.5-4 sec** | $0.06/1M tokens |
+| 2 (Fallback) | **Amazon Nova Micro** | AWS Bedrock | Chat — cheapest on AWS, 128K context | **0.8-2 sec** | $0.035/1M tokens |
+| — | Titan Embed V2 | AWS Bedrock | 1024-dim vector embeddings | — | $0.02/1M tokens |
+| — | Joanna/Matthew | Amazon Polly (Neural) | Text-to-speech (female/male) | <1 sec | ~$4/1M chars |
 
-**Key rotation:** 3 Gemini API keys rotate per-request = 45 RPM free tier, zero rate limits.
+**100% AWS.** Zero external API keys. Cross-Region Inference Profiles auto-route across US regions for 99.99% availability.
+
+### Bedrock Knowledge Base (Managed RAG)
+
+| Resource | ID | Status |
+|----------|-----|--------|
+| **OpenSearch Serverless** | `ail9k9rjyiwee0i9x3rk` | ACTIVE |
+| **Knowledge Base** | `MUJXTOAKSR` | ACTIVE |
+| **S3 Data Source** | `endevo-uat-jesse-knowledge` | 29 files, 6.6MB |
+| **Guardrail** | `1k15cfpabbqa` | READY — blocks politics, religion, PII, abuse |
+| **Ingestion** | Auto-sync from S3 | Running |
+
+**How it works:** Upload content to S3 → Bedrock auto-chunks, auto-embeds, auto-indexes → Jesse searches via Converse API → Guardrails filter response → User gets safe, accurate, cited answer.
 
 ### Speed-of-Light Architecture (2026-04-09)
 
