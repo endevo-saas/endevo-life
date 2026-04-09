@@ -105,7 +105,7 @@ export default function DeveloperPortalPage() {
   const [creatingWebhook, setCreatingWebhook] = useState(false)
 
   // Events state
-  const [selectedEvent, setSelectedEvent] = useState(EVENT_TYPES[0])
+  const [selectedEvent, setSelectedEvent] = useState<string>(EVENT_TYPES[0])
   const [emitting, setEmitting] = useState(false)
 
   // Docs state
