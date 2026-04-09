@@ -26,7 +26,7 @@ export default function EmployeesPage() {
     setError('')
     try {
       const d = await api.hrEmployees()
-      setEmployees(d.employees)
+      setEmployees(d?.employees || [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load employees')
     } finally {

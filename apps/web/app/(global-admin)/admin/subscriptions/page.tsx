@@ -198,7 +198,7 @@ export default function SubscriptionsPage() {
     setError('')
     try {
       const d = await api.adminTenants()
-      setTenants(d.tenants.filter(t => t.status !== 'deleted'))
+      setTenants((d?.tenants || []).filter(t => t.status !== 'deleted'))
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load subscriptions. Showing cached data if available.')
       // Keep previous tenants data if available so cards don't go blank

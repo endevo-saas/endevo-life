@@ -22,7 +22,7 @@ export default function AssessmentPage() {
 
   useEffect(() => {
     api.employeeAssessment(courseId)
-      .then(d => setQuestions(d.questions))
+      .then(d => setQuestions(d?.questions || []))
       .catch(e => setError(e instanceof Error ? e.message : 'Failed to load assessment'))
       .finally(() => setLoading(false))
   }, [courseId])

@@ -51,7 +51,7 @@ export default function HrAuditPage() {
     setLoading(true); setError('')
     try {
       const d = await api.hrAudit()
-      setLogs(d.logs)
+      setLogs(d?.logs || [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load')
     } finally { setLoading(false) }

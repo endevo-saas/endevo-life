@@ -53,7 +53,7 @@ export default function TenantsPage() {
 
   async function load() {
     setLoading(true); setError('')
-    try { const d = await api.adminTenants(); setTenants(d.tenants as TenantFull[]) }
+    try { const d = await api.adminTenants(); setTenants((d?.tenants || []) as TenantFull[]) }
     catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed') }
     finally { setLoading(false) }
   }

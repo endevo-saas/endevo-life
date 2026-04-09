@@ -30,7 +30,7 @@ export default function CertificatesPage() {
     try {
       // Load v1 training certs
       const d = await api.employeeCertificates()
-      setCerts(d.certificates)
+      setCerts(d?.certificates || [])
 
       // Load LMS completion certs via employee progress summary endpoint
       try {

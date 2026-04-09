@@ -13,7 +13,7 @@ export default function AssessmentListPage() {
 
   useEffect(() => {
     api.employeeTraining()
-      .then(d => setCourses(d.courses))
+      .then(d => setCourses(d?.courses || []))
       .catch(e => setError(e instanceof Error ? e.message : 'Failed to load'))
       .finally(() => setLoading(false))
   }, [])

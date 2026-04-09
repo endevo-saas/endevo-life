@@ -16,7 +16,7 @@ export default function TrainingPage() {
     setError('')
     try {
       const d = await api.employeeTraining()
-      setCourses(d.courses)
+      setCourses(d?.courses || [])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load training')
     } finally {
