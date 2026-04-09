@@ -56,27 +56,18 @@ ses = boto3.client("ses", region_name=REGION)
 _secrets = boto3.client("secretsmanager", region_name=REGION)
 dynamo_client = boto3.client("dynamodb", region_name=REGION)
 
-CHAT_MODEL = os.environ.get(
-    "BEDROCK_CHAT_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-)
-PLAN_MODEL = os.environ.get(
-    "BEDROCK_PLAN_MODEL", "us.anthropic.claude-haiku-4-5-20251001-v1:0"
-)
+# Bedrock fallback — Amazon Nova Micro (ultra fast, cheapest on AWS)
+CHAT_MODEL = os.environ.get("BEDROCK_CHAT_MODEL", "amazon.nova-micro-v1:0")
+PLAN_MODEL = os.environ.get("BEDROCK_PLAN_MODEL", "amazon.nova-micro-v1:0")
 EMBED_MODEL = os.environ.get("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 
-# Gemini API — FASTEST model with key rotation for zero rate limits
+# Gemini API — PRIMARY model with key rotation for zero rate limits
 # Uses gemini-2.5-flash-lite (cheapest, fastest, 1M context)
 # Multiple keys rotate per request for 15 RPM × N keys = N×15 RPM
 _GEMINI_KEYS = [k.strip() for k in os.environ.get("GEMINI_API_KEYS", os.environ.get("GEMINI_API_KEY", "")).split(",") if k.strip()]
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
 GEMINI_ENABLED = len(_GEMINI_KEYS) > 0
 _gemini_key_index = 0
-
-# Ollama offline fallback (Gemma 4) — Jesse NEVER stops working
-OLLAMA_ENABLED = os.environ.get("OLLAMA_ENABLED", "false").lower() == "true"
-OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "gemma3:4b")
-OLLAMA_TIMEOUT = int(os.environ.get("OLLAMA_TIMEOUT", "120"))
 
 MAX_CHAT_HISTORY = 10
 
@@ -337,48 +328,6 @@ def _invoke_gemini(
     return None
 
 
-def _invoke_ollama(
-    system_prompt: str,
-    messages: list[dict],
-    max_tokens: int = 2048,
-) -> str | None:
-    """Fallback: call Gemma via Ollama self-hosted. Returns None if unavailable."""
-    if not OLLAMA_ENABLED:
-        return None
-    try:
-        from urllib.request import urlopen, Request
-        # Convert Claude message format to Ollama chat format
-        ollama_messages = [{"role": "system", "content": system_prompt}]
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if isinstance(content, list):
-                content = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
-            ollama_messages.append({"role": role, "content": content})
-
-        payload = json.dumps({
-            "model": OLLAMA_MODEL,
-            "messages": ollama_messages,
-            "stream": False,
-            "options": {"num_predict": max_tokens},
-        }).encode()
-        req = Request(
-            f"{OLLAMA_BASE_URL}/api/chat",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with urlopen(req, timeout=OLLAMA_TIMEOUT) as resp:
-            result = json.loads(resp.read())
-            text = result.get("message", {}).get("content", "")
-            if text:
-                print(f"OLLAMA_FALLBACK_SUCCESS: model={OLLAMA_MODEL}")
-                return text
-    except Exception as e:
-        print(f"OLLAMA_FALLBACK_ERROR: {e}")
-    return None
-
-
 def invoke_claude(
     system_prompt: str,
     messages: list[dict],
@@ -387,48 +336,66 @@ def invoke_claude(
 ) -> str:
     """Multi-model AI with auto-failover. Jesse NEVER stops.
 
-    Priority order:
-    1. Gemini 2.0 Flash (FASTEST — instant, 2M tokens, free tier)
-    2. AWS Bedrock Claude Haiku (reliable, paid)
-    3. Ollama Gemma 4 (offline self-hosted fallback)
+    Priority:
+    1. Gemini 2.5 Flash Lite (PRIMARY — instant, free, 1M context)
+    2. Amazon Nova Micro (FALLBACK — ultra cheap, fast, inside AWS)
     """
     # --- 1. PRIMARY: Google Gemini (fastest) ---
     if GEMINI_ENABLED:
         gemini_text = _invoke_gemini(system_prompt, messages, max_tokens)
         if gemini_text:
             return gemini_text
-        print("GEMINI_FAILED: Falling back to Bedrock...")
+        print("GEMINI_FAILED: Falling back to Bedrock Nova Micro...")
 
-    # --- 2. SECONDARY: AWS Bedrock (Claude Haiku) ---
+    # --- 2. FALLBACK: AWS Bedrock (Amazon Nova Micro) ---
+    target_model = model_id or CHAT_MODEL
     try:
-        response = bedrock.invoke_model(
-            modelId=model_id or CHAT_MODEL,
-            contentType="application/json",
-            accept="application/json",
-            body=json.dumps(
-                {
+        # Nova Micro uses Bedrock Converse API (simpler, faster)
+        converse_messages = []
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if isinstance(content, list):
+                content = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
+            converse_messages.append({
+                "role": role,
+                "content": [{"text": content}],
+            })
+        response = bedrock.converse(
+            modelId=target_model,
+            system=[{"text": system_prompt}],
+            messages=converse_messages,
+            inferenceConfig={"maxTokens": max_tokens, "temperature": 0.4},
+        )
+        text = response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
+        if text:
+            print(f"BEDROCK_NOVA_SUCCESS: model={target_model}")
+            return text
+    except Exception as e:
+        print(f"BEDROCK_NOVA_ERROR: {e}")
+        # Last resort: try Anthropic format (for Claude models)
+        try:
+            response = bedrock.invoke_model(
+                modelId="us.anthropic.claude-haiku-4-5-20251001-v1:0",
+                contentType="application/json",
+                accept="application/json",
+                body=json.dumps({
                     "anthropic_version": "bedrock-2023-05-31",
                     "max_tokens": max_tokens,
                     "system": system_prompt,
                     "messages": messages,
-                }
-            ),
-        )
-        result = json.loads(response["body"].read())
-        text = ""
-        for block in result.get("content", []):
-            if block.get("type") == "text":
-                text += block.get("text", "")
-        if text:
-            return text
-    except Exception as e:
-        print(f"BEDROCK_CLAUDE_ERROR: {e}")
-
-    # --- 3. TERTIARY: Ollama (Gemma 4 offline) ---
-    print("BEDROCK_FAILED: Attempting Ollama fallback...")
-    ollama_text = _invoke_ollama(system_prompt, messages, max_tokens)
-    if ollama_text:
-        return ollama_text
+                }),
+            )
+            result = json.loads(response["body"].read())
+            text = ""
+            for block in result.get("content", []):
+                if block.get("type") == "text":
+                    text += block.get("text", "")
+            if text:
+                print("BEDROCK_CLAUDE_LAST_RESORT_SUCCESS")
+                return text
+        except Exception as e2:
+            print(f"BEDROCK_CLAUDE_LAST_RESORT_ERROR: {e2}")
 
     return "I'm having trouble connecting right now. Please try again shortly."
 
