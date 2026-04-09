@@ -95,12 +95,13 @@ def _get_secret(name: str) -> str:
 # Bedrock Knowledge Base retrieval (cloned from Aryan's bedrock.ts)
 # ---------------------------------------------------------------------------
 def _retrieve_from_knowledge_base(query: str, top_k: int = 5) -> str:
-    """Retrieve context from Bedrock Knowledge Base (Y52P6BJVGP).
+    """Retrieve context from Bedrock Knowledge Base.
 
-    This is Aryan's ingested knowledge base containing Niki's podcasts,
-    books, transcripts, and the 87-page workbook. Falls back gracefully
-    if KB is not available.
+    NOTE: Bedrock KB Y52P6BJVGP no longer exists. All knowledge is now
+    in DynamoDB endevo-uat-knowledge-base (7,228 chunks from Niki's content).
+    This function is kept for future re-activation when a new KB is created.
     """
+    return ""  # KB deleted — all knowledge now in DynamoDB
     try:
         kb_id = _get_secret("endevo/jesse/bedrock-kb-id")
         if not kb_id:
@@ -439,46 +440,60 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
 
 
 def _search_knowledge_base(query_text: str, top_k: int = 5) -> str:
-    """Embed query, search DynamoDB knowledge-base table, return top matches.
+    """Search DynamoDB knowledge-base using keyword matching (fast, no embeddings).
 
-    Optimised: scans max 1500 items with projection to reduce data transfer.
-    At 7K+ chunks, full scan is too slow for Lambda. This samples enough
-    for good RAG quality while staying under the 30s API Gateway timeout.
+    DynamoDB is NOT a vector database. Full cosine scan of 7K+ items with 1024-dim
+    embeddings is too slow for Lambda (>30s). Instead, we use DynamoDB text scan
+    with a contains filter on content — fast and reliable. For production at scale,
+    migrate to OpenSearch Serverless or Bedrock Knowledge Base.
     """
-    query_embedding = embed_text(query_text)
-    if not query_embedding:
+    if not query_text or not query_text.strip():
         return ""
 
     try:
-        items = []
-        scan_kwargs: dict = {
-            "ProjectionExpression": "sourceFile, chunkIndex, content, embedding",
-            "Limit": 500,  # per-page limit
-        }
-        max_items = 1500  # cap total items to keep Lambda fast
-        while len(items) < max_items:
-            result = KNOWLEDGE_T.scan(**scan_kwargs)
+        # Extract keywords from user query (top 3 meaningful words)
+        stop_words = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
+                      "do", "does", "did", "have", "has", "had", "will", "would",
+                      "can", "could", "should", "may", "might", "shall", "to", "of",
+                      "in", "for", "on", "with", "at", "by", "from", "as", "into",
+                      "about", "what", "how", "why", "when", "where", "who", "which",
+                      "that", "this", "it", "i", "me", "my", "we", "our", "you",
+                      "your", "he", "she", "they", "them", "and", "or", "but", "not",
+                      "if", "then", "so", "no", "yes", "hi", "hello", "hey", "tell",
+                      "please", "thanks", "thank"}
+        words = [w.lower().strip(".,!?;:'\"") for w in query_text.split()
+                 if len(w) > 2 and w.lower().strip(".,!?;:'\"") not in stop_words]
+        keywords = words[:3] if words else [query_text.strip()[:50]]
+
+        from boto3.dynamodb.conditions import Attr
+        all_chunks: list[str] = []
+
+        for keyword in keywords:
+            if not keyword:
+                continue
+            result = KNOWLEDGE_T.scan(
+                FilterExpression=Attr("content").contains(keyword),
+                ProjectionExpression="content",
+                Limit=200,
+            )
             for item in result.get("Items", []):
-                if item.get("embedding"):
-                    items.append(item)
-            last_key = result.get("LastEvaluatedKey")
-            if not last_key:
+                c = item.get("content", "")
+                if c and c not in all_chunks:
+                    all_chunks.append(c)
+            if len(all_chunks) >= top_k * 3:
                 break
-            scan_kwargs["ExclusiveStartKey"] = last_key
 
-        if not items:
-            return ""
+        if not all_chunks:
+            # Fallback: grab any 5 random chunks for context
+            result = KNOWLEDGE_T.scan(
+                ProjectionExpression="content",
+                Limit=top_k,
+            )
+            all_chunks = [item.get("content", "") for item in result.get("Items", []) if item.get("content")]
 
-        # Score each chunk by cosine similarity
-        scored = []
-        for item in items:
-            stored_vec = [float(v) for v in item["embedding"]]
-            sim = _cosine_similarity(query_embedding, stored_vec)
-            scored.append((sim, item.get("content", "")))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top_chunks = [chunk for _, chunk in scored[:top_k]]
-        return "\n\n---\n\n".join(top_chunks)
+        # Return top_k most relevant (longest matches tend to be most content-rich)
+        all_chunks.sort(key=len, reverse=True)
+        return "\n\n---\n\n".join(all_chunks[:top_k])
     except Exception as e:
         print(f"KNOWLEDGE_SEARCH_ERROR: {e}")
         return ""
