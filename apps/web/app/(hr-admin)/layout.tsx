@@ -19,7 +19,6 @@ const navGroups = [
       { href: '/hr/dashboard',    icon: BarChart3,  label: 'Dashboard' },
       { href: '/hr/employees',    icon: Users,      label: 'Employees' },
       { href: '/hr/invite',       icon: UserPlus,   label: 'Invite Employee' },
-      { href: '/hr/certificates', icon: Award,      label: 'Certificates' },
       { href: '/hr/audit',        icon: FileText,   label: 'Audit Log' },
       { href: '/hr/archive',      icon: Archive,    label: 'Recycle Bin' },
     ],
@@ -28,6 +27,7 @@ const navGroups = [
     label: 'LMS',
     items: [
       { href: '/hr/lms/progress', icon: TrendingUp, label: 'Module Progress' },
+      { href: '/hr/certificates', icon: Award,      label: 'Certificates' },
     ],
   },
   {
@@ -144,7 +144,7 @@ export default function HrLayout({ children }: { children: React.ReactNode }) {
         style={{ background: 'var(--bg-card)', borderRight: '1px solid var(--border-subtle)' }}>
         <div className="p-5 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <img src="/jesse/logo.png" alt="ENDevo" className="w-9 h-9 rounded-xl object-contain" />
+            <img src="/jesse/logo.png" alt="ENDevo" className="w-12 h-12 rounded-xl object-contain" />
             <div>
               <div className="text-sm font-semibold text-white">Legacy Readiness OS</div>
               <div className="text-[10px] font-bold tracking-widest text-orange-400">PLAN. PROTECT. PEACE.</div>

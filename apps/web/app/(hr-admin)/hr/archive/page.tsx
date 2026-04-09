@@ -35,7 +35,7 @@ export default function HrArchivePage() {
     setError('')
     try {
       const data = await api.hrArchivedEmployees()
-      setEmployees(data.employees as unknown as ArchivedEmployee[])
+      setEmployees((data.employees ?? []) as unknown as ArchivedEmployee[])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load archived employees')
     } finally {

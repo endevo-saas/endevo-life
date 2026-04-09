@@ -17,6 +17,11 @@ const navGroups = [
     label: 'My Journey',
     items: [
       { href: '/employee/dashboard',      icon: BarChart3,     label: 'Dashboard' },
+    ],
+  },
+  {
+    label: 'LMS',
+    items: [
       { href: '/employee/lms',            icon: BookOpen,      label: 'My Modules' },
       { href: '/employee/lms/assessment', icon: ClipboardList, label: 'Readiness Assessment' },
       { href: '/employee/certificates',   icon: Award,         label: 'My Certificates' },
@@ -202,7 +207,7 @@ export default function EmployeeLayout({ children }: { children: React.ReactNode
         {/* Brand */}
         <div className="p-5" style={{ borderBottom: '1px solid var(--border-subtle)' }}>
           <div className="flex items-center gap-3">
-            <img src="/jesse/logo.png" alt="ENDevo" className="w-9 h-9 rounded-xl object-contain" />
+            <img src="/jesse/logo.png" alt="ENDevo" className="w-12 h-12 rounded-xl object-contain" />
             <div>
               <div className="text-sm font-bold text-white">Legacy Readiness OS</div>
               <div className="text-[10px] font-bold tracking-widest text-orange-400">PLAN. PROTECT. PEACE.</div>

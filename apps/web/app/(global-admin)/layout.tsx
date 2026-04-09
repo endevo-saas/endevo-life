@@ -7,7 +7,7 @@ import {
   BarChart3, Settings, CreditCard, Globe, Monitor, MapPin,
   Wifi, ChevronDown, ChevronUp, Camera, Award, BookOpen,
   ClipboardList, TrendingUp, DollarSign, Flag, Cpu, ArrowUpDown, Archive,
-  Brain
+  Brain, Zap, Cloud
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
@@ -21,8 +21,7 @@ const navGroups = [
       { href: '/admin/dashboard',     icon: BarChart3,      label: 'Dashboard' },
       { href: '/admin/tenants',       icon: Building2,      label: 'Tenants' },
       { href: '/admin/users',         icon: Users,          label: 'All Users' },
-      { href: '/admin/subscriptions', icon: CreditCard,     label: 'Subscriptions' },
-      { href: '/admin/certificates',  icon: Award,          label: 'Certificates' },
+      { href: '/admin/subscriptions', icon: CreditCard,     label: 'Billing & Plans' },
       { href: '/admin/audit',         icon: FileText,       label: 'Audit Log' },
       { href: '/admin/archive',       icon: Archive,        label: 'Recycle Bin' },
     ]
@@ -33,13 +32,13 @@ const navGroups = [
       { href: '/admin/lms/modules',   icon: BookOpen,       label: 'Modules' },
       { href: '/admin/lms/questions', icon: ClipboardList,  label: 'Questions' },
       { href: '/admin/lms/progress',  icon: TrendingUp,     label: 'User Progress' },
+      { href: '/admin/certificates',  icon: Award,          label: 'Certificates' },
       { href: '/admin/knowledge',     icon: Brain,          label: 'Knowledge Base' },
     ]
   },
   {
     label: 'Configuration',
     items: [
-      { href: '/admin/plan-config',   icon: DollarSign,     label: 'Plan & Pricing' },
       { href: '/admin/features',      icon: Flag,           label: 'Feature Flags' },
       { href: '/admin/import-export', icon: ArrowUpDown,    label: 'Import / Export' },
     ]
@@ -47,6 +46,7 @@ const navGroups = [
   {
     label: 'System',
     items: [
+      { href: '/admin/finops',        icon: Cloud,          label: 'FinOps / AWS Costs' },
       { href: '/admin/system',        icon: Cpu,            label: 'System Status' },
       { href: '/admin/health',        icon: Activity,       label: 'System Health' },
       { href: '/admin/settings',      icon: Settings,       label: 'Settings' },
@@ -232,7 +232,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* Brand */}
         <div className="p-5 border-b border-white/10">
           <div className="flex items-center gap-3">
-            <img src="/jesse/logo.png" alt="ENDevo" className="w-9 h-9 rounded-xl object-contain" />
+            <img src="/jesse/logo.png" alt="ENDevo" className="w-12 h-12 rounded-xl object-contain" />
             <div>
               <div className="text-sm font-semibold text-white">Legacy Readiness OS</div>
               <div className="text-[10px] font-bold tracking-widest text-orange-400">PLAN. PROTECT. PEACE.</div>

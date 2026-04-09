@@ -245,7 +245,11 @@ export default function HealthPage() {
     } finally { setLoading(false) }
   }, [])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    const interval = setInterval(load, 30_000)
+    return () => clearInterval(interval)
+  }, [load])
 
   const healthy  = data?.status === 'healthy'
   const services = data?.services ?? {}

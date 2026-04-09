@@ -881,7 +881,7 @@ def handler(event, context):
             "archivedBy":    u.get("archivedBy", u.get("deactivatedBy", "")),
             "archiveReason": u.get("archiveReason", ""),
         } for u in all_archived]
-        return resp(200, {"items": result_items, "count": len(result_items)})
+        return resp(200, {"employees": result_items, "count": len(result_items)})
 
     # ── POST /api/hr/archive/employees/{userId}/restore — Restore employee
     if "/archive/employees/" in path and path.endswith("/restore") and method == "POST":

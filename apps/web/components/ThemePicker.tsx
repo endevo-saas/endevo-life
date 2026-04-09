@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-export type Theme = 'eclipse' | 'canvas' | 'neon'
+export type Theme = 'eclipse' | 'canvas' | 'neon' | 'navy-neon'
 
 const THEMES: { id: Theme; label: string; desc: string; preview: string }[] = [
   {
@@ -22,6 +22,12 @@ const THEMES: { id: Theme; label: string; desc: string; preview: string }[] = [
     label: 'Neon',
     desc: 'Vibrant • Duolingo-style',
     preview: 'linear-gradient(135deg, #0A0A0A 40%, #58CC02 70%, #FF6B35 100%)',
+  },
+  {
+    id: 'navy-neon',
+    label: 'Navy Neon',
+    desc: 'Navy + Orange • Endevo',
+    preview: 'linear-gradient(135deg, #0A0E1A 40%, #FF8C00 70%, #3B82F6 100%)',
   },
 ]
 

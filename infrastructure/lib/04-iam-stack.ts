@@ -32,11 +32,28 @@ export class IamStack extends cdk.Stack {
         'dynamodb:GetItem', 'dynamodb:PutItem', 'dynamodb:UpdateItem',
         'dynamodb:DeleteItem', 'dynamodb:Query', 'dynamodb:Scan',
         'dynamodb:BatchGetItem', 'dynamodb:BatchWriteItem',
+        'dynamodb:DescribeTable',
       ],
       resources: [
         `arn:aws:dynamodb:${this.region}:${this.account}:table/endevo-uat-*`,
         `arn:aws:dynamodb:${this.region}:${this.account}:table/endevo-uat-*/index/*`,
       ],
+    }))
+
+    // Lambda — read-only access for System Status monitoring
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'LambdaReadAccess',
+      effect: iam.Effect.ALLOW,
+      actions: ['lambda:GetFunction', 'lambda:GetFunctionConfiguration'],
+      resources: [`arn:aws:lambda:${this.region}:${this.account}:function:endevo-uat-*`],
+    }))
+
+    // SES — read quota for System Health monitoring
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'SESQuotaAccess',
+      effect: iam.Effect.ALLOW,
+      actions: ['ses:GetSendQuota'],
+      resources: ['*'],
     }))
 
     // S3 — all endevo buckets (wildcard covers current + future buckets)

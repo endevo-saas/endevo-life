@@ -75,6 +75,8 @@ dynamo    = boto3.resource("dynamodb", region_name=REGION)
 ses       = boto3.client("ses", region_name=REGION)
 s3_client = boto3.client("s3", region_name=REGION)
 _secrets  = boto3.client("secretsmanager", region_name=REGION)
+ce_client = boto3.client("ce", region_name=REGION)
+events_client = boto3.client("events", region_name=REGION)
 UPLOAD_BUCKET = os.environ.get("S3_UPLOAD_BUCKET", "endevo-uat-uploads")
 CF_DOMAIN = os.environ.get("CF_DOMAIN", "")
 USERS_T          = dynamo.Table("endevo-uat-users")
@@ -86,6 +88,9 @@ VIDEO_PROGRESS_T = dynamo.Table("endevo-uat-video-progress")
 CONFIG_T         = dynamo.Table("endevo-uat-config")
 SUBSCRIPTIONS_T  = dynamo.Table("endevo-uat-subscriptions")
 SESSIONS_T       = dynamo.Table("endevo-uat-sessions")
+COSTS_T          = dynamo.Table("endevo-uat-costs")
+WEBHOOKS_T       = dynamo.Table("endevo-uat-webhooks")
+EVENT_BUS_NAME   = os.environ.get("EVENT_BUS_NAME", "endevo-uat-events")
 
 # ── Platform Config Defaults ──────────────────────────────────────────────────
 CONFIG_DEFAULTS = {
@@ -365,17 +370,33 @@ def handler(event, context):
         total_users    = count_items(USERS_T)
         active_users   = count_items(USERS_T, Attr("status").eq("active"))
         total_certs    = count_items(CERT_T)
+
+        # Subscription stats by plan
+        sub_basic   = count_items(TENANTS_T, Attr("plan").eq("basic") & Attr("status").eq("active"))
+        sub_premium = count_items(TENANTS_T, Attr("plan").eq("premium") & Attr("status").eq("active"))
+
+        # Recent audit (last 10 entries)
+        audit_result = AUDIT_T.scan(Limit=10)
+        recent_audit = sorted(audit_result.get("Items", []),
+                              key=lambda x: x.get("timestamp", ""), reverse=True)[:10]
+        recent_audit = [{"action": a.get("action", ""), "email": a.get("email", ""),
+                         "timestamp": a.get("timestamp", ""), "ip": a.get("ip", "")}
+                        for a in recent_audit]
+
         return resp(200, {
-            "total_tenants":      total_tenants,
-            "active_tenants":     active_tenants,
-            "total_users":        total_users,
-            "active_users":       active_users,
-            "locked_users":       count_items(USERS_T, Attr("status").eq("locked")),
-            "pending_users":      count_items(USERS_T, Attr("status").eq("pending")),
-            "archived_users":     count_items(USERS_T, Attr("status").eq("archived")),
-            "archived_tenants":   count_items(TENANTS_T, Attr("status").eq("archived")),
-            "total_certificates": total_certs,
-            "system_status":      "healthy"
+            "total_tenants":        total_tenants,
+            "active_tenants":       active_tenants,
+            "total_users":          total_users,
+            "active_users":         active_users,
+            "locked_users":         count_items(USERS_T, Attr("status").eq("locked")),
+            "pending_users":        count_items(USERS_T, Attr("status").eq("pending")),
+            "archived_users":       count_items(USERS_T, Attr("status").eq("archived")),
+            "archived_tenants":     count_items(TENANTS_T, Attr("status").eq("archived")),
+            "total_certificates":   total_certs,
+            "subscription_basic":   sub_basic,
+            "subscription_premium": sub_premium,
+            "recent_audit":         recent_audit,
+            "system_status":        "healthy",
         })
 
     # ── GET /api/admin/tenants ────────────────────────────────────────────
@@ -463,13 +484,19 @@ def handler(event, context):
             seq += 1
             tenant_id = f"tenant-{seq:05d}"
 
+        tenant_type = sanitize(body.get("tenantType") or "b2b", 20)
+        if tenant_type not in ("b2b", "b2c", "individual"):
+            tenant_type = "b2b"
+
         now = datetime.now(timezone.utc).isoformat()
         TENANTS_T.put_item(Item={
             "tenantId": tenant_id, "name": name, "plan": plan, "status": "active",
             "website": website, "hrContact": hr_contact, "hrEmail": hr_email,
             "createdAt": now, "createdBy": caller_email,
-            "maxSeats": max_seats, "employeeCount": 0,
-            "tenantCode": tenant_id
+            "maxSeats": 1 if tenant_type == "individual" else max_seats,
+            "employeeCount": 0,
+            "tenantCode": tenant_id,
+            "tenantType": tenant_type,
         })
 
         # Auto-create HR Admin account and send invite email
@@ -1321,11 +1348,14 @@ def handler(event, context):
             basic_count   = sum(1 for t in all_tenants if t.get("plan") == "basic")
             premium_count = sum(1 for t in all_tenants if t.get("plan") == "premium")
 
-            # Revenue calculation based on tenant plans and seat counts
+            # Revenue calculation — count ALL users per tenant (HR admins + employees)
             mrr = 0
             for t in all_tenants:
                 plan = t.get("plan", "basic")
-                seats = int(t.get("employeeCount", 0) or 0) or 1
+                tid = t.get("tenantId", "")
+                # Count all billable users (HR_ADMIN + EMPLOYEE), not just employeeCount
+                seats = count_items(USERS_T, Attr("tenantId").eq(tid) & Attr("status").eq("active"))
+                seats = max(seats, 1)  # minimum 1 seat
                 if plan == "premium":
                     mrr += (premium_price / 12) * seats
                 else:
@@ -1538,6 +1568,42 @@ def handler(event, context):
                 raise
             print(f"PLAN_CHANGE_ERROR: {e}")
             return err(500, f"Failed to change plan: {str(e)}")
+
+    # ── POST /api/admin/subscriptions/{tenantId}/cancel — Cancel subscription ─
+    if "/subscriptions/" in path and path.endswith("/cancel") and method == "POST":
+        try:
+            target_tid = path.split("/subscriptions/")[1].split("/")[0]
+            t = TENANTS_T.get_item(Key={"tenantId": target_tid}).get("Item")
+            if not t:
+                return err(404, "Tenant not found")
+            if t.get("status") == "cancelled":
+                return err(400, "Subscription already cancelled")
+            now = datetime.now(timezone.utc).isoformat()
+            reason = sanitize(body.get("reason", ""), 500) or "Cancelled by admin"
+            old_plan = t.get("plan", "basic")
+
+            TENANTS_T.update_item(Key={"tenantId": target_tid},
+                UpdateExpression="SET #s = :s, cancelledAt = :at, cancelledBy = :by, cancelReason = :r",
+                ExpressionAttributeNames={"#s": "status"},
+                ExpressionAttributeValues={
+                    ":s": "cancelled", ":at": now, ":by": caller_email, ":r": reason})
+
+            # Record cancellation in subscriptions table
+            cancel_id = f"CXL-{target_tid[-5:]}-{now[:10].replace('-','')}"
+            SUBSCRIPTIONS_T.put_item(Item={
+                "tenantId": target_tid, "sk": f"CANCEL#{cancel_id}",
+                "cancelId": cancel_id, "oldPlan": old_plan,
+                "reason": reason, "cancelledAt": now, "cancelledBy": caller_email})
+
+            audit(target_tid, caller_email, "SUBSCRIPTION_CANCELLED",
+                  json.dumps({"tenantId": target_tid, "plan": old_plan, "reason": reason}),
+                  ip=ip, device=device, severity="WARNING")
+
+            return resp(200, {
+                "message": f"Subscription cancelled for {t.get('name', target_tid)}",
+                "cancel_id": cancel_id, "cancelled_at": now})
+        except Exception as e:
+            return err(500, f"Cancel failed: {str(e)}")
 
     # ── GET /api/admin/plan-config ──────────────────────────────────────
     if path.endswith("/plan-config") and method == "GET":
@@ -2267,7 +2333,7 @@ def handler(event, context):
             "archivedBy":    u.get("archivedBy", u.get("deactivatedBy", "")),
             "archiveReason": u.get("archiveReason", ""),
         } for u in all_archived]
-        return resp(200, {"items": result_items, "count": len(result_items)})
+        return resp(200, {"users": result_items, "count": len(result_items)})
 
     # ── POST /api/admin/archive/users/{userId}/restore — Restore user ────
     if "/archive/users/" in path and path.endswith("/restore") and method == "POST":
@@ -2300,7 +2366,7 @@ def handler(event, context):
             "archiveReason": t.get("archiveReason", ""),
             "userCount":     count_items(USERS_T, Attr("tenantId").eq(t.get("tenantId", "")) & Attr("status").eq("archived")),
         } for t in all_archived]
-        return resp(200, {"items": result_items, "count": len(result_items)})
+        return resp(200, {"tenants": result_items, "count": len(result_items)})
 
     # ── POST /api/admin/archive/tenants/{tenantId}/restore — Restore tenant
     if "/archive/tenants/" in path and path.endswith("/restore") and method == "POST":
@@ -2391,5 +2457,215 @@ def handler(event, context):
             return resp(200, {"message": "Knowledge base not yet configured. Files uploaded to S3 successfully."})
         except Exception as e:
             return resp(200, {"message": f"Files saved to S3. KB sync: {str(e)[:100]}"})
+
+    # ══════════════════════════════════════════════════════════════════════
+    # ── FinOps: AWS Cost Dashboard ───────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── GET /api/admin/finops/costs — Get AWS costs (daily/monthly) ──────
+    if path.endswith("/finops/costs") and method == "GET":
+        try:
+            period = qs.get("period", "daily")  # daily | monthly
+            days = int(qs.get("days", 30))
+            days = min(days, 90)
+
+            end_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            start_date = (datetime.now(timezone.utc) - __import__("datetime").timedelta(days=days)).strftime("%Y-%m-%d")
+
+            granularity = "MONTHLY" if period == "monthly" else "DAILY"
+
+            # Get costs grouped by service
+            cost_result = ce_client.get_cost_and_usage(
+                TimePeriod={"Start": start_date, "End": end_date},
+                Granularity=granularity,
+                Metrics=["UnblendedCost", "UsageQuantity"],
+                GroupBy=[{"Type": "DIMENSION", "Key": "SERVICE"}],
+                Filter={"Tags": {"Key": "Project", "Values": ["endevo"]}},
+            )
+
+            # Parse results
+            timeline = []
+            service_totals = {}
+            grand_total = 0
+
+            for period_data in cost_result.get("ResultsByTime", []):
+                period_start = period_data["TimePeriod"]["Start"]
+                period_total = 0
+                for group in period_data.get("Groups", []):
+                    service = group["Keys"][0]
+                    amount = float(group["Metrics"]["UnblendedCost"]["Amount"])
+                    period_total += amount
+                    service_totals[service] = service_totals.get(service, 0) + amount
+                timeline.append({"date": period_start, "cost": round(period_total, 2)})
+                grand_total += period_total
+
+            # Sort services by cost descending
+            services = sorted(
+                [{"service": k, "cost": round(v, 2)} for k, v in service_totals.items()],
+                key=lambda x: x["cost"], reverse=True
+            )
+
+            # Calculate daily average
+            daily_avg = round(grand_total / max(days, 1), 2)
+            monthly_est = round(daily_avg * 30, 2)
+
+            return resp(200, {
+                "period": period,
+                "start_date": start_date,
+                "end_date": end_date,
+                "grand_total": round(grand_total, 2),
+                "daily_average": daily_avg,
+                "monthly_estimate": monthly_est,
+                "currency": "USD",
+                "timeline": timeline,
+                "services": services[:20],
+                "service_count": len(services),
+            })
+        except Exception as e:
+            return resp(200, {
+                "period": "daily", "grand_total": 0, "daily_average": 0,
+                "monthly_estimate": 0, "currency": "USD", "timeline": [],
+                "services": [], "error": f"Cost Explorer unavailable: {str(e)[:200]}",
+            })
+
+    # ── GET /api/admin/finops/margins — Per-tenant cost vs revenue ───────
+    if path.endswith("/finops/margins") and method == "GET":
+        try:
+            pricing = get_config("pricing")
+            basic_price = pricing.get("basic", {}).get("price_yearly", 299)
+            premium_price = pricing.get("premium", {}).get("price_yearly", 499)
+
+            all_tenants = scan_all(TENANTS_T, Attr("status").eq("active"))
+            margins = []
+            for t in all_tenants:
+                tid = t.get("tenantId", "")
+                plan = t.get("plan", "basic")
+                seats = count_items(USERS_T, Attr("tenantId").eq(tid) & Attr("status").eq("active"))
+                seats = max(seats, 1)
+                annual_revenue = (premium_price if plan == "premium" else basic_price) * seats
+                monthly_revenue = round(annual_revenue / 12, 2)
+
+                margins.append({
+                    "tenantId": tid,
+                    "tenantName": t.get("name", ""),
+                    "plan": plan,
+                    "seats": seats,
+                    "monthly_revenue": monthly_revenue,
+                    "annual_revenue": annual_revenue,
+                })
+
+            total_mrr = sum(m["monthly_revenue"] for m in margins)
+            total_arr = round(total_mrr * 12, 2)
+
+            return resp(200, {
+                "tenants": sorted(margins, key=lambda x: x["annual_revenue"], reverse=True),
+                "total_mrr": round(total_mrr, 2),
+                "total_arr": total_arr,
+                "tenant_count": len(margins),
+            })
+        except Exception as e:
+            return err(500, f"Margin calculation failed: {str(e)[:200]}")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # ── Webhooks & API Keys ──────────────────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── GET /api/admin/webhooks/{tenantId} — List tenant webhooks ────────
+    if "/webhooks/" in path and method == "GET" and not path.endswith("/webhooks"):
+        try:
+            target_tid = path.split("/webhooks/")[1].split("/")[0]
+            result = WEBHOOKS_T.query(KeyConditionExpression=Key("tenantId").eq(target_tid))
+            items = result.get("Items", [])
+            webhooks = [i for i in items if i.get("sk", "").startswith("WEBHOOK#")]
+            api_keys = [i for i in items if i.get("sk", "").startswith("APIKEY#")]
+            return resp(200, {"webhooks": webhooks, "api_keys": api_keys, "tenantId": target_tid})
+        except Exception as e:
+            return err(500, f"Failed to load webhooks: {str(e)[:200]}")
+
+    # ── POST /api/admin/webhooks/{tenantId} — Create webhook ─────────────
+    if "/webhooks/" in path and method == "POST" and not path.endswith("/webhooks"):
+        try:
+            target_tid = path.split("/webhooks/")[1].split("/")[0]
+            url = sanitize(body.get("url", ""), 500)
+            events = body.get("events", [])
+            if not url or not url.startswith("https://"):
+                return err(400, "Webhook URL must be HTTPS")
+            if not events:
+                return err(400, "At least one event type is required")
+
+            wh_id = f"wh-{str(uuid.uuid4())[:8]}"
+            now = datetime.now(timezone.utc).isoformat()
+            WEBHOOKS_T.put_item(Item={
+                "tenantId": target_tid, "sk": f"WEBHOOK#{wh_id}",
+                "webhookId": wh_id, "url": url, "events": events,
+                "active": True, "createdAt": now, "createdBy": caller_email,
+            })
+            audit(target_tid, caller_email, "WEBHOOK_CREATED",
+                  json.dumps({"webhookId": wh_id, "url": url, "events": events}),
+                  ip=ip, device=device)
+            return resp(200, {"message": f"Webhook {wh_id} created", "webhookId": wh_id})
+        except Exception as e:
+            return err(500, f"Failed to create webhook: {str(e)[:200]}")
+
+    # ── POST /api/admin/webhooks/{tenantId}/apikey — Generate API key ────
+    if "/webhooks/" in path and path.endswith("/apikey") and method == "POST":
+        try:
+            target_tid = path.split("/webhooks/")[1].split("/")[0]
+            label = sanitize(body.get("label", "Default"), 100)
+            api_key = f"ek_{str(uuid.uuid4()).replace('-', '')}"
+            key_id = f"ak-{str(uuid.uuid4())[:8]}"
+            now = datetime.now(timezone.utc).isoformat()
+            WEBHOOKS_T.put_item(Item={
+                "tenantId": target_tid, "sk": f"APIKEY#{key_id}",
+                "keyId": key_id, "label": label,
+                "keyPrefix": api_key[:10] + "...",
+                "keyHash": __import__("hashlib").sha256(api_key.encode()).hexdigest(),
+                "active": True, "createdAt": now, "createdBy": caller_email,
+            })
+            audit(target_tid, caller_email, "API_KEY_CREATED",
+                  json.dumps({"keyId": key_id, "label": label}),
+                  ip=ip, device=device)
+            return resp(200, {
+                "message": f"API key created for {target_tid}",
+                "keyId": key_id, "api_key": api_key,
+                "warning": "Save this key now. It will not be shown again."
+            })
+        except Exception as e:
+            return err(500, f"Failed to generate API key: {str(e)[:200]}")
+
+    # ══════════════════════════════════════════════════════════════════════
+    # ── EventBridge: Emit Platform Events ────────────────────────────────
+    # ══════════════════════════════════════════════════════════════════════
+
+    # ── POST /api/admin/events/emit — Manually emit an event (testing) ───
+    if path.endswith("/events/emit") and method == "POST":
+        try:
+            event_type = body.get("type", "")
+            event_data = body.get("data", {})
+            if not event_type:
+                return err(400, "Event type is required")
+            events_client.put_events(Entries=[{
+                "Source": "endevo.admin",
+                "DetailType": event_type,
+                "Detail": json.dumps({**event_data, "emittedBy": caller_email,
+                                       "timestamp": datetime.now(timezone.utc).isoformat()}),
+                "EventBusName": EVENT_BUS_NAME,
+            }])
+            return resp(200, {"message": f"Event '{event_type}' emitted", "bus": EVENT_BUS_NAME})
+        except Exception as e:
+            return resp(200, {"message": f"Event emit attempted: {str(e)[:200]}"})
+
+    # ── GET /api/admin/events/types — List available event types ──────────
+    if path.endswith("/events/types") and method == "GET":
+        return resp(200, {"event_types": [
+            {"type": "endevo.user.created",          "desc": "New user account created"},
+            {"type": "endevo.user.activated",        "desc": "User activated their account"},
+            {"type": "endevo.module.completed",      "desc": "Employee completed an LMS module"},
+            {"type": "endevo.assessment.completed",  "desc": "Readiness assessment finished"},
+            {"type": "endevo.certificate.issued",    "desc": "Module 6 certificate generated"},
+            {"type": "endevo.subscription.changed",  "desc": "Tenant plan changed"},
+            {"type": "endevo.subscription.cancelled", "desc": "Subscription cancelled"},
+            {"type": "endevo.tenant.created",        "desc": "New tenant provisioned"},
+        ], "bus_name": EVENT_BUS_NAME})
 
     return err(404, f"Route not found: {method} {path}")

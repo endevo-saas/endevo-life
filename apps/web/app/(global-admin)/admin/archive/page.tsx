@@ -52,8 +52,8 @@ export default function AdminArchivePage() {
         api.adminArchivedUsers(),
         api.adminArchivedTenants(),
       ])
-      setUsers(ud.users as unknown as ArchivedUser[])
-      setTenants(td.tenants as unknown as ArchivedTenant[])
+      setUsers((ud.users ?? []) as unknown as ArchivedUser[])
+      setTenants((td.tenants ?? []) as unknown as ArchivedTenant[])
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load archived records')
     } finally {

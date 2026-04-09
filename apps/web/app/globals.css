@@ -5,10 +5,11 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════════════════════════
-   ENDEVO LIFE — 3 THEMES
-   1. Eclipse  — Dark  (Linear/Vercel style)
-   2. Canvas   — Light (Notion/Apple style) — dark text on white
-   3. Neon     — Vibrant (Duolingo/Stripe style)
+   ENDEVO LIFE — 4 THEMES
+   1. Eclipse    — Dark  (Linear/Vercel style)
+   2. Canvas     — Light (Notion/Apple style) — dark text on white
+   3. Neon       — Vibrant (Duolingo/Stripe style)
+   4. Navy Neon  — Navy blue + orange neon glow (Endevo signature)
 ═══════════════════════════════════════════════════════════════════ */
 
 /* ── 1. ECLIPSE — Default dark theme ───────────────────────────── */
@@ -109,6 +110,40 @@
                      radial-gradient(ellipse at 60% 80%, rgba(255,199,21,0.08) 0%, transparent 40%),
                      #0A0A0A;
   --shimmer:         rgba(88, 204, 2, 0.15);
+}
+
+/* ── 4. NAVY NEON — Endevo signature: navy blue + orange neon ──── */
+[data-theme="navy-neon"] {
+  --bg-base:         #0A0E1A;
+  --bg-card:         #0F1628;
+  --bg-elevated:     #151D33;
+  --bg-hover:        rgba(255, 140, 0, 0.08);
+  --border:          rgba(255, 140, 0, 0.3);
+  --border-subtle:   #1E2A45;
+
+  --text-primary:    #EAEEF6;
+  --text-secondary:  #8B98B5;
+  --text-muted:      #4A5575;
+
+  --accent-1:        #FF8C00;   /* Orange neon — Endevo signature */
+  --accent-2:        #3B82F6;   /* Bright blue complement */
+  --accent-glow:     rgba(255, 140, 0, 0.45);
+  --accent-glow-2:   rgba(59, 130, 246, 0.3);
+
+  --success:         #22D3EE;   /* Cyan neon */
+  --success-glow:    rgba(34, 211, 238, 0.35);
+  --gold:            #FFB800;
+  --gold-glow:       rgba(255, 184, 0, 0.4);
+  --danger:          #FF4757;
+  --danger-glow:     rgba(255, 71, 87, 0.35);
+
+  --gradient-brand:  linear-gradient(135deg, #FF8C00 0%, #FF6B00 50%, #3B82F6 100%);
+  --gradient-card:   linear-gradient(145deg, rgba(255,140,0,0.08), rgba(59,130,246,0.04));
+  --gradient-hero:   radial-gradient(ellipse at 20% 50%, rgba(255,140,0,0.15) 0%, transparent 50%),
+                     radial-gradient(ellipse at 80% 30%, rgba(59,130,246,0.12) 0%, transparent 50%),
+                     radial-gradient(ellipse at 50% 80%, rgba(255,184,0,0.06) 0%, transparent 40%),
+                     #0A0E1A;
+  --shimmer:         rgba(255, 140, 0, 0.2);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -303,6 +338,29 @@ html, body {
 [data-theme="neon"] .nav-active {
   color: #FFFFFF !important;
   box-shadow: 0 0 16px rgba(88,204,2,0.3);
+}
+
+/* Navy Neon: orange neon active state + glow effects */
+[data-theme="navy-neon"] .nav-active {
+  color: #FF8C00 !important;
+  box-shadow: 0 0 18px rgba(255,140,0,0.35);
+  border-color: rgba(255,140,0,0.4);
+}
+
+[data-theme="navy-neon"] .btn-primary {
+  box-shadow: 0 4px 20px rgba(255,140,0,0.4), 0 0 40px rgba(255,140,0,0.15);
+}
+
+[data-theme="navy-neon"] .btn-primary:hover {
+  box-shadow: 0 8px 32px rgba(255,140,0,0.5), 0 0 60px rgba(255,140,0,0.2);
+}
+
+[data-theme="navy-neon"] .glass {
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2), 0 0 20px rgba(255,140,0,0.05);
+}
+
+[data-theme="navy-neon"] .input-field:focus {
+  box-shadow: 0 0 0 3px rgba(255,140,0,0.3), 0 0 16px rgba(255,140,0,0.15);
 }
 
 /* ═══════════════════════════════════════════════════════════════════

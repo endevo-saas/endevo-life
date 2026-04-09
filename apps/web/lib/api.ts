@@ -280,6 +280,30 @@ export const api = {
   adminUpdateFeatures: (flags: Record<string, boolean>) =>
     apiFetch<{ message: string; flags: Record<string, boolean> }>('/api/admin/features', { method: 'PUT', body: JSON.stringify(flags) }),
 
+  // FinOps — AWS Cost Dashboard
+  adminFinopsCosts: (period = 'daily', days = 30) =>
+    apiFetch<FinOpsCosts>(`/api/admin/finops/costs?period=${period}&days=${days}`),
+  adminFinopsMargins: () =>
+    apiFetch<FinOpsMargins>('/api/admin/finops/margins'),
+
+  // Webhooks & API Keys
+  adminGetWebhooks: (tenantId: string) =>
+    apiFetch<{ webhooks: Webhook[]; api_keys: ApiKey[]; tenantId: string }>(`/api/admin/webhooks/${tenantId}`),
+  adminCreateWebhook: (tenantId: string, url: string, events: string[]) =>
+    apiFetch<{ message: string; webhookId: string }>(`/api/admin/webhooks/${tenantId}`, { method: 'POST', body: JSON.stringify({ url, events }) }),
+  adminGenerateApiKey: (tenantId: string, label: string) =>
+    apiFetch<{ message: string; keyId: string; api_key: string; warning: string }>(`/api/admin/webhooks/${tenantId}/apikey`, { method: 'POST', body: JSON.stringify({ label }) }),
+
+  // Events
+  adminEmitEvent: (type: string, data: Record<string, unknown>) =>
+    apiFetch<{ message: string }>('/api/admin/events/emit', { method: 'POST', body: JSON.stringify({ type, data }) }),
+  adminEventTypes: () =>
+    apiFetch<{ event_types: { type: string; desc: string }[]; bus_name: string }>('/api/admin/events/types'),
+
+  // Cancel Subscription
+  adminCancelSubscription: (tenantId: string, reason: string) =>
+    apiFetch<{ message: string; cancel_id: string }>(`/api/admin/subscriptions/${tenantId}/cancel`, { method: 'POST', body: JSON.stringify({ reason }) }),
+
   // System Status
   adminSystemStatus: () =>
     apiFetch<SystemStatus>('/api/admin/system/status'),
@@ -640,4 +664,55 @@ export interface LambdaStatus {
   memoryMB?: number
   timeoutSec?: number
   lastModified?: string
+}
+
+// FinOps Types
+export interface FinOpsCosts {
+  period: string
+  start_date: string
+  end_date: string
+  grand_total: number
+  daily_average: number
+  monthly_estimate: number
+  currency: string
+  timeline: { date: string; cost: number }[]
+  services: { service: string; cost: number }[]
+  service_count: number
+  error?: string
+}
+
+export interface FinOpsMargins {
+  tenants: TenantMargin[]
+  total_mrr: number
+  total_arr: number
+  tenant_count: number
+}
+
+export interface TenantMargin {
+  tenantId: string
+  tenantName: string
+  plan: string
+  seats: number
+  monthly_revenue: number
+  annual_revenue: number
+}
+
+export interface Webhook {
+  tenantId: string
+  sk: string
+  webhookId: string
+  url: string
+  events: string[]
+  active: boolean
+  createdAt: string
+}
+
+export interface ApiKey {
+  tenantId: string
+  sk: string
+  keyId: string
+  label: string
+  keyPrefix: string
+  active: boolean
+  createdAt: string
 }

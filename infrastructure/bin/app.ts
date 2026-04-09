@@ -12,6 +12,8 @@ import { LmsInfraStack } from '../lib/08-lms-infra-stack'
 import { SubscriptionStack } from '../lib/09-subscription-stack'
 import { JesseStack } from '../lib/10-jesse-stack'
 import { FeaturesStack } from '../lib/11-features-stack'
+import { EventBridgeStack } from '../lib/12-eventbridge-stack'
+import { FinOpsStack } from '../lib/13-finops-stack'
 
 const app = new cdk.App()
 
@@ -71,3 +73,12 @@ new JesseStack(app, 'EndevoUatJesse', { env, tags })
 
 // Stack 11 — Plan Features + Notifications
 new FeaturesStack(app, 'EndevoUatFeatures', { env, tags })
+
+// Stack 12 — EventBridge (event-driven backbone)
+new EventBridgeStack(app, 'EndevoUatEventBridge', { env, tags })
+
+// Stack 13 — FinOps (cost tracking + webhooks)
+new FinOpsStack(app, 'EndevoUatFinOps', {
+  env, tags,
+  lambdaRole: iam.lambdaRole,
+})

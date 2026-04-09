@@ -165,25 +165,22 @@ export default function AdminDashboard() {
                 gradient="bg-gradient-to-br from-brand-600/20 to-brand-800/10 border-brand-500/30"
               />
               <StatCard
-                icon={Users} label="Total Users" value={data?.total_users ?? 0}
-                sub={`${data?.active_users ?? 0} active accounts`}
+                icon={Users} label="Users" value={data?.total_users ?? 0}
+                sub={`${data?.active_users ?? 0} active · ${data ? Math.round((data.active_users / Math.max(data.total_users, 1)) * 100) : 0}% active rate`}
                 color="text-green-400" href="/admin/users"
                 gradient="bg-gradient-to-br from-green-600/20 to-green-800/10 border-green-500/30"
               />
               <StatCard
-                icon={Activity}
-                label="Active Users"
-                value={data?.active_users ?? 0}
-                sub={`${data ? Math.round((data.active_users / Math.max(data.total_users, 1)) * 100) : 0}% of total users`}
-                color="text-cyan-400"
-                href="/admin/users"
-                gradient="bg-gradient-to-br from-cyan-600/20 to-cyan-800/10 border-cyan-500/30"
+                icon={Award} label="Certificates" value={data?.total_certificates ?? 0}
+                sub="Issued across all tenants"
+                color="text-yellow-400" href="/admin/lms/progress"
+                gradient="bg-gradient-to-br from-yellow-600/20 to-yellow-800/10 border-yellow-500/30"
               />
               <StatCard
-                icon={Award} label="Total Certificates" value={data?.total_certificates ?? 0}
-                sub="Issued across all tenants"
-                color="text-yellow-400" href="/admin/certificates"
-                gradient="bg-gradient-to-br from-yellow-600/20 to-yellow-800/10 border-yellow-500/30"
+                icon={Shield} label="System Health" value={healthy ? '100%' : 'Degraded'}
+                sub={healthy ? 'All systems operational' : 'Issues detected'}
+                color={healthy ? 'text-emerald-400' : 'text-red-400'} href="/admin/health"
+                gradient={`bg-gradient-to-br ${healthy ? 'from-emerald-600/20 to-emerald-800/10 border-emerald-500/30' : 'from-red-600/20 to-red-800/10 border-red-500/30'}`}
               />
             </>
           )}
