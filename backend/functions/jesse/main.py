@@ -264,8 +264,13 @@ def get_caller(event: dict) -> tuple:
 # ---------------------------------------------------------------------------
 # Bedrock: Claude + Titan Embed
 # ---------------------------------------------------------------------------
+# Bedrock Guardrail — blocks harmful content, PII, off-topic
+GUARDRAIL_ID = os.environ.get("BEDROCK_GUARDRAIL_ID", "1k15cfpabbqa")
+GUARDRAIL_VERSION = os.environ.get("BEDROCK_GUARDRAIL_VERSION", "DRAFT")
+
+
 def _converse(model_id: str, system_prompt: str, messages: list[dict], max_tokens: int) -> str | None:
-    """Call Bedrock Converse API — works with Nova, Mistral, Llama, Gemma."""
+    """Call Bedrock Converse API with Guardrails — Nova, Mistral, Llama, Gemma."""
     try:
         converse_messages = []
         for msg in messages:
@@ -277,12 +282,20 @@ def _converse(model_id: str, system_prompt: str, messages: list[dict], max_token
         # Nova requires first message to be 'user' — prepend if needed
         if not converse_messages or converse_messages[0]["role"] != "user":
             converse_messages.insert(0, {"role": "user", "content": [{"text": "Hello Jesse"}]})
-        response = bedrock.converse(
-            modelId=model_id,
-            system=[{"text": system_prompt}],
-            messages=converse_messages,
-            inferenceConfig={"maxTokens": max_tokens, "temperature": 0.4},
-        )
+
+        # Build call with Guardrail protection
+        call_args: dict = {
+            "modelId": model_id,
+            "system": [{"text": system_prompt}],
+            "messages": converse_messages,
+            "inferenceConfig": {"maxTokens": max_tokens, "temperature": 0.4},
+        }
+        if GUARDRAIL_ID:
+            call_args["guardrailConfig"] = {
+                "guardrailIdentifier": GUARDRAIL_ID,
+                "guardrailVersion": GUARDRAIL_VERSION,
+            }
+        response = bedrock.converse(**call_args)
         text = response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
         if text:
             print(f"BEDROCK_SUCCESS: model={model_id}")

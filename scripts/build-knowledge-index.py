@@ -26,8 +26,8 @@ OUTPUT_FILE = os.path.join(
 )
 
 # Per-source character budget (after dedup). Prose sources get more, code sources get less.
-PROSE_CHAR_BUDGET = 1000
-CODE_CHAR_BUDGET = 600
+PROSE_CHAR_BUDGET = 800
+CODE_CHAR_BUDGET = 500
 # Minimum overlap length to detect chunk-boundary duplicates
 OVERLAP_MIN = 80
 
@@ -50,21 +50,42 @@ def extract_short_name(source_path: str) -> str:
     # Handle book episodes
     m = re.match(r"Book - Before I Ghost You/Batch \d+/(.+?)\.docx$", path)
     if m:
-        return f"Book: {m.group(1)}"
+        name = m.group(1)
+        # Clean up episode names
+        name = re.sub(r"^Episode\s+", "Ep", name)
+        name = re.sub(r"^\(Transcription\)\s*", "", name)
+        return f"Book: {name}"
 
     # Handle podcast blog transcripts
     m = re.match(r"Podcast blog transcripts/(.+?)\.docx$", path)
     if m:
-        return f"Podcast: {m.group(1)}"
-
-    # Handle client transcripts
-    m = re.match(r"Book - Before I Ghost You/Batch \d+/(.+?)\.docx$", path)
-    if m:
-        return f"Client: {m.group(1)}"
+        name = m.group(1)
+        # Clean up E## prefix format
+        name = re.sub(r"^E(\d+)\s*-\s*\d+\w+\d+\s*-\s*", r"E\1: ", name)
+        return f"Podcast: {name}"
 
     # Handle jesse-v2 code
     if path.startswith("jesse-v2/"):
         return f"Jesse Code: {path}"
+
+    # Handle podcast transcripts (raw episode transcripts)
+    m = re.match(r"Podcast Transcripts/(.+?)\.docx$", path)
+    if m:
+        name = m.group(1)
+        return f"Podcast Transcript: {name}"
+
+    # Handle client transcripts (otter.ai session recordings)
+    m = re.match(r"Client Transcripts/(.+?)\.(?:pdf|docx)$", path)
+    if m:
+        name = m.group(1)
+        # Clean up otter_ai suffix and common patterns
+        name = re.sub(r"_otter_ai(\s*\(\d+\))?$", "", name)
+        name = re.sub(r"\s*\(\d+\)$", "", name)
+        # Clean date prefixes like (15Dec25)
+        name = re.sub(r"^\(\d+\w+\d+\)\s*", "", name)
+        # Clean "Copy of" prefix
+        name = re.sub(r"^Copy of\s*", "", name)
+        return f"Client: {name}"
 
     # Fallback: strip extension, use filename
     base = os.path.splitext(os.path.basename(path))[0]
@@ -237,21 +258,25 @@ def categorize_sources(sources: dict) -> dict:
     """Group sources into categories for the index."""
     categories = OrderedDict()
     categories["Book Chapters (Before I Ghost You)"] = []
-    categories["Client Stories"] = []
-    categories["Podcast Episodes"] = []
+    categories["Client Sessions"] = []
+    categories["Podcast Episodes (Blog Posts)"] = []
+    categories["Podcast Episodes (Full Transcripts)"] = []
     categories["Jesse AI Code & Docs"] = []
 
     for source_path, data in sources.items():
         short_name = data["short_name"]
-        if "Book:" in short_name or ("Book - Before I Ghost You" in source_path and "Episode" in source_path):
+        if short_name.startswith("Book:"):
             categories["Book Chapters (Before I Ghost You)"].append(data)
-        elif "Podcast:" in short_name:
-            categories["Podcast Episodes"].append(data)
-        elif "Jesse Code:" in short_name or source_path.startswith("jesse-v2/"):
+        elif short_name.startswith("Podcast Transcript:"):
+            categories["Podcast Episodes (Full Transcripts)"].append(data)
+        elif short_name.startswith("Podcast:"):
+            categories["Podcast Episodes (Blog Posts)"].append(data)
+        elif short_name.startswith("Jesse Code:") or source_path.startswith("jesse-v2/"):
             categories["Jesse AI Code & Docs"].append(data)
+        elif short_name.startswith("Client:"):
+            categories["Client Sessions"].append(data)
         else:
-            # Client stories and other book content
-            categories["Client Stories"].append(data)
+            categories["Client Sessions"].append(data)
 
     # Remove empty categories
     return OrderedDict((k, v) for k, v in categories.items() if v)

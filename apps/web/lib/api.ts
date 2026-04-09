@@ -295,6 +295,18 @@ export const api = {
       method: 'POST', body: JSON.stringify({ message, context })
     }),
 
+  // Knowledge Base
+  adminUploadKnowledge: (filename: string, contentType: string) =>
+    apiFetch<{ url: string; key: string }>('/api/admin/knowledge/upload-url', {
+      method: 'POST', body: JSON.stringify({ filename, contentType })
+    }),
+  adminListKnowledge: () =>
+    apiFetch<{ files: Array<{ key: string; size: number; lastModified: string }> }>('/api/admin/knowledge/files'),
+  adminSyncKnowledge: () =>
+    apiFetch<{ message: string }>('/api/admin/knowledge/sync', { method: 'POST' }),
+  adminDeleteKnowledge: (key: string) =>
+    apiFetch<{ message: string }>('/api/admin/knowledge/files', { method: 'DELETE', body: JSON.stringify({ key }) }),
+
   // Jesse AI
   jesseSpeakText: (text: string, voice?: 'female' | 'male') =>
     apiFetch<{ audioUrl: string | null; voice: string }>('/api/jesse/speak', {
