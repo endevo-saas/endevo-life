@@ -1216,9 +1216,9 @@ npx cdk deploy --all
 
 | Metric | Value |
 |--------|-------|
-| **Total git commits** | 170 |
-| **Total source files** | 168 (Python + TypeScript + config + docs + knowledge) |
-| **Total lines of code** | 37,625 |
+| **Total git commits** | 176 |
+| **Total source files** | 170+ (Python + TypeScript + config + docs + knowledge) |
+| **Total lines of code** | 38,000+ |
 | **Python files (backend)** | 40 |
 | **TypeScript/TSX files (frontend)** | 85 |
 | **Folders** | 100 |
@@ -1303,6 +1303,61 @@ AFTER (instant, 1-2 sec):
 - 56 podcast blog posts (polished versions)
 - 10 technical docs (scoring signals, assessment questions, RAG pipeline, SaaS integration spec)
 - **Total raw data:** 5.6 MB → **compressed to 198 KB (96.6% reduction)**
+
+### Jesse Power List — What Each Role Can Do via Chat/Voice
+
+**Super Admin (Platform Commander) — 100% Full Authority:**
+
+| # | Power | Example Command |
+|---|-------|----------------|
+| 1 | Create tenant | "Create a new tenant called Maple Financial with 50 seats on Premium" |
+| 2 | List all tenants | "Show me all tenants" |
+| 3 | Change tenant plan | "Upgrade Blue Sky Retail to Premium" |
+| 4 | Create user | "Add john@example.com as HR Admin for Maple Financial" |
+| 5 | List all users | "Show all users across all tenants" |
+| 6 | Lock/unlock user | "Lock user najiukhan86@gmail.com" |
+| 7 | Toggle feature flags | "Enable jesse_ai feature for all tenants" |
+| 8 | View platform metrics | "Show me platform overview — how many tenants and users?" |
+| 9 | Export data | "Export all tenant data" |
+| 10 | View system status | "Is the system healthy?" |
+| 11 | Manage MFA | "Enable MFA for Maple Financial" |
+| 12 | Send invitations | "Send invite to sarah@example.com for Blue Sky" |
+| 13 | Search users | "Is khak.pa@gmail.com in the system?" |
+
+**HR Admin (HR Operations) — Tenant-Scoped:**
+
+| # | Power | Example Command |
+|---|-------|----------------|
+| 1 | Create employee | "Add jane@company.com as employee" |
+| 2 | List employees | "Show me all my employees" |
+| 3 | Send invite | "Send invite to newuser@company.com" |
+| 4 | View HR metrics | "What's our activation rate?" |
+| 5 | Book coaching session | "Book a session for jane next Tuesday" |
+| 6 | View tenant info | "Show me our subscription details" |
+| 7 | Track LMS progress | "How are my employees doing on modules?" |
+
+**Employee (Legacy Guide) — Personal Benefits:**
+
+| # | Power | Example Command |
+|---|-------|----------------|
+| 1 | Learning guidance | "Help me with Module 2 Legal Foundations" |
+| 2 | Assessment help | "Explain my readiness score" |
+| 3 | Domain advice | "I scored low on Financial — what should I do?" |
+| 4 | Quiz preparation | "Help me prepare for the Digital Readiness quiz" |
+| 5 | View progress | "How many modules have I completed?" |
+| 6 | Niki's knowledge | "What does Niki say about estate planning?" |
+| 7 | Life topics | "How do I talk to my family about end-of-life planning?" |
+
+### Branding
+
+| Element | Value |
+|---------|-------|
+| **Sidebar logo** | ENDevo logo + "Legacy Readiness OS" + "PLAN. PROTECT. PEACE." |
+| **Browser tab** | "ENDevo — Legacy Readiness OS \| Plan. Protect. Peace." |
+| **Favicon** | ENDevo logo |
+| **Jesse avatar** | Real character photo (skeleton with orange hat — from Aryan's repo) |
+| **Jesse animation** | Video plays + orange neon glow when Jesse is thinking/responding |
+| **Color scheme** | Deep blue background + orange accents (matching ENDevo brand) |
 
 ---
 
