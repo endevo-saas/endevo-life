@@ -1216,9 +1216,9 @@ npx cdk deploy --all
 
 | Metric | Value |
 |--------|-------|
-| **Total git commits** | 155 |
-| **Total source files** | 155 (Python + TypeScript + config + docs) |
-| **Total lines of code** | 36,073 |
+| **Total git commits** | 170 |
+| **Total source files** | 168 (Python + TypeScript + config + docs + knowledge) |
+| **Total lines of code** | 37,625 |
 | **Python files (backend)** | 40 |
 | **TypeScript/TSX files (frontend)** | 85 |
 | **Folders** | 100 |
@@ -1230,7 +1230,7 @@ npx cdk deploy --all
 | **Shared components** | 11 (jesse, copilot, lms, theme, ui) |
 | **GitHub Actions workflows** | 3 (Lambda deploy, Amplify deploy, CDK deploy) |
 | **Documentation files** | 15 in `/docs` (173 KB) |
-| **CloudWatch alarms** | 35 |
+| **CloudWatch alarms** | 37 |
 | **Calendar days built** | 20 (March 20 - April 8, 2026) |
 | **Team size during build** | 2 active (Shahzad + AI), 3 joining |
 
@@ -1266,14 +1266,43 @@ Jesse is not a chatbot. Jesse is Endevo's AI employee — a coworker without sal
 | Page context awareness | BUILT — Knows which page you're on |
 | Markdown rendering | BUILT — Bold, lists, formatting |
 
-### Jesse AI Models
+### Jesse AI Models — Multi-Model Failover Chain
 
-| Model | Provider | Purpose | Fallback |
-|-------|----------|---------|----------|
-| Claude Haiku 4.5 | AWS Bedrock | Primary chat + plan generation | Gemma 4 via Ollama |
-| Titan Embed V2 | AWS Bedrock | 1024-dim vector embeddings | — |
-| Gemma 3 4B | Ollama (self-hosted) | Offline fallback when Bedrock fails | — |
-| Joanna/Matthew | Amazon Polly (Neural) | Text-to-speech (female/male) | — |
+| Priority | Model | Provider | Purpose | Speed |
+|----------|-------|----------|---------|-------|
+| 1 (Primary) | **Gemini 2.5 Flash Lite** | Google AI | Chat — fastest, 1M context | **1-2 sec** |
+| 2 (Fallback) | Claude Haiku 4.5 | AWS Bedrock | Chat — reliable backup | 5-10 sec |
+| 3 (Offline) | Gemma 3 4B | Ollama (self-hosted) | Emergency offline fallback | Variable |
+| — | Titan Embed V2 | AWS Bedrock | 1024-dim vector embeddings (batch) | — |
+| — | Joanna/Matthew | Amazon Polly (Neural) | Text-to-speech (female/male) | <1 sec |
+
+**Key rotation:** 3 Gemini API keys rotate per-request = 45 RPM free tier, zero rate limits.
+
+### Speed-of-Light Architecture (2026-04-09)
+
+Jesse's knowledge is **pre-compiled into files loaded at Lambda cold start** — zero database scans per request.
+
+```
+BEFORE (slow, 15-30 sec):
+  User asks → Scan 7,228 DynamoDB items → Compute cosine similarity → Call AI → Respond
+
+AFTER (instant, 1-2 sec):
+  Lambda cold start → Load knowledge_compressed.txt (198KB, once)
+  User asks → Read from RAM (0ms) → Gemini formats answer → Respond
+```
+
+| File | Size | Tokens | Content |
+|------|------|--------|---------|
+| `knowledge_compressed.txt` | 198 KB | ~48,500 | 192 sources: Niki's book, podcasts, transcripts, client sessions |
+| `knowledge_platform.txt` | 3 KB | ~744 | Live platform state: tenants, users, config, modules |
+
+**Knowledge sources ingested (192 files from Niki's library):**
+- 37 book chapters ("Before I Ghost You" — medical aid in dying, digital vaults, natural burials, death doulas, caregiving)
+- 33 client session transcripts (Julie Esposito, Ellen Oliver, Kristi Baldwin + Niki)
+- 56 podcast episodes (full transcripts)
+- 56 podcast blog posts (polished versions)
+- 10 technical docs (scoring signals, assessment questions, RAG pipeline, SaaS integration spec)
+- **Total raw data:** 5.6 MB → **compressed to 198 KB (96.6% reduction)**
 
 ---
 
@@ -1443,7 +1472,7 @@ Every archived record contains: `status='archived'`, `archivedAt`, `archivedBy`,
 - [ ] Configure API Gateway throttle limits
 - [ ] Request SES production access (exit sandbox)
 - [ ] Add security headers (HSTS, X-Frame-Options, CSP)
-- [ ] Add CloudWatch alarms for fn-lms and fn-jesse
+- [x] Add CloudWatch alarms for fn-lms and fn-jesse (DONE 2026-04-08)
 
 ### Content & Features
 - [ ] Upload Module 1 videos to S3 (Niki bringing content)
@@ -1506,12 +1535,22 @@ Every archived record contains: `status='archived'`, `archivedAt`, `archivedBy`,
 - **Missing notifications table created** (18th table). LMS health endpoint added. Amplify workflow fixed (wrong app name).
 - **Soft-delete/Recycle Bin:** No data ever permanently deleted. Users, tenants, employees go to archive with full audit trail. Restore capability for admin + HR. Cascade archive/restore for tenants.
 - **AWS hardening:** PITR enabled on 6 tables, 2 new CloudWatch alarms (37 total), API Gateway throttle configured (500 burst/200 rate), detailed metrics enabled.
+- **Knowledge base migration:** 6,887 chunks copied from Aryan's Aurora PostgreSQL (us-east-2) to our DynamoDB. 7,228 total chunks with Titan Embed V2 embeddings generated.
+- **Speed-of-light engine:** Pre-compiled knowledge into 198KB compressed file. Loaded at Lambda cold start. Zero DynamoDB scans per request.
+- **Gemini 2.5 Flash Lite:** Added as primary AI model with 3-key rotation. Response time: 1-2 seconds (was 15-30 seconds).
+- **Multi-model failover:** Gemini → Bedrock Claude Haiku → Ollama Gemma 4. Jesse NEVER stops.
+- **IAM fixes:** Bedrock cross-region inference + Polly permissions added to Lambda role.
+- **Amplify fix:** API URL not reaching Next.js build — added .env.production + api.ts fallback.
+- **Speaker fix:** Audio stops on panel minimize, ref cleanup on ended.
 
-**What we built in 20 calendar days:**
-A complete enterprise SaaS platform with 6 Lambda functions, 18 DynamoDB tables, 110+ API endpoints, 40+ frontend pages, an AI employee (Jesse) with voice and action capabilities, multi-region failover, zero-trust auth, and full CI/CD automation — with 2 people and AI.
+**What we built in 20 calendar days (170 commits, 37,625 lines):**
+A complete enterprise SaaS platform with 6 Lambda functions, 18 DynamoDB tables, 120+ API endpoints, 42+ frontend pages, an AI employee (Jesse v2) with voice I/O and action execution, multi-region failover, zero-trust auth, multi-model AI failover (Gemini → Bedrock → Ollama), pre-compiled knowledge engine (192 sources, 7,228 chunks, 198KB compressed), soft-delete recycle bin, and full CI/CD automation — with 2 people and AI.
 
 **What no competitor has:**
-An AI employee that plays 3 different roles, executes real platform operations via chat/voice, confirms before changes, audits everything, falls back to offline AI when cloud fails, discusses death and legacy with the empathy of an angel, and speaks every language the user speaks.
+An AI employee that plays 3 different roles, executes real platform operations via chat/voice, confirms before changes, audits everything, responds in 1-2 seconds using a speed-of-light pre-compiled knowledge engine, auto-failovers across 3 AI models, falls back to offline AI when cloud fails, discusses death and legacy with the empathy of an angel, knows 192 sources of Niki's content by heart, and speaks every language the user speaks.
+
+**The speed-of-light engine:**
+Jesse loads 198KB of compressed knowledge at Lambda cold start (once). Every subsequent request reads from RAM — zero database scans, zero embedding computations. Gemini 2.5 Flash Lite with 3-key rotation delivers responses in 1-2 seconds. The knowledge is 99% of the answer; the AI is just 1% — formatting Niki's wisdom into human-readable responses.
 
 ---
 
