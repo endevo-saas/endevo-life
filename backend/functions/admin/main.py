@@ -214,30 +214,11 @@ def get_caller(event):
             print(f"SESSION_LOOKUP_ERROR: {e}")
         return None, None
 
-    # WorkOS JWT — validate and look up in DynamoDB
-    try:
-        from utils.workos_auth import is_workos_token, validate_workos_token
-        if is_workos_token(token):
-            workos_user = validate_workos_token(token)
-            if workos_user:
-                email = workos_user["email"]
-                try:
-                    result = USERS_T.query(
-                        IndexName="email-index",
-                        KeyConditionExpression=Key("email").eq(email),
-                    )
-                    items = result.get("Items", [])
-                    if items:
-                        if items[0].get("status") == "archived":
-                            return None, None
-                        return items[0].get("role"), email
-                except Exception as e:
-                    print(f"WORKOS_ADMIN_DB_ERROR: {e}")
-                return None, email
-        return None, None
-    except ImportError:
-        print("CRITICAL: workos_auth module not available")
-        return None, None
+    # SECURITY: JWT path removed — unverified JWT tokens are not accepted.
+    # All authentication MUST go through the DynamoDB session token path (endevo_*).
+    # WorkOS JWTs lack RSA signature verification and can be forged.
+    print(f"AUTH_REJECTED: Non-session token presented to admin endpoint")
+    return None, None
 
 def sanitize(value, max_len=200):
     """Strip whitespace, remove ALL HTML tags, limit length, block XSS patterns."""

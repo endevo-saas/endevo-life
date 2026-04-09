@@ -78,15 +78,23 @@ def is_workos_token(token: str) -> bool:
 
 
 def validate_workos_token(token: str) -> Optional[dict]:
-    """Validate a WorkOS JWT and return user info.
+    """DEPRECATED — Do NOT use for authentication decisions.
+
+    This function decodes JWT claims WITHOUT verifying the RSA signature,
+    meaning any attacker can forge a token with arbitrary claims (including
+    GLOBAL_ADMIN role). All Lambda auth paths now use the DynamoDB session
+    token (endevo_*) exclusively.
+
+    This function is retained only for non-auth diagnostic/logging purposes.
+    It will be removed in a future cleanup pass.
 
     Returns dict with: email, sub (workos user id), org_id, provider
-    Returns None if validation fails.
-
-    NOTE: In production, use proper RSA signature verification with JWKS.
-    For the shadow migration phase, we decode and verify claims only.
-    Full cryptographic verification will be added when WorkOS keys are configured.
+    Returns None if decode fails.
     """
+    logger.warning(
+        "SECURITY: validate_workos_token called — this function does NOT verify "
+        "RSA signatures and MUST NOT be used for authentication decisions."
+    )
     try:
         header, payload = _decode_jwt_unverified(token)
 

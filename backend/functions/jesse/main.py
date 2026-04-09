@@ -235,30 +235,10 @@ def get_caller(event: dict) -> tuple:
             print(f"SESSION_LOOKUP_ERROR: {e}")
         return None, None, None
 
-    # WorkOS JWT fallback
-    try:
-        from utils.workos_auth import is_workos_token, validate_workos_token
-
-        if is_workos_token(token):
-            workos_user = validate_workos_token(token)
-            if workos_user:
-                email = workos_user["email"]
-                try:
-                    from boto3.dynamodb.conditions import Key as _Key
-
-                    result = USERS_T.query(
-                        IndexName="email-index",
-                        KeyConditionExpression=_Key("email").eq(email),
-                    )
-                    items = result.get("Items", [])
-                    if items:
-                        u = items[0]
-                        return u.get("tenantId"), email, u.get("userId", "")
-                except Exception as e:
-                    print(f"WORKOS_JESSE_DB_ERROR: {e}")
-            return None, None, None
-    except ImportError:
-        pass
+    # SECURITY: JWT path removed — unverified JWT tokens are not accepted.
+    # All authentication MUST go through the DynamoDB session token path (endevo_*).
+    # WorkOS JWTs lack RSA signature verification and can be forged.
+    print(f"AUTH_REJECTED: Non-session token presented to Jesse endpoint")
     return None, None, None
 
 

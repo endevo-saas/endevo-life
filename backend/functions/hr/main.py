@@ -138,32 +138,11 @@ def get_caller(event):
             print(f"SESSION_LOOKUP_ERROR: {e}")
         return None, None, None
 
-    # WorkOS JWT fallback
-    try:
-        from utils.workos_auth import is_workos_token, validate_workos_token
-        if not is_workos_token(token):
-            return None, None, None
-        workos_user = validate_workos_token(token)
-        if not workos_user:
-            return None, None, None
-        email = workos_user["email"]
-        try:
-            from boto3.dynamodb.conditions import Key as _Key
-            result = USERS_T.query(
-                IndexName="email-index",
-                KeyConditionExpression=_Key("email").eq(email),
-            )
-            items = result.get("Items", [])
-            if items:
-                u = items[0]
-                if u.get("status") in ("inactive", "archived"):
-                    return None, None, None
-                return u.get("tenantId"), u.get("role"), email
-        except Exception as e:
-            print(f"WORKOS_HR_DB_ERROR: {e}")
-        return None, None, None
-    except ImportError:
-        return None, None, None
+    # SECURITY: JWT path removed — unverified JWT tokens are not accepted.
+    # All authentication MUST go through the DynamoDB session token path (endevo_*).
+    # WorkOS JWTs lack RSA signature verification and can be forged.
+    print(f"AUTH_REJECTED: Non-session token presented to HR endpoint")
+    return None, None, None
 
 def sanitize(value, max_len=200):
     if not isinstance(value, str):
