@@ -64,10 +64,13 @@ PLAN_MODEL = os.environ.get(
 )
 EMBED_MODEL = os.environ.get("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 
-# Gemini API — FASTEST model, primary for chat when GEMINI_API_KEY is set
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
-GEMINI_ENABLED = bool(GEMINI_API_KEY)
+# Gemini API — FASTEST model with key rotation for zero rate limits
+# Uses gemini-2.5-flash-lite (cheapest, fastest, 1M context)
+# Multiple keys rotate per request for 15 RPM × N keys = N×15 RPM
+_GEMINI_KEYS = [k.strip() for k in os.environ.get("GEMINI_API_KEYS", os.environ.get("GEMINI_API_KEY", "")).split(",") if k.strip()]
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
+GEMINI_ENABLED = len(_GEMINI_KEYS) > 0
+_gemini_key_index = 0
 
 # Ollama offline fallback (Gemma 4) — Jesse NEVER stops working
 OLLAMA_ENABLED = os.environ.get("OLLAMA_ENABLED", "false").lower() == "true"
@@ -246,42 +249,59 @@ def get_caller(event: dict) -> tuple:
 def _invoke_gemini(
     system_prompt: str,
     messages: list[dict],
-    max_tokens: int = 2048,
+    max_tokens: int = 512,
 ) -> str | None:
-    """PRIMARY fast model: Google Gemini 2.0 Flash via REST API.
-    2M token context, instant responses, free tier = 15 RPM / 1M tokens/day.
+    """PRIMARY fast model: Gemini 2.5 Flash Lite with rotating keys.
+
+    Strategy: 99% context (Niki's KB data), 1% AI (just format the answer).
+    Ultra-compressed: max 512 output tokens, low temperature for consistency.
+    Key rotation: cycles through N keys for N×15 = 45+ RPM free tier.
     """
     if not GEMINI_ENABLED:
         return None
-    try:
-        from urllib.request import urlopen, Request
-        # Convert Claude messages to Gemini format
-        contents = []
-        for msg in messages:
-            role = "user" if msg.get("role") == "user" else "model"
-            text = msg.get("content", "")
-            if isinstance(text, list):
-                text = " ".join(b.get("text", "") for b in text if b.get("type") == "text")
-            contents.append({"role": role, "parts": [{"text": text}]})
 
-        payload = json.dumps({
-            "system_instruction": {"parts": [{"text": system_prompt}]},
-            "contents": contents,
-            "generationConfig": {
-                "maxOutputTokens": max_tokens,
-                "temperature": 0.7,
-            },
-        }).encode()
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
-        req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-        with urlopen(req, timeout=25) as resp:
-            result = json.loads(resp.read())
-            text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-            if text:
-                print(f"GEMINI_SUCCESS: model={GEMINI_MODEL}")
-                return text
-    except Exception as e:
-        print(f"GEMINI_ERROR: {e}")
+    global _gemini_key_index
+    from urllib.request import urlopen, Request
+
+    # Convert Claude messages to Gemini format
+    contents = []
+    for msg in messages:
+        role = "user" if msg.get("role") == "user" else "model"
+        text = msg.get("content", "")
+        if isinstance(text, list):
+            text = " ".join(b.get("text", "") for b in text if b.get("type") == "text")
+        contents.append({"role": role, "parts": [{"text": text}]})
+
+    payload = json.dumps({
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": contents,
+        "generationConfig": {
+            "maxOutputTokens": max_tokens,
+            "temperature": 0.4,  # Low temp = consistent, factual answers from KB
+        },
+    }).encode()
+
+    # Try each key until one works (rotation for rate limit avoidance)
+    attempts = len(_GEMINI_KEYS)
+    for _ in range(attempts):
+        key = _GEMINI_KEYS[_gemini_key_index % len(_GEMINI_KEYS)]
+        _gemini_key_index += 1
+        try:
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={key}"
+            req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+            with urlopen(req, timeout=15) as resp:
+                result = json.loads(resp.read())
+                text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                if text:
+                    print(f"GEMINI_SUCCESS: model={GEMINI_MODEL} key_idx={(_gemini_key_index-1) % len(_GEMINI_KEYS)}")
+                    return text
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str:
+                print(f"GEMINI_RATE_LIMITED: key_idx={(_gemini_key_index-1) % len(_GEMINI_KEYS)}, trying next...")
+                continue
+            print(f"GEMINI_ERROR: {e}")
+            break
     return None
 
 
