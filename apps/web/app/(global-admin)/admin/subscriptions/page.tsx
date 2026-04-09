@@ -216,8 +216,7 @@ export default function SubscriptionsPage() {
 
   const mrr = useMemo(() =>
     activeTenants.reduce((sum, t) => {
-      // Use actual user count (user_count from API), NOT maxSeats (which is the limit)
-      const seats = (t as Record<string, unknown>).user_count as number || (t as Record<string, unknown>).employee_count as number || t.employeeCount || 1
+      const seats = t.user_count || t.employee_count || t.employeeCount || 1
       return sum + computeMrr(seats, t.plan)
     }, 0),
     [activeTenants]
@@ -251,8 +250,8 @@ export default function SubscriptionsPage() {
             ? a.name.localeCompare(b.name)
             : b.name.localeCompare(a.name)
         case 'mrr': {
-          const mrrA = computeMrr((a as Record<string, unknown>).user_count as number || a.employeeCount || 1, a.plan)
-          const mrrB = computeMrr((b as Record<string, unknown>).user_count as number || b.employeeCount || 1, b.plan)
+          const mrrA = computeMrr(a.user_count || a.employee_count || a.employeeCount || 1, a.plan)
+          const mrrB = computeMrr(b.user_count || b.employee_count || b.employeeCount || 1, b.plan)
           return sortAsc ? mrrA - mrrB : mrrB - mrrA
         }
         case 'seats':
