@@ -56,18 +56,13 @@ ses = boto3.client("ses", region_name=REGION)
 _secrets = boto3.client("secretsmanager", region_name=REGION)
 dynamo_client = boto3.client("dynamodb", region_name=REGION)
 
-# Bedrock fallback — Amazon Nova Micro (ultra fast, cheapest on AWS)
-CHAT_MODEL = os.environ.get("BEDROCK_CHAT_MODEL", "amazon.nova-micro-v1:0")
-PLAN_MODEL = os.environ.get("BEDROCK_PLAN_MODEL", "amazon.nova-micro-v1:0")
+# AWS Bedrock ONLY — 100% inside AWS, zero external dependencies
+# Primary: Nova Lite (0.53s, $0.06/1M tokens, 300K context)
+# Fallback: Nova Micro (0.83s, $0.035/1M tokens, 128K context)
+CHAT_MODEL = os.environ.get("BEDROCK_CHAT_MODEL", "amazon.nova-lite-v1:0")
+CHAT_MODEL_FALLBACK = os.environ.get("BEDROCK_CHAT_FALLBACK", "amazon.nova-micro-v1:0")
+PLAN_MODEL = os.environ.get("BEDROCK_PLAN_MODEL", "amazon.nova-lite-v1:0")
 EMBED_MODEL = os.environ.get("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
-
-# Gemini API — PRIMARY model with key rotation for zero rate limits
-# Uses gemini-2.5-flash-lite (cheapest, fastest, 1M context)
-# Multiple keys rotate per request for 15 RPM × N keys = N×15 RPM
-_GEMINI_KEYS = [k.strip() for k in os.environ.get("GEMINI_API_KEYS", os.environ.get("GEMINI_API_KEY", "")).split(",") if k.strip()]
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash-lite")
-GEMINI_ENABLED = len(_GEMINI_KEYS) > 0
-_gemini_key_index = 0
 
 MAX_CHAT_HISTORY = 10
 
@@ -269,133 +264,53 @@ def get_caller(event: dict) -> tuple:
 # ---------------------------------------------------------------------------
 # Bedrock: Claude + Titan Embed
 # ---------------------------------------------------------------------------
-def _invoke_gemini(
-    system_prompt: str,
-    messages: list[dict],
-    max_tokens: int = 512,
-) -> str | None:
-    """PRIMARY fast model: Gemini 2.5 Flash Lite with rotating keys.
-
-    Strategy: 99% context (Niki's KB data), 1% AI (just format the answer).
-    Ultra-compressed: max 512 output tokens, low temperature for consistency.
-    Key rotation: cycles through N keys for N×15 = 45+ RPM free tier.
-    """
-    if not GEMINI_ENABLED:
-        return None
-
-    global _gemini_key_index
-    from urllib.request import urlopen, Request
-
-    # Convert Claude messages to Gemini format
-    contents = []
-    for msg in messages:
-        role = "user" if msg.get("role") == "user" else "model"
-        text = msg.get("content", "")
-        if isinstance(text, list):
-            text = " ".join(b.get("text", "") for b in text if b.get("type") == "text")
-        contents.append({"role": role, "parts": [{"text": text}]})
-
-    payload = json.dumps({
-        "system_instruction": {"parts": [{"text": system_prompt}]},
-        "contents": contents,
-        "generationConfig": {
-            "maxOutputTokens": max_tokens,
-            "temperature": 0.4,  # Low temp = consistent, factual answers from KB
-        },
-    }).encode()
-
-    # Try each key until one works (rotation for rate limit avoidance)
-    attempts = len(_GEMINI_KEYS)
-    for _ in range(attempts):
-        key = _GEMINI_KEYS[_gemini_key_index % len(_GEMINI_KEYS)]
-        _gemini_key_index += 1
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={key}"
-            req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
-            with urlopen(req, timeout=15) as resp:
-                result = json.loads(resp.read())
-                text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
-                if text:
-                    print(f"GEMINI_SUCCESS: model={GEMINI_MODEL} key_idx={(_gemini_key_index-1) % len(_GEMINI_KEYS)}")
-                    return text
-        except Exception as e:
-            err_str = str(e)
-            if "429" in err_str:
-                print(f"GEMINI_RATE_LIMITED: key_idx={(_gemini_key_index-1) % len(_GEMINI_KEYS)}, trying next...")
-                continue
-            print(f"GEMINI_ERROR: {e}")
-            break
-    return None
-
-
-def invoke_claude(
-    system_prompt: str,
-    messages: list[dict],
-    max_tokens: int = 2048,
-    model_id: str | None = None,
-) -> str:
-    """Multi-model AI with auto-failover. Jesse NEVER stops.
-
-    Priority:
-    1. Gemini 2.5 Flash Lite (PRIMARY — instant, free, 1M context)
-    2. Amazon Nova Micro (FALLBACK — ultra cheap, fast, inside AWS)
-    """
-    # --- 1. PRIMARY: Google Gemini (fastest) ---
-    if GEMINI_ENABLED:
-        gemini_text = _invoke_gemini(system_prompt, messages, max_tokens)
-        if gemini_text:
-            return gemini_text
-        print("GEMINI_FAILED: Falling back to Bedrock Nova Micro...")
-
-    # --- 2. FALLBACK: AWS Bedrock (Amazon Nova Micro) ---
-    target_model = model_id or CHAT_MODEL
+def _converse(model_id: str, system_prompt: str, messages: list[dict], max_tokens: int) -> str | None:
+    """Call Bedrock Converse API — works with Nova, Mistral, Llama, Gemma."""
     try:
-        # Nova Micro uses Bedrock Converse API (simpler, faster)
         converse_messages = []
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
             if isinstance(content, list):
                 content = " ".join(b.get("text", "") for b in content if b.get("type") == "text")
-            converse_messages.append({
-                "role": role,
-                "content": [{"text": content}],
-            })
+            converse_messages.append({"role": role, "content": [{"text": content}]})
         response = bedrock.converse(
-            modelId=target_model,
+            modelId=model_id,
             system=[{"text": system_prompt}],
             messages=converse_messages,
             inferenceConfig={"maxTokens": max_tokens, "temperature": 0.4},
         )
         text = response.get("output", {}).get("message", {}).get("content", [{}])[0].get("text", "")
         if text:
-            print(f"BEDROCK_NOVA_SUCCESS: model={target_model}")
+            print(f"BEDROCK_SUCCESS: model={model_id}")
             return text
     except Exception as e:
-        print(f"BEDROCK_NOVA_ERROR: {e}")
-        # Last resort: try Anthropic format (for Claude models)
-        try:
-            response = bedrock.invoke_model(
-                modelId="us.anthropic.claude-haiku-4-5-20251001-v1:0",
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps({
-                    "anthropic_version": "bedrock-2023-05-31",
-                    "max_tokens": max_tokens,
-                    "system": system_prompt,
-                    "messages": messages,
-                }),
-            )
-            result = json.loads(response["body"].read())
-            text = ""
-            for block in result.get("content", []):
-                if block.get("type") == "text":
-                    text += block.get("text", "")
-            if text:
-                print("BEDROCK_CLAUDE_LAST_RESORT_SUCCESS")
-                return text
-        except Exception as e2:
-            print(f"BEDROCK_CLAUDE_LAST_RESORT_ERROR: {e2}")
+        print(f"BEDROCK_ERROR ({model_id}): {e}")
+    return None
+
+
+def invoke_claude(
+    system_prompt: str,
+    messages: list[dict],
+    max_tokens: int = 512,
+    model_id: str | None = None,
+) -> str:
+    """100% AWS Bedrock — zero external dependencies. Jesse NEVER stops.
+
+    Priority:
+    1. Amazon Nova Lite (PRIMARY — 0.53s, $0.06/1M, 300K context)
+    2. Amazon Nova Micro (FALLBACK — 0.83s, $0.035/1M, 128K context)
+    """
+    # --- 1. PRIMARY: Amazon Nova Lite (fastest on Bedrock) ---
+    text = _converse(model_id or CHAT_MODEL, system_prompt, messages, max_tokens)
+    if text:
+        return text
+
+    # --- 2. FALLBACK: Amazon Nova Micro (cheapest on Bedrock) ---
+    print("NOVA_LITE_FAILED: Trying Nova Micro...")
+    text = _converse(CHAT_MODEL_FALLBACK, system_prompt, messages, max_tokens)
+    if text:
+        return text
 
     return "I'm having trouble connecting right now. Please try again shortly."
 
