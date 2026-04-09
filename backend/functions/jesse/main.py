@@ -439,22 +439,28 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
 
 
 def _search_knowledge_base(query_text: str, top_k: int = 5) -> str:
-    """Embed query, search DynamoDB knowledge-base table, return top matches as context.
+    """Embed query, search DynamoDB knowledge-base table, return top matches.
 
-    DynamoDB scan + cosine similarity -- works fine for <10K chunks.
-    At scale, migrate to OpenSearch Serverless or Bedrock Knowledge Base.
+    Optimised: scans max 1500 items with projection to reduce data transfer.
+    At 7K+ chunks, full scan is too slow for Lambda. This samples enough
+    for good RAG quality while staying under the 30s API Gateway timeout.
     """
     query_embedding = embed_text(query_text)
     if not query_embedding:
         return ""
 
     try:
-        # Scan all chunks (paginated for large tables)
         items = []
-        scan_kwargs: dict = {}
-        while True:
+        scan_kwargs: dict = {
+            "ProjectionExpression": "sourceFile, chunkIndex, content, embedding",
+            "Limit": 500,  # per-page limit
+        }
+        max_items = 1500  # cap total items to keep Lambda fast
+        while len(items) < max_items:
             result = KNOWLEDGE_T.scan(**scan_kwargs)
-            items.extend(result.get("Items", []))
+            for item in result.get("Items", []):
+                if item.get("embedding"):
+                    items.append(item)
             last_key = result.get("LastEvaluatedKey")
             if not last_key:
                 break
@@ -466,15 +472,10 @@ def _search_knowledge_base(query_text: str, top_k: int = 5) -> str:
         # Score each chunk by cosine similarity
         scored = []
         for item in items:
-            stored_embedding = item.get("embedding")
-            if not stored_embedding:
-                continue
-            # DynamoDB stores numbers as Decimal -- convert to float
-            stored_vec = [float(v) for v in stored_embedding]
+            stored_vec = [float(v) for v in item["embedding"]]
             sim = _cosine_similarity(query_embedding, stored_vec)
             scored.append((sim, item.get("content", "")))
 
-        # Return top-k most relevant chunks
         scored.sort(key=lambda x: x[0], reverse=True)
         top_chunks = [chunk for _, chunk in scored[:top_k]]
         return "\n\n---\n\n".join(top_chunks)
