@@ -100,11 +100,8 @@ new KmsStack(app, 'EndevoUatKms', {
 // Stack 15 — CloudFront + WAF (API Gateway security shield)
 new CloudFrontApiStack(app, 'EndevoUatCloudFrontApi', { env, tags })
 
-// Stack 16 — SQS Email Queue (SES throttle protection)
-new EmailQueueStack(app, 'EndevoUatEmailQueue', {
-  env, tags,
-  lambdaRole: iam.lambdaRole,
-})
+// Stack 16 — SQS Email Queue — DISABLED (cyclic dep with IAM, needs standalone role)
+// new EmailQueueStack(app, 'EndevoUatEmailQueue', { env, tags, lambdaRole: iam.lambdaRole })
 
 // Stack 17 — Observability (CloudWatch error alarms for all Lambdas)
 new ObservabilityStack(app, 'EndevoUatObservability', { env, tags })
