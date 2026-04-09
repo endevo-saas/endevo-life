@@ -346,6 +346,7 @@ export default function JesseAIWidget() {
   const [isListening, setIsListening] = useState(false)
   const [voiceEnabled, setVoiceEnabled] = useState(true)
   const [voiceGender, setVoiceGender] = useState<'female' | 'male'>('female')
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   /* ---- refs ---- */
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -450,20 +451,31 @@ export default function JesseAIWidget() {
   }, [isListening])
 
   /* ---- TTS voice output ---- */
+  const stopSpeaking = useCallback(() => {
+    if (audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+      audioRef.current = null
+    }
+  }, [])
+
   const speakReply = useCallback(
     async (text: string) => {
       if (!voiceEnabled) return
+      stopSpeaking() // stop any previous audio
       try {
-        const data = await api.jesseSpeakText(text, voiceGender)
+        const data = await api.jesseSpeakText(text.slice(0, 500), voiceGender)
         if (data.audioUrl) {
           const audio = new Audio(data.audioUrl)
+          audioRef.current = audio
+          audio.onended = () => { audioRef.current = null }
           audio.play()
         }
       } catch {
         // Voice is optional; fail silently
       }
     },
-    [voiceEnabled, voiceGender]
+    [voiceEnabled, voiceGender, stopSpeaking]
   )
 
   /* ---- send message ---- */
@@ -531,8 +543,18 @@ export default function JesseAIWidget() {
 
   /* ---- toggle ---- */
   const togglePanel = useCallback(() => {
-    setIsOpen((prev) => !prev)
-  }, [])
+    setIsOpen((prev) => {
+      if (prev) {
+        // Closing panel — stop audio + mic
+        stopSpeaking()
+        if (isListening) {
+          (recognitionRef.current as { stop: () => void } | null)?.stop()
+          setIsListening(false)
+        }
+      }
+      return !prev
+    })
+  }, [stopSpeaking, isListening])
 
   /* ---------------------------------------------------------------- */
   /* Render                                                           */
