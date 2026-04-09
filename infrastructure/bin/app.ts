@@ -14,6 +14,7 @@ import { JesseStack } from '../lib/10-jesse-stack'
 import { FeaturesStack } from '../lib/11-features-stack'
 import { EventBridgeStack } from '../lib/12-eventbridge-stack'
 import { FinOpsStack } from '../lib/13-finops-stack'
+import { KmsStack } from '../lib/14-kms-stack'
 
 const app = new cdk.App()
 
@@ -22,11 +23,14 @@ const env = {
   region: process.env.AWS_REGION || 'us-east-1',
 }
 
+// Cost Allocation Tags — applied to ALL resources for FinOps per-tenant tracking
 const tags = {
   Project: 'endevo',
   Environment: 'uat',
   ManagedBy: 'cdk',
   Owner: 'shahzad',
+  CostCenter: 'endevo-platform',
+  Service: 'endevo-life',
 }
 
 // Stack 1 — Cognito REMOVED (WorkOS replaces Cognito; 01-cognito-stack.ts kept as safety net for 30 days)
@@ -79,6 +83,12 @@ new EventBridgeStack(app, 'EndevoUatEventBridge', { env, tags })
 
 // Stack 13 — FinOps (cost tracking + webhooks)
 new FinOpsStack(app, 'EndevoUatFinOps', {
+  env, tags,
+  lambdaRole: iam.lambdaRole,
+})
+
+// Stack 14 — KMS (Zero-Trust envelope encryption for Digital Vault)
+new KmsStack(app, 'EndevoUatKms', {
   env, tags,
   lambdaRole: iam.lambdaRole,
 })

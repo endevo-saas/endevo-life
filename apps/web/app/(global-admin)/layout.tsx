@@ -41,6 +41,7 @@ const navGroups = [
     items: [
       { href: '/admin/features',      icon: Flag,           label: 'Feature Flags' },
       { href: '/admin/import-export', icon: ArrowUpDown,    label: 'Import / Export' },
+      { href: '/admin/developers',    icon: Zap,            label: 'API & Webhooks' },
     ]
   },
   {
