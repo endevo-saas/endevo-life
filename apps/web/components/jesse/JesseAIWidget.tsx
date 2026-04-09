@@ -351,7 +351,7 @@ function JesseBubble({
             ))}
           </div>
         )}
-        {message.hitlActions && message.hitlActions.length > 0 && (
+        {message.hitlActions && message.hitlActions.length > 0 && onApproveAction && onRejectAction && (
           <div className="mt-1">
             {message.hitlActions.map((action) => (
               <HITLActionCard
