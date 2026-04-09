@@ -75,23 +75,20 @@ _KNOWLEDGE_NIKI = ""
 _KNOWLEDGE_PLATFORM = ""
 
 def _load_knowledge_files():
-    """Load pre-compiled knowledge at Lambda cold start. Zero per-request cost."""
+    """Load pre-compiled knowledge at Lambda cold start. Zero per-request cost.
+
+    Niki knowledge is now served by Bedrock Knowledge Base (KB: MUJXTOAKSR).
+    Only platform context (small, ~3KB) is loaded from file.
+    """
     global _KNOWLEDGE_NIKI, _KNOWLEDGE_PLATFORM
     import os
     base = os.path.dirname(os.path.abspath(__file__))
 
-    # Load compressed Niki knowledge (if exists, else fall back to platform)
-    for fname in ["knowledge_compressed.txt", "knowledge_niki.txt"]:
-        fpath = os.path.join(base, fname)
-        if os.path.exists(fpath):
-            with open(fpath, "r", encoding="utf-8") as f:
-                content = f.read()
-                # Cap at 100K chars (~25K tokens) to fit in prompt
-                _KNOWLEDGE_NIKI = content[:100000]
-                print(f"KNOWLEDGE_LOADED: {fname} ({len(_KNOWLEDGE_NIKI)} chars)")
-                break
+    # Niki knowledge now handled by Bedrock KB — no file loading needed
+    _KNOWLEDGE_NIKI = ""
+    print("KNOWLEDGE: Niki content served by Bedrock KB (not loaded from file)")
 
-    # Load platform context (small file, always fits)
+    # Load platform context (small file, always fits — NOT in Bedrock KB)
     ppath = os.path.join(base, "knowledge_platform.txt")
     if os.path.exists(ppath):
         with open(ppath, "r", encoding="utf-8") as f:
@@ -123,15 +120,13 @@ def _get_secret(name: str) -> str:
 # Bedrock Knowledge Base retrieval (cloned from Aryan's bedrock.ts)
 # ---------------------------------------------------------------------------
 def _retrieve_from_knowledge_base(query: str, top_k: int = 5) -> str:
-    """Retrieve context from Bedrock Knowledge Base.
+    """Retrieve context from Bedrock Knowledge Base (KB: MUJXTOAKSR).
 
-    NOTE: Bedrock KB Y52P6BJVGP no longer exists. All knowledge is now
-    in DynamoDB endevo-uat-knowledge-base (7,228 chunks from Niki's content).
-    This function is kept for future re-activation when a new KB is created.
+    28 docs indexed. Replaces the 25K-token brute-force prompt dump.
+    Env var BEDROCK_KB_ID is checked first (faster), then Secrets Manager fallback.
     """
-    return ""  # KB deleted — all knowledge now in DynamoDB
     try:
-        kb_id = _get_secret("endevo/jesse/bedrock-kb-id")
+        kb_id = os.environ.get("BEDROCK_KB_ID") or _get_secret("endevo/jesse/bedrock-kb-id")
         if not kb_id:
             return ""
         response = bedrock_agent.retrieve(
@@ -218,9 +213,13 @@ def get_caller(event: dict) -> tuple:
     # Session token (from OTP login)
     if token.startswith("endevo_"):
         try:
-            from boto3.dynamodb.conditions import Attr as _Attr
+            from boto3.dynamodb.conditions import Key as _SessKey
 
-            result = USERS_T.scan(FilterExpression=_Attr("sessionToken").eq(token))
+            result = USERS_T.query(
+                IndexName="sessionToken-index",
+                KeyConditionExpression=_SessKey("sessionToken").eq(token),
+                Limit=1,
+            )
             items = result.get("Items", [])
             if items:
                 u = items[0]
@@ -452,33 +451,8 @@ def _cosine_similarity(vec_a: list[float], vec_b: list[float]) -> float:
 
 
 def _search_knowledge_base(query_text: str, top_k: int = 5) -> str:
-    """Return pre-loaded knowledge context. Zero DynamoDB scans.
-
-    Strategy: 99% pre-loaded context, 1% AI formatting.
-    Knowledge files are loaded at Lambda cold start (once).
-    Each warm invocation reads from memory — speed of light.
-    """
-    if not query_text:
-        return ""
-
-    # For short/simple queries, return a relevant slice of the knowledge
-    # The AI model will find the relevant parts in the context
-    if _KNOWLEDGE_NIKI:
-        return _KNOWLEDGE_NIKI
-
-    # Fallback to DynamoDB keyword search if no file loaded
-    try:
-        from boto3.dynamodb.conditions import Attr
-        result = KNOWLEDGE_T.scan(
-            FilterExpression=Attr("content").contains(query_text.split()[0] if query_text.split() else "endevo"),
-            ProjectionExpression="content",
-            Limit=5,
-        )
-        chunks = [item.get("content", "") for item in result.get("Items", []) if item.get("content")]
-        return "\n\n---\n\n".join(chunks)
-    except Exception as e:
-        print(f"KNOWLEDGE_SEARCH_ERROR: {e}")
-        return ""
+    """Knowledge retrieval now handled by Bedrock KB. This is a no-op."""
+    return ""
 
 
 def _prune_chat_history(user_id: str) -> None:

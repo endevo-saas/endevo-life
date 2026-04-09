@@ -115,7 +115,12 @@ def get_caller(event):
     # Session token (from OTP login)
     if token.startswith("endevo_"):
         try:
-            result = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(token))
+            from boto3.dynamodb.conditions import Key as _SessKey
+            result = USERS_T.query(
+                IndexName="sessionToken-index",
+                KeyConditionExpression=_SessKey("sessionToken").eq(token),
+                Limit=1,
+            )
             items = result.get("Items", [])
             if items:
                 u = items[0]

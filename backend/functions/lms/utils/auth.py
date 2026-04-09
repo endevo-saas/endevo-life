@@ -26,8 +26,12 @@ def get_caller(
     if token.startswith("endevo_"):
         try:
             from utils.db import USERS_T
-            from boto3.dynamodb.conditions import Attr
-            resp = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(token))
+            from boto3.dynamodb.conditions import Key as _SessKey
+            resp = USERS_T.query(
+                IndexName="sessionToken-index",
+                KeyConditionExpression=_SessKey("sessionToken").eq(token),
+                Limit=1,
+            )
             items = resp.get("Items", [])
             if items:
                 user = items[0]

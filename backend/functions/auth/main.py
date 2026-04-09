@@ -134,7 +134,7 @@ def get_failed_count(ip):
         )
         return result.get("Count", 0)
     except:
-        return 0  # fail open — don't block on DB errors
+        return 99  # fail CLOSED — block on error to prevent bypass under load
 
 def generate_otp():
     """Generate a cryptographically secure 6-digit numeric OTP."""
@@ -318,10 +318,14 @@ def handler(event, context):
         if not access_token:
             return err(401, "Not authenticated")
 
-        # Look up user by session token in DynamoDB
-        from boto3.dynamodb.conditions import Attr
+        # Look up user by session token in DynamoDB (GSI query, not scan)
+        from boto3.dynamodb.conditions import Key as _SessKey
         try:
-            result = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(access_token))
+            result = USERS_T.query(
+                IndexName="sessionToken-index",
+                KeyConditionExpression=_SessKey("sessionToken").eq(access_token),
+                Limit=1,
+            )
             items = result.get("Items", [])
             if items:
                 u = items[0]
@@ -513,6 +517,12 @@ def handler(event, context):
 
         if not all([email, otp_ref, otp_code]):
             return err(400, "email, otp_ref, and code are required")
+
+        # Brute-force protection on OTP verification
+        if get_failed_count(ip) >= MAX_FAILED:
+            security_audit("OTP_VERIFY_BLOCKED", email or "UNKNOWN", "AUTH", ip, device,
+                           f"IP {ip} blocked — too many failed attempts", "WARN")
+            return err(429, "Too many attempts. Please wait 15 minutes.")
 
         record = get_otp_record(otp_ref, email)
         if not record:

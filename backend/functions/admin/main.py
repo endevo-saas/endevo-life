@@ -192,7 +192,11 @@ def get_caller(event):
     # Session token (from OTP login) — look up in DynamoDB
     if token.startswith("endevo_"):
         try:
-            result = USERS_T.scan(FilterExpression=Attr("sessionToken").eq(token))
+            result = USERS_T.query(
+                IndexName="sessionToken-index",
+                KeyConditionExpression=Key("sessionToken").eq(token),
+                Limit=1,
+            )
             items = result.get("Items", [])
             if items:
                 u = items[0]

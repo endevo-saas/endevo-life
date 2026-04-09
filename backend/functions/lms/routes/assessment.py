@@ -22,7 +22,7 @@ Routes handled:
 import json
 import logging
 import random
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from boto3.dynamodb.conditions import Key, Attr
@@ -271,6 +271,17 @@ def _submit_assessment(event: dict, tenant_id: str, user_id: str) -> dict:
     # Run the Readiness Engine — this is the core scoring algorithm.
     # Returns domain scores, tiers, gaps, module priority, and personalised narrative.
     scorecard = calculate_scorecard(submitted_answers, all_questions, attempt_number)
+
+    # Idempotency: reject duplicate submissions within 5 seconds
+    recent_cutoff = (datetime.now(timezone.utc) - timedelta(seconds=5)).isoformat()
+    recent = RESPONSES_T.query(
+        KeyConditionExpression=Key("userId").eq(user_id),
+        ScanIndexForward=False,
+        Limit=1,
+    )
+    recent_items = recent.get("Items", [])
+    if recent_items and recent_items[0].get("submittedAt", "") > recent_cutoff:
+        return ok({"message": "Assessment already submitted", "scorecard": recent_items[0].get("scorecard", {})})
 
     # Persist the full response including embedded scorecard.
     # Schema: PK=userId SK=submittedAt
