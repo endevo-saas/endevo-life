@@ -64,6 +64,11 @@ PLAN_MODEL = os.environ.get(
 )
 EMBED_MODEL = os.environ.get("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 
+# Gemini API — FASTEST model, primary for chat when GEMINI_API_KEY is set
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
+GEMINI_ENABLED = bool(GEMINI_API_KEY)
+
 # Ollama offline fallback (Gemma 4) — Jesse NEVER stops working
 OLLAMA_ENABLED = os.environ.get("OLLAMA_ENABLED", "false").lower() == "true"
 OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -238,6 +243,48 @@ def get_caller(event: dict) -> tuple:
 # ---------------------------------------------------------------------------
 # Bedrock: Claude + Titan Embed
 # ---------------------------------------------------------------------------
+def _invoke_gemini(
+    system_prompt: str,
+    messages: list[dict],
+    max_tokens: int = 2048,
+) -> str | None:
+    """PRIMARY fast model: Google Gemini 2.0 Flash via REST API.
+    2M token context, instant responses, free tier = 15 RPM / 1M tokens/day.
+    """
+    if not GEMINI_ENABLED:
+        return None
+    try:
+        from urllib.request import urlopen, Request
+        # Convert Claude messages to Gemini format
+        contents = []
+        for msg in messages:
+            role = "user" if msg.get("role") == "user" else "model"
+            text = msg.get("content", "")
+            if isinstance(text, list):
+                text = " ".join(b.get("text", "") for b in text if b.get("type") == "text")
+            contents.append({"role": role, "parts": [{"text": text}]})
+
+        payload = json.dumps({
+            "system_instruction": {"parts": [{"text": system_prompt}]},
+            "contents": contents,
+            "generationConfig": {
+                "maxOutputTokens": max_tokens,
+                "temperature": 0.7,
+            },
+        }).encode()
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
+        req = Request(url, data=payload, headers={"Content-Type": "application/json"}, method="POST")
+        with urlopen(req, timeout=25) as resp:
+            result = json.loads(resp.read())
+            text = result.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+            if text:
+                print(f"GEMINI_SUCCESS: model={GEMINI_MODEL}")
+                return text
+    except Exception as e:
+        print(f"GEMINI_ERROR: {e}")
+    return None
+
+
 def _invoke_ollama(
     system_prompt: str,
     messages: list[dict],
@@ -286,8 +333,21 @@ def invoke_claude(
     max_tokens: int = 2048,
     model_id: str | None = None,
 ) -> str:
-    """Call Claude Haiku via Bedrock with Gemma/Ollama fallback. Jesse NEVER stops."""
-    # --- Primary: AWS Bedrock (Claude Haiku) ---
+    """Multi-model AI with auto-failover. Jesse NEVER stops.
+
+    Priority order:
+    1. Gemini 2.0 Flash (FASTEST — instant, 2M tokens, free tier)
+    2. AWS Bedrock Claude Haiku (reliable, paid)
+    3. Ollama Gemma 4 (offline self-hosted fallback)
+    """
+    # --- 1. PRIMARY: Google Gemini (fastest) ---
+    if GEMINI_ENABLED:
+        gemini_text = _invoke_gemini(system_prompt, messages, max_tokens)
+        if gemini_text:
+            return gemini_text
+        print("GEMINI_FAILED: Falling back to Bedrock...")
+
+    # --- 2. SECONDARY: AWS Bedrock (Claude Haiku) ---
     try:
         response = bedrock.invoke_model(
             modelId=model_id or CHAT_MODEL,
@@ -312,7 +372,7 @@ def invoke_claude(
     except Exception as e:
         print(f"BEDROCK_CLAUDE_ERROR: {e}")
 
-    # --- Fallback: Ollama (Gemma 4) ---
+    # --- 3. TERTIARY: Ollama (Gemma 4 offline) ---
     print("BEDROCK_FAILED: Attempting Ollama fallback...")
     ollama_text = _invoke_ollama(system_prompt, messages, max_tokens)
     if ollama_text:
