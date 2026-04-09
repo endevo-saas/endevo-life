@@ -295,14 +295,22 @@ function ActionCard({ action }: { action: CopilotActionResult }) {
   )
 }
 
+function JesseAvatar({ size = 'sm' }: { size?: 'sm' | 'md' | 'lg' | 'xl' }) {
+  const sizeMap = { sm: 'w-7 h-7', md: 'w-10 h-10', lg: 'w-16 h-16', xl: 'w-14 h-14' }
+  return (
+    <img
+      src="/jesse/avatar.png"
+      alt="Jesse"
+      className={`${sizeMap[size]} rounded-full object-cover flex-shrink-0 shadow-sm border-2 border-white/30`}
+      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+    />
+  )
+}
+
 function JesseBubble({ message, gradient }: { message: JesseMessage; gradient: string }) {
   return (
     <div className="flex justify-start mb-3 gap-2">
-      <div
-        className={`w-7 h-7 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center flex-shrink-0 mt-0.5 shadow-sm`}
-      >
-        <span className="text-white text-xs font-bold">J</span>
-      </div>
+      <JesseAvatar size="sm" />
       <div className="max-w-[80%] flex flex-col">
         <div className="rounded-2xl rounded-bl-md px-4 py-2.5 text-sm leading-relaxed whitespace-pre-wrap break-words bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border border-gray-200 dark:border-gray-700">
           {renderMarkdownLite(message.content)}
@@ -325,11 +333,7 @@ function JesseBubble({ message, gradient }: { message: JesseMessage; gradient: s
 function TypingIndicator({ gradient }: { gradient: string }) {
   return (
     <div className="flex justify-start mb-3 gap-2" aria-live="polite" aria-label="Jesse is working">
-      <div
-        className={`w-7 h-7 rounded-full bg-gradient-to-br ${gradient} flex items-center justify-center flex-shrink-0 mt-0.5 shadow-sm`}
-      >
-        <span className="text-white text-xs font-bold">J</span>
-      </div>
+      <JesseAvatar size="sm" />
       <div className="rounded-2xl rounded-bl-md px-4 py-3 flex items-center gap-3 bg-gray-100 dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
         <div className="flex gap-1">
           <span className="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-500 animate-bounce [animation-delay:0ms]" />
@@ -596,7 +600,7 @@ export default function JesseAIWidget() {
           >
             <div className="flex items-center gap-2.5">
               <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
-                <span className="text-white text-base font-bold">J</span>
+                <img src="/jesse/avatar.png" alt="Jesse" className="w-full h-full rounded-full object-cover" />
               </div>
               <div>
                 <h2 className="text-white text-sm font-semibold leading-tight">
@@ -657,11 +661,7 @@ export default function JesseAIWidget() {
           >
             {messages.length === 0 && !isLoading && (
               <div className="flex flex-col items-center justify-center h-full text-center px-4">
-                <div
-                  className={`w-16 h-16 rounded-full bg-gradient-to-br ${config.gradient} flex items-center justify-center mb-4 shadow-lg`}
-                >
-                  <span className="text-white text-2xl font-bold">J</span>
-                </div>
+                <JesseAvatar size="lg" />
                 <p className="text-gray-500 dark:text-gray-400 text-sm leading-relaxed max-w-[280px]">
                   {config.emptyGreeting}
                 </p>
@@ -758,7 +758,7 @@ export default function JesseAIWidget() {
         {isOpen ? (
           <CloseIcon />
         ) : (
-          <span className="text-xl font-bold">J</span>
+          <img src="/jesse/avatar.png" alt="Jesse" className="w-full h-full rounded-full object-cover" />
         )}
 
         {/* Role badge on FAB */}
