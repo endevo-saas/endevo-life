@@ -1216,9 +1216,9 @@ npx cdk deploy --all
 
 | Metric | Value |
 |--------|-------|
-| **Total git commits** | 183+ |
-| **Total source files** | 175+ (Python + TypeScript + config + docs + knowledge) |
-| **Total lines of code** | 39,000+ |
+| **Total git commits** | 184+ |
+| **Total source files** | 187 (Python + TypeScript + config + docs + knowledge) |
+| **Total lines of code** | 43,000+ |
 | **Python files (backend)** | 40 |
 | **TypeScript/TSX files (frontend)** | 85 |
 | **Folders** | 100 |
@@ -1525,6 +1525,80 @@ Every archived record contains: `status='archived'`, `archivedAt`, `archivedBy`,
 | WAF attachment | BLOCKED | HTTP APIs don't support WAFv2 directly. Need CloudFront in front of API Gateway. Planned for next CDK update. |
 | Lambda concurrency | DOCUMENTED | Account limit = 1000. Need AWS Support quota increase for 1M scale. |
 | Security headers | DOCUMENTED | Need CloudFront or Lambda response changes. |
+
+---
+
+## End-to-End Workflows
+
+### Authentication Flow
+1. User enters email on `/login`
+2. Backend: validate → brute-force check (5 attempts/15 min) → lookup via email-index GSI → generate 6-digit crypto OTP → store with 5-min TTL → send via SES email + SNS SMS
+3. User enters OTP → backend verifies → generates session token (`endevo_{hash}`) → stores 24h expiry → audit log
+4. Frontend stores cookies → redirects by role (admin/hr/employee)
+
+### Super Admin — Create Tenant
+1. "New Tenant" → Company Name, Website, HR Email, Plan, Max Seats
+2. Backend: generate sequential ID → create tenant record → auto-create HR admin in WorkOS + DynamoDB → send welcome email
+3. Tables modified: tenants (new), users (new HR_ADMIN), audit
+
+### Super Admin — Disable Tenant (Cascade)
+1. Confirm disable → tenant status='archived' + archivedAt/archivedBy
+2. **CASCADE:** ALL employees in tenant get status='archived' → blocked from login
+3. Restorable from Recycle Bin (`/admin/archive`)
+
+### HR Admin — Invite Employee
+1. Form: Email, Phone (both required), Name, Department, Job Title
+2. Backend: validate uniqueness → create in WorkOS → store status='pending' → send invite email
+3. Single invite only (no bulk CSV in MVP)
+
+### Employee — Take Assessment
+1. 40 questions across 4 domains (Legal, Financial, Physical, Digital — 10 each)
+2. Scoring: A=10, B=6, C=3, D=0 → domain % → overall % → tier assignment
+3. Tiers: Peace Champion (85%+), On Your Way (60%+), Getting Clarity (35%+), Starting Fresh (0-34%)
+4. Completing assessment unlocks ALL 6 modules simultaneously
+5. Unlimited retakes, no cooldown
+
+### Employee — Watch Video & Resume
+1. Click lesson → load presigned S3 URL + quiz popups + saved position
+2. Resume: `lastPosition` stored in DynamoDB, resumes -5 seconds for context
+3. Progress: `percentWatched` updated per save → 95%+ = complete
+4. Inline quizzes pause video, answer required to continue
+
+### Employee — Complete Module & Certificate
+1. All lessons watched + quizzes passed = module complete
+2. Module 6 completion → certificate eligibility → auto-generated
+3. Certificate includes: score, date, verification ID, module count
+
+### Feature Flags (18 platform-wide toggles)
+`jesse_ai`, `mfa_required`, `lms_enabled`, `coaching_sessions`, `digital_vault`, `certificates`, `advanced_analytics`, `custom_branding`, `family_sharing`, `priority_support`, `bulk_import`, `api_access`, `audit_log`, `email_notifications`, `sso_enabled`, `captcha_enabled`, `otp_enabled`, `maintenance_mode`
+
+---
+
+## Scaling & Reliability
+
+| Component | Current | Limit | Fix |
+|-----------|---------|-------|-----|
+| Lambda concurrency | 1,000 | Blocks 10K+ users | Request quota increase to 5,000+ |
+| API Gateway timeout | 30s | Jesse can need 60s on cold start | Frontend retry + provisioned concurrency |
+| DynamoDB | Single region | Zero failover | Enable Global Tables (us-west-2 replica) |
+| S3 | Single region | Content unavailable if region fails | Enable Cross-Region Replication |
+| Session tokens | 6 full-table scans per auth | Crashes at 5K+ users | Add sessionToken-index GSI |
+| Idempotency | Not enforced | 3 clicks = 3 assessment records | Add debounce + server idempotency token |
+
+## Cost Structure (UAT)
+
+| Service | Monthly Cost |
+|---------|-------------|
+| Lambda (6 functions) | ~$5 |
+| DynamoDB (18 tables, on-demand) | ~$10 |
+| S3 (9 buckets) | ~$3 |
+| API Gateway | ~$5 |
+| Bedrock Nova Lite | ~$10 (at 1K daily requests) |
+| OpenSearch Serverless (2 OCUs) | ~$175 |
+| Amplify hosting | ~$5 |
+| CloudFront | ~$2 |
+| SES/SNS | ~$1 |
+| **Total UAT** | **~$216/month** |
 
 ---
 
