@@ -15,6 +15,8 @@ import { FeaturesStack } from '../lib/11-features-stack'
 import { EventBridgeStack } from '../lib/12-eventbridge-stack'
 import { FinOpsStack } from '../lib/13-finops-stack'
 import { KmsStack } from '../lib/14-kms-stack'
+import { CloudFrontApiStack } from '../lib/15-cloudfront-api-stack'
+import { EmailQueueStack } from '../lib/16-email-queue-stack'
 
 const app = new cdk.App()
 
@@ -89,6 +91,15 @@ new FinOpsStack(app, 'EndevoUatFinOps', {
 
 // Stack 14 — KMS (Zero-Trust envelope encryption for Digital Vault)
 new KmsStack(app, 'EndevoUatKms', {
+  env, tags,
+  lambdaRole: iam.lambdaRole,
+})
+
+// Stack 15 — CloudFront + WAF (API Gateway security shield)
+new CloudFrontApiStack(app, 'EndevoUatCloudFrontApi', { env, tags })
+
+// Stack 16 — SQS Email Queue (SES throttle protection)
+new EmailQueueStack(app, 'EndevoUatEmailQueue', {
   env, tags,
   lambdaRole: iam.lambdaRole,
 })

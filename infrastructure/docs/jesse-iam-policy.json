@@ -3,11 +3,13 @@
   "Permissions": [
     "bedrock:InvokeModel (for Claude Haiku + Titan Embed V2)",
     "dynamodb:* on endevo-uat-jesse-chat",
+    "dynamodb:* on endevo-uat-jesse-jobs",
     "dynamodb:GetItem/Query on endevo-uat-users",
     "dynamodb:Query on endevo-uat-responses",
     "dynamodb:GetItem on endevo-uat-config",
+    "lambda:InvokeFunction on fn-jesse (self-invoke for async fallback)",
     "secretsmanager:GetSecretValue on endevo/workos/*",
     "logs:CreateLogGroup/CreateLogStream/PutLogEvents"
   ],
-  "Notes": "The existing endevo-uat-lambda-role already has wildcard endevo-uat-* DynamoDB access. Only Bedrock permissions need adding."
+  "Notes": "The existing endevo-uat-lambda-role already has wildcard endevo-uat-* DynamoDB access. Only Bedrock and Lambda self-invoke permissions need adding."
 }

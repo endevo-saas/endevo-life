@@ -11,7 +11,8 @@ Routes:
   POST   /api/jesse/copilot             - Unified AI endpoint (chat + RAG + actions, all plans)
   GET    /api/jesse/copilot/history     - Copilot message history (auth required)
   POST   /api/jesse/speak               - Text-to-speech via Amazon Polly (all plans)
-  POST   /api/jesse/chat                - RAG chat with Jesse (all plans)
+  POST   /api/jesse/chat                - RAG chat with Jesse (sync or async fallback)
+  GET    /api/jesse/chat/job/{jobId}    - Poll async job status (when chat returns 202)
   GET    /api/jesse/chat/history        - Load chat history (all plans)
   DELETE /api/jesse/chat/reset          - Clear chat history (all plans)
   POST   /api/jesse/assess              - Score assessment + generate plan (all plans)
@@ -22,6 +23,7 @@ DynamoDB Tables:
   endevo-uat-tenants       - Tenant records
   endevo-uat-responses     - Assessment responses (read-only)
   endevo-uat-jesse-chat    - Chat history (PK=userId, SK=createdAt)
+  endevo-uat-jesse-jobs    - Async job tracking (PK=jobId, TTL=1hr)
   endevo-uat-config        - Config / feature flags
   endevo-uat-sessions      - Coaching sessions
   endevo-uat-certificates  - User certificates
@@ -29,7 +31,9 @@ DynamoDB Tables:
 import json
 import os
 import re
+import time
 import uuid
+import threading
 import boto3
 from datetime import datetime, timezone
 from botocore.exceptions import ClientError
@@ -55,6 +59,72 @@ polly = boto3.client("polly", region_name=REGION)
 ses = boto3.client("ses", region_name=REGION)
 _secrets = boto3.client("secretsmanager", region_name=REGION)
 dynamo_client = boto3.client("dynamodb", region_name=REGION)
+lambda_client = boto3.client("lambda", region_name=REGION)
+LAMBDA_FUNCTION_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
+
+# Async job timeout threshold — if sync path risks API Gateway 30s limit,
+# fall back to async. Set to 25s to leave 5s buffer.
+ASYNC_TIMEOUT_THRESHOLD = 25
+
+# ---------------------------------------------------------------------------
+# Async Job helpers (DynamoDB-backed, uses jesse-chat table with job: prefix)
+# ---------------------------------------------------------------------------
+JOBS_T = dynamo.Table("endevo-uat-jesse-jobs")
+
+
+def _create_async_job(job_id: str, user_id: str, payload: dict) -> None:
+    """Create a new async job record in DynamoDB."""
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        JOBS_T.put_item(Item={
+            "jobId": job_id,
+            "userId": user_id,
+            "status": "processing",
+            "payload": json.dumps(payload, default=str),
+            "createdAt": now,
+            "updatedAt": now,
+            "ttl": int(datetime.now(timezone.utc).timestamp()) + 3600,  # 1hr TTL
+        })
+    except Exception as e:
+        print(f"JOB_CREATE_ERROR: {e}")
+
+
+def _update_async_job(job_id: str, status: str, response: str | None = None, error: str | None = None) -> None:
+    """Update an async job with result or error."""
+    now = datetime.now(timezone.utc).isoformat()
+    update_expr = "SET #s = :status, updatedAt = :now"
+    expr_values: dict = {":status": status, ":now": now}
+    expr_names: dict = {"#s": "status"}
+
+    if response is not None:
+        update_expr += ", #r = :response"
+        expr_values[":response"] = response
+        expr_names["#r"] = "response"
+    if error is not None:
+        update_expr += ", #e = :error"
+        expr_values[":error"] = error
+        expr_names["#e"] = "error"
+
+    try:
+        JOBS_T.update_item(
+            Key={"jobId": job_id},
+            UpdateExpression=update_expr,
+            ExpressionAttributeNames=expr_names,
+            ExpressionAttributeValues=expr_values,
+        )
+    except Exception as e:
+        print(f"JOB_UPDATE_ERROR: {e}")
+
+
+def _get_async_job(job_id: str) -> dict | None:
+    """Retrieve an async job by jobId."""
+    try:
+        result = JOBS_T.get_item(Key={"jobId": job_id})
+        return result.get("Item")
+    except Exception as e:
+        print(f"JOB_GET_ERROR: {e}")
+        return None
+
 
 # AWS Bedrock ONLY — 100% inside AWS, zero external dependencies
 # Cross-Region Inference — auto-routes to us-east-1, us-west-2, or us-east-2
@@ -1932,10 +2002,62 @@ def _handle_copilot(body: dict, tenant_id: str, email: str, user_id: str) -> dic
 
 
 # ---------------------------------------------------------------------------
+# Async job processor — invoked by Lambda self-invoke (InvocationType='Event')
+# ---------------------------------------------------------------------------
+def _handle_async_job(event: dict) -> dict:
+    """Process a Bedrock call asynchronously and store the result in DynamoDB.
+
+    Called when Lambda is invoked by itself with InvocationType='Event'.
+    The event contains: asyncJobId, userId, systemPrompt, claudeMessages, message.
+    """
+    job_id = event["asyncJobId"]
+    user_id = event.get("userId", "")
+    system_prompt = event.get("systemPrompt", "")
+    claude_messages = event.get("claudeMessages", [])
+    message = event.get("message", "")
+
+    print(f"ASYNC_JOB_START: job={job_id}, user={user_id}")
+
+    try:
+        # Call Bedrock with full timeout (up to 60s Lambda limit)
+        reply = invoke_claude(system_prompt, claude_messages)
+
+        if not reply or "trouble connecting" in reply:
+            _update_async_job(job_id, "error", error="Bedrock failed to generate a response")
+            print(f"ASYNC_JOB_BEDROCK_FAIL: job={job_id}")
+            return {"status": "error", "jobId": job_id}
+
+        # Save assistant reply to chat history
+        _save_chat_message(user_id, "assistant", reply, source="chat")
+
+        # Prune old messages
+        _prune_chat_history(user_id)
+
+        # Update job with complete status and response
+        _update_async_job(job_id, "complete", response=reply)
+
+        print(f"ASYNC_JOB_COMPLETE: job={job_id}, reply_len={len(reply)}")
+        return {"status": "complete", "jobId": job_id}
+
+    except Exception as e:
+        print(f"ASYNC_JOB_ERROR: job={job_id}, error={e}")
+        _update_async_job(job_id, "error", error=str(e))
+        return {"status": "error", "jobId": job_id}
+
+
+# ---------------------------------------------------------------------------
 # Route handler
 # ---------------------------------------------------------------------------
 def handler(event: dict, context) -> dict:
     global _current_event
+
+    # --- ASYNC JOB HANDLER ---
+    # When Lambda is invoked async (InvocationType='Event') by itself,
+    # the event contains asyncJobId instead of requestContext.
+    # Process the Bedrock call and store the result in DynamoDB.
+    if "asyncJobId" in event:
+        return _handle_async_job(event)
+
     _current_event = event
 
     method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
@@ -2003,6 +2125,9 @@ def handler(event: dict, context) -> dict:
             return resp(200, {"audioUrl": None, "error": "Voice synthesis unavailable", "voice": voice_pref})
 
     # POST /api/jesse/chat (no premium gate -- available to all plans)
+    # Supports sync (fast) and async (fallback for long Bedrock calls) modes.
+    # If Bedrock responds within ASYNC_TIMEOUT_THRESHOLD (25s), returns directly.
+    # Otherwise, creates an async job and returns jobId for polling.
     if path.endswith("/chat") and not path.endswith("/chat/history") and not path.endswith("/chat/reset") and method == "POST":
         message = (body.get("message") or "").strip()
         if not message:
@@ -2037,26 +2162,118 @@ def handler(event: dict, context) -> dict:
         if not claude_messages or claude_messages[-1].get("content") != message:
             claude_messages.append({"role": "user", "content": message})
 
-        # 6. Call Claude
-        reply = invoke_claude(system_prompt, claude_messages)
+        # 6. Call Bedrock with timeout guard — sync if fast, async if slow
+        reply_container: dict = {"reply": None, "error": None}
 
-        # 7. Save assistant reply
-        _save_chat_message(user_id, "assistant", reply, source="chat")
+        def _call_bedrock():
+            try:
+                reply_container["reply"] = invoke_claude(system_prompt, claude_messages)
+            except Exception as e:
+                reply_container["error"] = str(e)
 
-        # 8. Prune old messages
-        _prune_chat_history(user_id)
+        bedrock_thread = threading.Thread(target=_call_bedrock, daemon=True)
+        start_time = time.monotonic()
+        bedrock_thread.start()
+        bedrock_thread.join(timeout=ASYNC_TIMEOUT_THRESHOLD)
+        elapsed = time.monotonic() - start_time
 
-        # 9. Return updated history
-        updated_history = _get_chat_history(user_id, source="chat")
-        return resp(200, {
-            "reply": reply,
-            "history": updated_history,
-        })
+        if reply_container["reply"] is not None:
+            # --- SYNC PATH: Bedrock responded within threshold ---
+            reply = reply_container["reply"]
+
+            # 7. Save assistant reply
+            _save_chat_message(user_id, "assistant", reply, source="chat")
+
+            # 8. Prune old messages
+            _prune_chat_history(user_id)
+
+            # 9. Return updated history
+            updated_history = _get_chat_history(user_id, source="chat")
+            return resp(200, {
+                "reply": reply,
+                "history": updated_history,
+            })
+        else:
+            # --- ASYNC FALLBACK: Bedrock still running or errored ---
+            # Generate a job ID and invoke self asynchronously
+            job_id = str(uuid.uuid4())
+            print(f"ASYNC_FALLBACK: Bedrock took >{elapsed:.1f}s, creating job {job_id}")
+
+            # Store the job as processing
+            _create_async_job(job_id, user_id, {
+                "message": message,
+                "userId": user_id,
+                "tenantId": tenant_id,
+            })
+
+            # Invoke self asynchronously to complete the Bedrock call
+            async_payload = {
+                "asyncJobId": job_id,
+                "userId": user_id,
+                "tenantId": tenant_id,
+                "systemPrompt": system_prompt,
+                "claudeMessages": claude_messages,
+                "message": message,
+            }
+            try:
+                lambda_client.invoke(
+                    FunctionName=LAMBDA_FUNCTION_NAME,
+                    InvocationType="Event",  # Fire-and-forget async
+                    Payload=json.dumps(async_payload, default=str),
+                )
+                print(f"ASYNC_INVOKE_OK: job={job_id}")
+            except Exception as e:
+                print(f"ASYNC_INVOKE_ERROR: {e}")
+                _update_async_job(job_id, "error", error=f"Failed to invoke async handler: {e}")
+                return err(500, "Failed to start async processing")
+
+            return resp(202, {
+                "status": "processing",
+                "jobId": job_id,
+                "message": "Jesse is thinking... Poll GET /api/jesse/chat/job/{jobId} for the result.",
+            })
 
     # GET /api/jesse/chat/history (no premium gate)
     if path.endswith("/chat/history") and method == "GET":
         history = _get_chat_history(user_id, source="chat")
         return resp(200, {"history": history, "count": len(history)})
+
+    # GET /api/jesse/chat/job/{jobId} -- poll async job status
+    if "/chat/job/" in path and method == "GET":
+        job_id = path.split("/")[-1]
+        if not job_id:
+            return err(400, "jobId is required")
+
+        job = _get_async_job(job_id)
+        if not job:
+            return err(404, "Job not found")
+
+        # Security: only the job owner can read it
+        if job.get("userId") != user_id:
+            return err(403, "Access denied")
+
+        job_status = job.get("status", "processing")
+
+        if job_status == "complete":
+            return resp(200, {
+                "status": "complete",
+                "jobId": job_id,
+                "response": job.get("response", ""),
+                "createdAt": job.get("createdAt", ""),
+                "updatedAt": job.get("updatedAt", ""),
+            })
+        elif job_status == "error":
+            return resp(200, {
+                "status": "error",
+                "jobId": job_id,
+                "error": job.get("error", "Unknown error"),
+            })
+        else:
+            return resp(200, {
+                "status": "processing",
+                "jobId": job_id,
+                "message": "Jesse is still thinking...",
+            })
 
     # DELETE /api/jesse/chat/reset (no premium gate)
     if path.endswith("/chat/reset") and method == "DELETE":
