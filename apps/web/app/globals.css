@@ -5,11 +5,12 @@
 @tailwind utilities;
 
 /* ═══════════════════════════════════════════════════════════════════
-   ENDEVO LIFE — 4 THEMES
+   ENDEVO LIFE — 5 THEMES
    1. Eclipse    — Dark  (Linear/Vercel style)
    2. Canvas     — Light (Notion/Apple style) — dark text on white
    3. Neon       — Vibrant (Duolingo/Stripe style)
    4. Navy Neon  — Navy blue + orange neon glow (Endevo signature)
+   5. Compassion — Calming bereavement mode (auto-activates for delegates)
 ═══════════════════════════════════════════════════════════════════ */
 
 /* ── 1. ECLIPSE — Default dark theme ───────────────────────────── */
@@ -144,6 +145,38 @@
                      radial-gradient(ellipse at 50% 80%, rgba(255,184,0,0.06) 0%, transparent 40%),
                      #0A0E1A;
   --shimmer:         rgba(255, 140, 0, 0.2);
+}
+
+/* ── 5. COMPASSION — Calming bereavement mode (auto-activates for delegates) */
+[data-theme="compassion"] {
+  --bg-base:         #F5F0EB;
+  --bg-card:         #FDFBF9;
+  --bg-elevated:     #EDE7E0;
+  --bg-hover:        rgba(139, 115, 85, 0.06);
+  --border:          rgba(139, 115, 85, 0.2);
+  --border-subtle:   #E0D8CF;
+
+  --text-primary:    #3D3530;
+  --text-secondary:  #7A6E63;
+  --text-muted:      #B0A598;
+
+  --accent-1:        #8B7355;
+  --accent-2:        #6B8F71;
+  --accent-glow:     rgba(139, 115, 85, 0.15);
+  --accent-glow-2:   rgba(107, 143, 113, 0.12);
+
+  --success:         #6B8F71;
+  --success-glow:    rgba(107, 143, 113, 0.15);
+  --gold:            #C4A265;
+  --gold-glow:       rgba(196, 162, 101, 0.15);
+  --danger:          #B07070;
+  --danger-glow:     rgba(176, 112, 112, 0.15);
+
+  --gradient-brand:  linear-gradient(135deg, #8B7355 0%, #6B8F71 100%);
+  --gradient-card:   linear-gradient(145deg, rgba(139,115,85,0.04), rgba(107,143,113,0.03));
+  --gradient-hero:   radial-gradient(ellipse at 30% 50%, rgba(139,115,85,0.06) 0%, transparent 60%),
+                     #F5F0EB;
+  --shimmer:         rgba(139, 115, 85, 0.08);
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -361,6 +394,22 @@ html, body {
 
 [data-theme="navy-neon"] .input-field:focus {
   box-shadow: 0 0 0 3px rgba(255,140,0,0.3), 0 0 16px rgba(255,140,0,0.15);
+}
+
+/* Compassion: gentle, no harsh shadows or animations */
+[data-theme="compassion"] .nav-active {
+  color: #8B7355 !important;
+  box-shadow: none;
+  border-color: rgba(139, 115, 85, 0.25);
+  background: rgba(139, 115, 85, 0.08);
+}
+
+[data-theme="compassion"] .btn-primary {
+  box-shadow: 0 2px 8px rgba(139, 115, 85, 0.15);
+}
+
+[data-theme="compassion"] .glass {
+  box-shadow: 0 1px 4px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06);
 }
 
 /* ═══════════════════════════════════════════════════════════════════

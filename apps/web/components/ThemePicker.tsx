@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 
-export type Theme = 'eclipse' | 'canvas' | 'neon' | 'navy-neon'
+export type Theme = 'eclipse' | 'canvas' | 'neon' | 'navy-neon' | 'compassion'
 
 const THEMES: { id: Theme; label: string; desc: string; preview: string }[] = [
   {
@@ -29,6 +29,12 @@ const THEMES: { id: Theme; label: string; desc: string; preview: string }[] = [
     desc: 'Navy + Orange • Endevo',
     preview: 'linear-gradient(135deg, #0A0E1A 40%, #FF8C00 70%, #3B82F6 100%)',
   },
+  {
+    id: 'compassion',
+    label: 'Compassion',
+    desc: 'Calming • Bereavement',
+    preview: 'linear-gradient(135deg, #F5F0EB 50%, #8B7355 50%)',
+  },
 ]
 
 export function useTheme() {
@@ -42,7 +48,7 @@ export function useTheme() {
 
   function applyTheme(t: Theme) {
     document.documentElement.setAttribute('data-theme', t)
-    document.documentElement.classList.toggle('light-mode', t === 'canvas')
+    document.documentElement.classList.toggle('light-mode', t === 'canvas' || t === 'compassion')
   }
 
   function setTheme(t: Theme) {

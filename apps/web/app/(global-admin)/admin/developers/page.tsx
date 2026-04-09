@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Key, Webhook as WebhookIcon, Zap, BookOpen, Loader2, AlertCircle, RefreshCw,
-  CheckCircle, Copy, Trash2, Plus, Eye, EyeOff, Send, Shield,
+  CheckCircle, Copy, Plus, Send, Shield,
   Globe, Lock, ChevronRight, ExternalLink, AlertTriangle
 } from 'lucide-react'
 import { api, Tenant, Webhook as WebhookType, ApiKey } from '@/lib/api'
