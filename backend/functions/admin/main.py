@@ -345,7 +345,7 @@ def get_config(key):
 
 # ── Handler ───────────────────────────────────────────────────────────────────
 
-def handler(event, context):
+def _handler_impl(event, context):
     global _current_event
     _current_event = event
 
@@ -2673,3 +2673,21 @@ def handler(event, context):
         ], "bus_name": EVENT_BUS_NAME})
 
     return err(404, f"Route not found: {method} {path}")
+
+
+def handler(event, context):
+    try:
+        return _handler_impl(event, context)
+    except Exception as e:
+        import traceback
+        print(f"UNHANDLED_ERROR: {traceback.format_exc()}")
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({
+                "success": False,
+                "error_code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again.",
+                "detail": str(e)[:200] if os.environ.get("STAGE") == "dev" else None
+            })
+        }

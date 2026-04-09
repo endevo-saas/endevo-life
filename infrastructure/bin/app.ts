@@ -18,6 +18,7 @@ import { KmsStack } from '../lib/14-kms-stack'
 import { CloudFrontApiStack } from '../lib/15-cloudfront-api-stack'
 import { EmailQueueStack } from '../lib/16-email-queue-stack'
 import { ObservabilityStack } from '../lib/17-observability-stack'
+import { JesseAgentStack } from '../lib/18-jesse-agent-stack'
 
 const app = new cdk.App()
 
@@ -107,3 +108,9 @@ new EmailQueueStack(app, 'EndevoUatEmailQueue', {
 
 // Stack 17 — Observability (CloudWatch error alarms for all Lambdas)
 new ObservabilityStack(app, 'EndevoUatObservability', { env, tags })
+
+// Stack 18 — Jesse AI Bedrock Agent (HITL action groups + Knowledge Base)
+new JesseAgentStack(app, 'EndevoUatJesseAgent', {
+  env, tags,
+  lambdaRole: iam.lambdaRole,
+})

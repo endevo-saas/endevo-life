@@ -3,7 +3,9 @@
 import { useState, useEffect, useRef, useCallback, useMemo, type KeyboardEvent } from 'react'
 import { usePathname } from 'next/navigation'
 import Cookies from 'js-cookie'
-import { api, type JesseChatMessage, type CopilotActionResult } from '@/lib/api'
+import { api, type JesseChatMessage, type CopilotActionResult, type JesseActionProposal } from '@/lib/api'
+import HITLActionCard from './ActionCard'
+import type { JesseAction } from './ActionCard'
 
 /* ------------------------------------------------------------------ */
 /* Types                                                              */
@@ -12,6 +14,7 @@ type JesseRole = 'GLOBAL_ADMIN' | 'HR_ADMIN' | 'EMPLOYEE'
 
 interface JesseMessage extends JesseChatMessage {
   actions?: CopilotActionResult[]
+  hitlActions?: JesseAction[]
 }
 
 interface RoleConfig {
@@ -261,7 +264,7 @@ function UserBubble({ message, gradient }: { message: JesseMessage; gradient: st
   )
 }
 
-function ActionCard({ action }: { action: CopilotActionResult }) {
+function CopilotActionCard({ action }: { action: CopilotActionResult }) {
   const isSuccess = action.result.success
   return (
     <div
@@ -323,7 +326,17 @@ function JesseAvatar({ size = 'sm', talking = false }: { size?: 'sm' | 'md' | 'l
   )
 }
 
-function JesseBubble({ message, gradient }: { message: JesseMessage; gradient: string }) {
+function JesseBubble({
+  message,
+  gradient,
+  onApproveAction,
+  onRejectAction,
+}: {
+  message: JesseMessage
+  gradient: string
+  onApproveAction: (actionId: string) => void
+  onRejectAction: (actionId: string) => void
+}) {
   return (
     <div className="flex justify-start mb-3 gap-2">
       <JesseAvatar size="sm" />
@@ -334,7 +347,19 @@ function JesseBubble({ message, gradient }: { message: JesseMessage; gradient: s
         {message.actions && message.actions.length > 0 && (
           <div className="mt-1">
             {message.actions.map((a, i) => (
-              <ActionCard key={`${a.action}-${i}`} action={a} />
+              <CopilotActionCard key={`${a.action}-${i}`} action={a} />
+            ))}
+          </div>
+        )}
+        {message.hitlActions && message.hitlActions.length > 0 && (
+          <div className="mt-1">
+            {message.hitlActions.map((action) => (
+              <HITLActionCard
+                key={action.actionId}
+                action={action}
+                onApprove={onApproveAction}
+                onReject={onRejectAction}
+              />
             ))}
           </div>
         )}
@@ -535,21 +560,52 @@ export default function JesseAIWidget() {
     setIsLoading(true)
 
     try {
-      const data = await api.copilotChat(trimmed, {
-        role,
-        page: pathname,
-        tenantId: tenantId || undefined,
-      })
+      // Try Jesse Agent (Bedrock Agent mode) first, fall back to copilot
+      let reply = ''
+      let copilotActions: CopilotActionResult[] | undefined
+      let hitlActions: JesseAction[] | undefined
+
+      try {
+        const agentData = await api.jesseAgent(trimmed, {
+          role,
+          page: pathname,
+          tenantId: tenantId || undefined,
+        })
+        reply = agentData.reply
+
+        if (agentData.action) {
+          const proposal = agentData.action
+          hitlActions = [{
+            actionId: proposal.actionId,
+            type: proposal.type,
+            label: proposal.label,
+            description: proposal.description,
+            params: proposal.params,
+            status: proposal.status,
+            result: proposal.result,
+          }]
+        }
+      } catch {
+        // Agent not configured or failed — fall back to copilot
+        const copilotData = await api.copilotChat(trimmed, {
+          role,
+          page: pathname,
+          tenantId: tenantId || undefined,
+        })
+        reply = copilotData.reply
+        copilotActions = copilotData.actions
+      }
 
       const assistantMessage: JesseMessage = {
         role: 'assistant',
-        content: data.reply,
+        content: reply,
         createdAt: new Date().toISOString(),
-        actions: data.actions,
+        actions: copilotActions,
+        hitlActions,
       }
 
       setMessages((prev) => [...prev, assistantMessage])
-      speakReply(data.reply)
+      speakReply(reply)
 
       if (!isOpen) {
         setUnreadCount((prev) => prev + 1)

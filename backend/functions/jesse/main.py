@@ -8,6 +8,8 @@ and role-specific system prompts for GLOBAL_ADMIN, HR_ADMIN, and EMPLOYEE.
 Routes:
   GET    /api/jesse/health              - Health check (public)
   GET    /api/jesse/access              - Access check (always returns hasAccess=true)
+  POST   /api/jesse/agent               - Bedrock Agent endpoint (new architecture, falls back to copilot)
+  POST   /api/jesse/agent/execute       - Execute an approved Bedrock Agent action
   POST   /api/jesse/copilot             - Unified AI endpoint (chat + RAG + actions, all plans)
   GET    /api/jesse/copilot/history     - Copilot message history (auth required)
   POST   /api/jesse/speak               - Text-to-speech via Amazon Polly (all plans)
@@ -61,6 +63,10 @@ _secrets = boto3.client("secretsmanager", region_name=REGION)
 dynamo_client = boto3.client("dynamodb", region_name=REGION)
 lambda_client = boto3.client("lambda", region_name=REGION)
 LAMBDA_FUNCTION_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
+
+# Bedrock Agent (new architecture — invoke_agent for agentic flow)
+AGENT_ID = os.environ.get("JESSE_AGENT_ID", "")
+AGENT_ALIAS_ID = os.environ.get("JESSE_AGENT_ALIAS_ID", "")
 
 # Async job timeout threshold — if sync path risks API Gateway 30s limit,
 # fall back to async. Set to 25s to leave 5s buffer.
@@ -2050,7 +2056,7 @@ def _handle_async_job(event: dict) -> dict:
 # ---------------------------------------------------------------------------
 # Route handler
 # ---------------------------------------------------------------------------
-def handler(event: dict, context) -> dict:
+def _handler_impl(event: dict, context) -> dict:
     global _current_event
 
     # --- ASYNC JOB HANDLER ---
@@ -2360,3 +2366,21 @@ def handler(event: dict, context) -> dict:
             return err(500, "Failed to load plan")
 
     return err(404, f"Route not found: {method} {path}")
+
+
+def handler(event: dict, context) -> dict:
+    try:
+        return _handler_impl(event, context)
+    except Exception as e:
+        import traceback
+        print(f"UNHANDLED_ERROR: {traceback.format_exc()}")
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({
+                "success": False,
+                "error_code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again.",
+                "detail": str(e)[:200] if os.environ.get("STAGE") == "dev" else None
+            })
+        }

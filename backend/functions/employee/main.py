@@ -146,17 +146,16 @@ def get_caller(event):
     print(f"AUTH_REJECTED: Non-session token presented to employee endpoint")
     return None, None, None
 
-def handler(event, context):
+def _handler_impl(event, context):
     global _current_event
     _current_event = event
-    try:
 
-        method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
-        path   = event.get("rawPath", "")
-        if method == "OPTIONS": return resp(200, {})
-        body = get_body(event)
-        tenant_id, email, user_sub = get_caller(event)
-        if not tenant_id: return err(401, "Not authenticated")
+    method = event.get("requestContext", {}).get("http", {}).get("method", "GET")
+    path   = event.get("rawPath", "")
+    if method == "OPTIONS": return resp(200, {})
+    body = get_body(event)
+    tenant_id, email, user_sub = get_caller(event)
+    if not tenant_id: return err(401, "Not authenticated")
 
     # GET /api/employee/dashboard
     if path.endswith("/dashboard") and method == "GET":
@@ -632,3 +631,21 @@ def handler(event, context):
         })
 
     return err(404, f"Route not found: {method} {path}")
+
+
+def handler(event, context):
+    try:
+        return _handler_impl(event, context)
+    except Exception as e:
+        import traceback
+        print(f"UNHANDLED_ERROR: {traceback.format_exc()}")
+        return {
+            "statusCode": 500,
+            "headers": {"Content-Type": "application/json", "Access-Control-Allow-Origin": "*"},
+            "body": json.dumps({
+                "success": False,
+                "error_code": "INTERNAL_ERROR",
+                "message": "An unexpected error occurred. Please try again.",
+                "detail": str(e)[:200] if os.environ.get("STAGE") == "dev" else None
+            })
+        }

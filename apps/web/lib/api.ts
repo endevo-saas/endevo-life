@@ -387,6 +387,16 @@ export const api = {
   adminDeleteKnowledge: (key: string) =>
     apiFetch<{ message: string }>('/api/admin/knowledge/files', { method: 'DELETE', body: JSON.stringify({ key }) }),
 
+  // Jesse Agent (Bedrock Agent mode)
+  jesseAgent: (message: string, context: { role: string; page: string; tenantId?: string }) =>
+    apiFetch<{ reply: string; action?: JesseActionProposal }>('/api/jesse/agent', {
+      method: 'POST', body: JSON.stringify({ message, context })
+    }),
+  jesseAgentExecute: (actionType: string, params: Record<string, unknown>) =>
+    apiFetch<{ success: boolean; result: string }>('/api/jesse/agent/execute', {
+      method: 'POST', body: JSON.stringify({ actionType, params })
+    }),
+
   // Jesse AI
   jesseSpeakText: (text: string, voice?: 'female' | 'male') =>
     apiFetch<{ audioUrl: string | null; voice: string }>('/api/jesse/speak', {
@@ -665,6 +675,16 @@ export interface JesseChatMessage {
   role: 'user' | 'assistant'
   content: string
   createdAt: string
+}
+
+export interface JesseActionProposal {
+  actionId: string
+  type: string
+  label: string
+  description: string
+  params: Record<string, unknown>
+  status: 'pending' | 'approved' | 'rejected' | 'executing' | 'completed' | 'failed'
+  result?: string
 }
 
 // Bulk Import/Export Types
