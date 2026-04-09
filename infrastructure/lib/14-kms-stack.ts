@@ -65,20 +65,11 @@ export class KmsStack extends cdk.Stack {
     cdk.Tags.of(this.vaultKey).add('ManagedBy', 'cdk')
     cdk.Tags.of(this.vaultKey).add('Owner', 'shahzad')
 
-    // --- 3. IAM Policy on Lambda role — scoped to this key ARN ---
-    props.lambdaRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'KmsVaultKeyAccess',
-      effect: iam.Effect.ALLOW,
-      actions: [
-        'kms:Encrypt',
-        'kms:Decrypt',
-        'kms:GenerateDataKey',
-        'kms:DescribeKey',
-      ],
-      resources: [this.vaultKey.keyArn],
-    }))
+    // IAM policy NOT added via addToPolicy to avoid cyclic dependency.
+    // The key policy above (AllowLambdaRoleCryptoOps) grants the Lambda
+    // role Encrypt/Decrypt/GenerateDataKey/DescribeKey directly.
 
-    // --- 4. Stack-level tags ---
+    // --- 3. Stack-level tags ---
     cdk.Tags.of(this).add('Project', 'endevo')
     cdk.Tags.of(this).add('Environment', 'uat')
     cdk.Tags.of(this).add('ManagedBy', 'cdk')
