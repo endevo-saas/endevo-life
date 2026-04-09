@@ -57,11 +57,13 @@ _secrets = boto3.client("secretsmanager", region_name=REGION)
 dynamo_client = boto3.client("dynamodb", region_name=REGION)
 
 # AWS Bedrock ONLY — 100% inside AWS, zero external dependencies
+# Cross-Region Inference — auto-routes to us-east-1, us-west-2, or us-east-2
+# Provides 99.99% availability even during regional brownouts
 # Primary: Nova Lite (0.53s, $0.06/1M tokens, 300K context)
 # Fallback: Nova Micro (0.83s, $0.035/1M tokens, 128K context)
-CHAT_MODEL = os.environ.get("BEDROCK_CHAT_MODEL", "amazon.nova-lite-v1:0")
-CHAT_MODEL_FALLBACK = os.environ.get("BEDROCK_CHAT_FALLBACK", "amazon.nova-micro-v1:0")
-PLAN_MODEL = os.environ.get("BEDROCK_PLAN_MODEL", "amazon.nova-lite-v1:0")
+CHAT_MODEL = os.environ.get("BEDROCK_CHAT_MODEL", "us.amazon.nova-lite-v1:0")
+CHAT_MODEL_FALLBACK = os.environ.get("BEDROCK_CHAT_FALLBACK", "us.amazon.nova-micro-v1:0")
+PLAN_MODEL = os.environ.get("BEDROCK_PLAN_MODEL", "us.amazon.nova-lite-v1:0")
 EMBED_MODEL = os.environ.get("BEDROCK_EMBED_MODEL", "amazon.titan-embed-text-v2:0")
 
 MAX_CHAT_HISTORY = 10

@@ -58,6 +58,12 @@ Routes:
   POST /api/admin/archive/users/{userId}/restore       Restore archived user
   GET  /api/admin/archive/tenants                      List all archived tenants
   POST /api/admin/archive/tenants/{tenantId}/restore   Restore archived tenant
+
+  Knowledge Base Management:
+  POST /api/admin/knowledge/upload-url                 Get presigned S3 URL for KB file upload
+  GET  /api/admin/knowledge/files                      List files in knowledge bucket
+  DELETE /api/admin/knowledge/files                    Delete a file from knowledge bucket
+  POST /api/admin/knowledge/sync                       Trigger Bedrock KB ingestion sync
 """
 import json, os, uuid, base64, re
 import boto3
@@ -2343,5 +2349,62 @@ def handler(event, context):
             "message": f"Tenant '{t.get('name')}' restored from archive. {restored_count} users restored.",
             "restoredAt": now,
         })
+
+    # ── Knowledge Base Management ─────────────────────────────────────
+    if path.endswith("/knowledge/upload-url") and method == "POST":
+        import uuid as _uuid
+        filename = body.get("filename", "unknown")
+        content_type = body.get("contentType", "application/octet-stream")
+        key = f"uploads/{_uuid.uuid4().hex[:8]}_{filename}"
+        kb_s3 = boto3.client("s3", region_name="us-east-1")
+        url = kb_s3.generate_presigned_url(
+            "put_object",
+            Params={
+                "Bucket": "endevo-uat-jesse-knowledge",
+                "Key": key,
+                "ContentType": content_type,
+            },
+            ExpiresIn=300,
+        )
+        return resp(200, {"url": url, "key": key})
+
+    if path.endswith("/knowledge/files") and method == "GET":
+        kb_s3 = boto3.client("s3", region_name="us-east-1")
+        result = kb_s3.list_objects_v2(Bucket="endevo-uat-jesse-knowledge")
+        files = []
+        for obj in result.get("Contents", []):
+            files.append({
+                "key": obj["Key"],
+                "size": obj["Size"],
+                "lastModified": obj["LastModified"].isoformat(),
+            })
+        return resp(200, {"files": files, "count": len(files)})
+
+    if path.endswith("/knowledge/files") and method == "DELETE":
+        key = body.get("key")
+        if not key:
+            return resp(400, {"error": "Missing 'key' parameter"})
+        kb_s3 = boto3.client("s3", region_name="us-east-1")
+        kb_s3.delete_object(Bucket="endevo-uat-jesse-knowledge", Key=key)
+        return resp(200, {"message": f"Deleted {key}"})
+
+    if path.endswith("/knowledge/sync") and method == "POST":
+        try:
+            bedrock_agent = boto3.client("bedrock-agent", region_name="us-east-1")
+            kbs = bedrock_agent.list_knowledge_bases()
+            kb_id = None
+            for kb in kbs.get("knowledgeBaseSummaries", []):
+                if "jesse" in kb.get("name", "").lower():
+                    kb_id = kb["knowledgeBaseId"]
+                    break
+            if kb_id:
+                ds_list = bedrock_agent.list_data_sources(knowledgeBaseId=kb_id)
+                ds_id = ds_list.get("dataSourceSummaries", [{}])[0].get("dataSourceId")
+                if ds_id:
+                    bedrock_agent.start_ingestion_job(knowledgeBaseId=kb_id, dataSourceId=ds_id)
+                    return resp(200, {"message": f"Sync started for KB {kb_id}", "knowledgeBaseId": kb_id})
+            return resp(200, {"message": "Knowledge base not yet configured. Files uploaded to S3 successfully."})
+        except Exception as e:
+            return resp(200, {"message": f"Files saved to S3. KB sync: {str(e)[:100]}"})
 
     return err(404, f"Route not found: {method} {path}")
