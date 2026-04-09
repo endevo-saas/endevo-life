@@ -295,15 +295,31 @@ function ActionCard({ action }: { action: CopilotActionResult }) {
   )
 }
 
-function JesseAvatar({ size = 'sm' }: { size?: 'sm' | 'md' | 'lg' | 'xl' }) {
+function JesseAvatar({ size = 'sm', talking = false }: { size?: 'sm' | 'md' | 'lg' | 'xl'; talking?: boolean }) {
   const sizeMap = { sm: 'w-7 h-7', md: 'w-10 h-10', lg: 'w-16 h-16', xl: 'w-14 h-14' }
+  const glowClass = talking
+    ? 'ring-2 ring-orange-400 shadow-[0_0_12px_rgba(251,146,60,0.6)] animate-pulse'
+    : 'border-2 border-white/30 shadow-sm'
   return (
-    <img
-      src="/jesse/avatar.png"
-      alt="Jesse"
-      className={`${sizeMap[size]} rounded-full object-cover flex-shrink-0 shadow-sm border-2 border-white/30`}
-      onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
-    />
+    <div className={`${sizeMap[size]} rounded-full overflow-hidden flex-shrink-0 ${glowClass} transition-all duration-300`}>
+      {talking && size !== 'sm' ? (
+        <video
+          src="/jesse/intro.mp4"
+          autoPlay
+          loop
+          muted
+          playsInline
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <img
+          src="/jesse/avatar.png"
+          alt="Jesse"
+          className="w-full h-full object-cover"
+          onError={(e) => { (e.target as HTMLImageElement).style.display = 'none' }}
+        />
+      )}
+    </div>
   )
 }
 
@@ -599,9 +615,7 @@ export default function JesseAIWidget() {
             style={{ backdropFilter: 'blur(12px)' }}
           >
             <div className="flex items-center gap-2.5">
-              <div className="w-9 h-9 rounded-full bg-white/20 flex items-center justify-center backdrop-blur-sm">
-                <img src="/jesse/avatar.png" alt="Jesse" className="w-full h-full rounded-full object-cover" />
-              </div>
+              <JesseAvatar size="md" talking={isLoading} />
               <div>
                 <h2 className="text-white text-sm font-semibold leading-tight">
                   {config.title}
