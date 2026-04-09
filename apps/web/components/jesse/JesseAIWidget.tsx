@@ -103,42 +103,59 @@ function formatTime(iso: string): string {
 /* ------------------------------------------------------------------ */
 /* Utility: simple markdown renderer                                  */
 /* ------------------------------------------------------------------ */
+const BULLET_COLORS = [
+  'text-violet-400', 'text-cyan-400', 'text-emerald-400',
+  'text-amber-400', 'text-rose-400', 'text-blue-400',
+  'text-pink-400', 'text-teal-400',
+]
+
 function renderMarkdownLite(text: string): React.ReactNode[] {
-  const lines = text.split('\n')
+  // Strip emojis and markdown headers from AI output for clean display
+  const cleaned = text
+    .replace(/[\u{1F600}-\u{1F9FF}\u{2600}-\u{27BF}\u{1F300}-\u{1F5FF}\u{1F680}-\u{1F6FF}\u{1FA00}-\u{1FA6F}\u{1FA70}-\u{1FAFF}]/gu, '')
+    .replace(/^#{1,4}\s+/gm, '') // remove ## headers
+    .replace(/\*{3,}/g, '')      // remove *** dividers
+
+  const lines = cleaned.split('\n')
   const nodes: React.ReactNode[] = []
+  let bulletIdx = 0
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i]
 
-    // Numbered list
+    // Numbered list — colorful numbers
     const numberedMatch = line.match(/^(\d+)\.\s+(.+)$/)
     if (numberedMatch) {
+      const color = BULLET_COLORS[bulletIdx % BULLET_COLORS.length]
+      bulletIdx++
       nodes.push(
         <div key={i} className="flex gap-2 ml-1 my-0.5">
-          <span className="text-xs opacity-60 min-w-[1.2em] text-right">{numberedMatch[1]}.</span>
-          <span>{applyInlineFormatting(numberedMatch[2])}</span>
+          <span className={`text-xs font-bold min-w-[1.4em] text-right mt-0.5 ${color}`}>{numberedMatch[1]}.</span>
+          <span className="leading-relaxed">{applyInlineFormatting(numberedMatch[2])}</span>
         </div>
       )
       continue
     }
 
-    // Bullet list
+    // Bullet list — colorful dots
     const bulletMatch = line.match(/^[-*]\s+(.+)$/)
     if (bulletMatch) {
+      const color = BULLET_COLORS[bulletIdx % BULLET_COLORS.length]
+      bulletIdx++
       nodes.push(
         <div key={i} className="flex gap-2 ml-1 my-0.5">
-          <span className="text-xs opacity-60 mt-1">{'\u2022'}</span>
-          <span>{applyInlineFormatting(bulletMatch[1])}</span>
+          <span className={`text-sm mt-0.5 ${color}`}>{'\u25CF'}</span>
+          <span className="leading-relaxed">{applyInlineFormatting(bulletMatch[1])}</span>
         </div>
       )
       continue
     }
 
-    // Regular line (preserve blank lines as spacing)
+    // Regular line
     if (line.trim() === '') {
-      nodes.push(<div key={i} className="h-2" />)
+      nodes.push(<div key={i} className="h-1.5" />)
     } else {
-      nodes.push(<span key={i}>{applyInlineFormatting(line)}{i < lines.length - 1 ? '\n' : ''}</span>)
+      nodes.push(<p key={i} className="leading-relaxed my-0.5">{applyInlineFormatting(line)}</p>)
     }
   }
 
@@ -483,6 +500,8 @@ export default function JesseAIWidget() {
     const trimmed = input.trim()
     if (!trimmed || isLoading) return
 
+    // Stop Jesse speaking when user sends new message
+    stopSpeaking()
     setError(null)
     setInput('')
 
@@ -528,7 +547,7 @@ export default function JesseAIWidget() {
     } finally {
       setIsLoading(false)
     }
-  }, [input, isLoading, role, pathname, tenantId, speakReply, isOpen])
+  }, [input, isLoading, role, pathname, tenantId, speakReply, isOpen, stopSpeaking])
 
   /* ---- keyboard ---- */
   const handleKeyDown = useCallback(
@@ -595,7 +614,12 @@ export default function JesseAIWidget() {
             {/* Header controls: voice toggle, gender toggle, close */}
             <div className="flex items-center gap-0.5">
               <button
-                onClick={() => setVoiceEnabled((prev) => !prev)}
+                onClick={() => {
+                  setVoiceEnabled((prev) => {
+                    if (prev) stopSpeaking() // muting = stop audio NOW
+                    return !prev
+                  })
+                }}
                 className={`p-1.5 rounded-lg transition-all ${
                   voiceEnabled ? 'text-white bg-white/20' : 'text-white/40 hover:text-white/60'
                 }`}
@@ -677,7 +701,7 @@ export default function JesseAIWidget() {
               <textarea
                 ref={inputRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => { stopSpeaking(); setInput(e.target.value) }}
                 onKeyDown={handleKeyDown}
                 placeholder={placeholderHint}
                 rows={1}
