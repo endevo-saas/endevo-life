@@ -96,6 +96,19 @@ export class IamStack extends cdk.Stack {
       resources: ['*'],  // SNS Publish to phone numbers requires * resource
     }))
 
+    // Bedrock — AI model invocation + guardrails (Jesse AI)
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'BedrockAccess',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'bedrock:InvokeModel', 'bedrock:InvokeModelWithResponseStream',
+        'bedrock:Converse', 'bedrock:ConverseStream',
+        'bedrock:ApplyGuardrail', 'bedrock:GetGuardrail', 'bedrock:ListGuardrails',
+        'bedrock:Retrieve', 'bedrock:RetrieveAndGenerate',
+      ],
+      resources: ['*'],
+    }))
+
     // CloudFront signed URLs — LMS video delivery
     this.lambdaRole.addToPolicy(new iam.PolicyStatement({
       sid: 'CloudFrontSignedUrls',
