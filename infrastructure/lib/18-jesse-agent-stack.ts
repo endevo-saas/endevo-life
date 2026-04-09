@@ -1,5 +1,4 @@
 import * as cdk from 'aws-cdk-lib'
-import * as bedrock from 'aws-cdk-lib/aws-bedrock'
 import * as iam from 'aws-cdk-lib/aws-iam'
 import { Construct } from 'constructs'
 
@@ -12,11 +11,14 @@ interface JesseAgentStackProps extends cdk.StackProps {
  *
  * Creates an Amazon Bedrock Agent for Jesse AI with:
  *   1. IAM role — bedrock.amazonaws.com trust, model invocation, KB retrieval, Lambda invoke
- *   2. CfnAgent — foundation model, system prompt, idle TTL, auto-prepare
- *   3. Knowledge Base association — Endevo Life legacy planning content
+ *   2. CfnResource Agent — foundation model, system prompt, idle TTL, auto-prepare
+ *   3. Knowledge Base association (inline on agent)
  *   4. Action Group — RETURN_CONTROL (HITL) with OpenAPI schema for 6 actions
  *   5. Agent Alias — "live" alias for stable invocation endpoint
  *   6. Lambda role permission — bedrock:InvokeAgent on the agent ARN
+ *
+ * Note: Uses CfnResource instead of CfnAgent because aws-cdk-lib@2.130.0
+ * does not include L1 Bedrock Agent constructs (added in 2.142.0+).
  *
  * Model: us.amazon.nova-lite-v1:0
  * Knowledge Base: MUJXTOAKSR
@@ -220,91 +222,94 @@ export class JesseAgentStack extends cdk.Stack {
     })
 
     // ---------------------------------------------------------------
-    // 4. Bedrock Agent (CfnAgent)
+    // 4. Bedrock Agent (CfnResource — escape hatch for CDK 2.130.0)
     // ---------------------------------------------------------------
-    const agent = new bedrock.CfnAgent(this, 'JesseAgent', {
-      agentName: 'endevo-jesse-agent',
-      agentResourceRoleArn: agentRole.roleArn,
-      foundationModel,
-      instruction,
-      description: 'Jesse AI \u2014 Endevo Life digital legacy planning assistant with HITL action groups',
-      idleSessionTtlInSeconds: 1800,
-      autoPrepare: true,
+    const agent = new cdk.CfnResource(this, 'JesseAgent', {
+      type: 'AWS::Bedrock::Agent',
+      properties: {
+        AgentName: 'endevo-jesse-agent',
+        AgentResourceRoleArn: agentRole.roleArn,
+        FoundationModel: foundationModel,
+        Instruction: instruction,
+        Description: 'Jesse AI \u2014 Endevo Life digital legacy planning assistant with HITL action groups',
+        IdleSessionTTLInSeconds: 1800,
+        AutoPrepare: true,
 
-      // Knowledge Base association
-      knowledgeBase: [{
-        knowledgeBaseId,
-        description: 'Endevo Life legacy planning content \u2014 modules, workbook, legal guides',
-        knowledgeBaseState: 'ENABLED',
-      }],
+        // Knowledge Base association
+        KnowledgeBases: [{
+          KnowledgeBaseId: knowledgeBaseId,
+          Description: 'Endevo Life legacy planning content \u2014 modules, workbook, legal guides',
+          KnowledgeBaseState: 'ENABLED',
+        }],
 
-      // Action Group with RETURN_CONTROL (HITL)
-      actionGroups: [
-        {
-          actionGroupName: 'endevo-actions',
-          description: 'Jesse AI actions for tenant management, employee operations, and campaigns',
-          actionGroupExecutor: {
-            customControl: 'RETURN_CONTROL',
+        // Action Groups
+        ActionGroups: [
+          {
+            ActionGroupName: 'endevo-actions',
+            Description: 'Jesse AI actions for tenant management, employee operations, and campaigns',
+            ActionGroupExecutor: {
+              CustomControl: 'RETURN_CONTROL',
+            },
+            ApiSchema: {
+              Payload: openApiSchema,
+            },
           },
-          apiSchema: {
-            payload: openApiSchema,
+          {
+            ActionGroupName: 'UserInputAction',
+            ParentActionGroupSignature: 'AMAZON.UserInput',
+            ActionGroupState: 'ENABLED',
           },
-        },
-        {
-          actionGroupName: 'UserInputAction',
-          parentActionGroupSignature: 'AMAZON.UserInput',
-          actionGroupState: 'ENABLED',
-        },
-      ],
+        ],
+      },
     })
+
+    const agentId = agent.getAtt('AgentId').toString()
+    const agentArn = cdk.Fn.sub(
+      'arn:aws:bedrock:${AWS::Region}:${AWS::AccountId}:agent/${AgentId}',
+      { AgentId: agentId },
+    )
 
     // ---------------------------------------------------------------
     // 5. Agent Alias ("live")
     // ---------------------------------------------------------------
-    const agentAlias = new bedrock.CfnAgentAlias(this, 'JesseAgentAlias', {
-      agentId: agent.attrAgentId,
-      agentAliasName: 'live',
-      description: 'Live alias for Jesse AI Bedrock Agent',
+    const agentAlias = new cdk.CfnResource(this, 'JesseAgentAlias', {
+      type: 'AWS::Bedrock::AgentAlias',
+      properties: {
+        AgentId: agentId,
+        AgentAliasName: 'live',
+        Description: 'Live alias for Jesse AI Bedrock Agent',
+      },
     })
 
-    // Ensure alias is created after the agent
     agentAlias.addDependency(agent)
 
-    // ---------------------------------------------------------------
-    // 6. Lambda role — bedrock:InvokeAgent permission
-    // ---------------------------------------------------------------
-    props.lambdaRole.addToPolicy(new iam.PolicyStatement({
-      sid: 'BedrockInvokeJesseAgent',
-      effect: iam.Effect.ALLOW,
-      actions: ['bedrock:InvokeAgent'],
-      resources: [
-        `arn:aws:bedrock:${region}:${account}:agent/${agent.attrAgentId}`,
-        `arn:aws:bedrock:${region}:${account}:agent-alias/${agent.attrAgentId}/*`,
-      ],
-    }))
+    const agentAliasId = agentAlias.getAtt('AgentAliasId').toString()
+
+    // IAM: bedrock:InvokeAgent permission handled in 04-iam-stack.ts
+    // (wildcard on Bedrock actions) to avoid cyclic cross-stack dependency
 
     // ---------------------------------------------------------------
     // 7. Store references for cross-stack access
     // ---------------------------------------------------------------
-    this.agentId = agent.attrAgentId
-    this.agentAliasId = agentAlias.attrAgentAliasId
-    this.agentArn = agent.attrAgentArn
+    this.agentId = agentId
+    this.agentAliasId = agentAliasId
+    this.agentArn = agentArn
 
     // ---------------------------------------------------------------
     // 8. Outputs
     // ---------------------------------------------------------------
     new cdk.CfnOutput(this, 'AgentId', {
-      value: agent.attrAgentId,
+      value: agentId,
       description: 'Jesse AI Bedrock Agent ID',
     })
 
     new cdk.CfnOutput(this, 'AgentAliasId', {
-      value: agentAlias.attrAgentAliasId,
+      value: agentAliasId,
       description: 'Jesse AI Bedrock Agent Alias ID (live)',
     })
 
     new cdk.CfnOutput(this, 'AgentArn', {
-      value: agent.attrAgentArn,
+      value: agentArn,
       description: 'Jesse AI Bedrock Agent ARN',
     })
   }

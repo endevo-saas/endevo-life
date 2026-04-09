@@ -139,29 +139,8 @@ def handler(event, context):
       })
     )
 
-    // --- 5. IAM — SQS permissions on the shared Lambda role ---
-    props.lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'SQSEmailQueueAccess',
-        effect: iam.Effect.ALLOW,
-        actions: [
-          'sqs:ReceiveMessage',
-          'sqs:DeleteMessage',
-          'sqs:GetQueueAttributes',
-        ],
-        resources: [this.emailQueue.queueArn],
-      })
-    )
-
-    // SES send permissions (already in IAM stack but explicit for this Lambda)
-    props.lambdaRole.addToPolicy(
-      new iam.PolicyStatement({
-        sid: 'SESEmailSendAccess',
-        effect: iam.Effect.ALLOW,
-        actions: ['ses:SendEmail', 'ses:SendRawEmail'],
-        resources: ['*'],
-      })
-    )
+    // IAM: SQS + SES permissions are handled via wildcard in 04-iam-stack.ts
+    // Not adding cross-stack addToPolicy here to avoid cyclic dependency
 
     // --- Tags ---
     for (const [key, value] of Object.entries(tags)) {

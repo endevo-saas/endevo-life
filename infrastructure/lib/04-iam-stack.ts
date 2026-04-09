@@ -56,6 +56,17 @@ export class IamStack extends cdk.Stack {
       resources: ['*'],
     }))
 
+    // SQS — email queue + DLQ access
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'SQSAccess',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'sqs:SendMessage', 'sqs:ReceiveMessage', 'sqs:DeleteMessage',
+        'sqs:GetQueueAttributes', 'sqs:GetQueueUrl',
+      ],
+      resources: [`arn:aws:sqs:${this.region}:${this.account}:endevo-uat-*`],
+    }))
+
     // S3 — all endevo buckets (wildcard covers current + future buckets)
     this.lambdaRole.addToPolicy(new iam.PolicyStatement({
       sid: 'S3Access',
@@ -105,6 +116,7 @@ export class IamStack extends cdk.Stack {
         'bedrock:Converse', 'bedrock:ConverseStream',
         'bedrock:ApplyGuardrail', 'bedrock:GetGuardrail', 'bedrock:ListGuardrails',
         'bedrock:Retrieve', 'bedrock:RetrieveAndGenerate',
+        'bedrock:InvokeAgent',
       ],
       resources: ['*'],
     }))
