@@ -287,7 +287,6 @@ export default function DeveloperPortalPage() {
                 backgroundColor: 'var(--bg-elevated)',
                 color: 'var(--text-primary)',
                 border: '1px solid var(--border)',
-                focusRingColor: 'var(--accent-1)',
               }}
             >
               {tenants.map(t => (
