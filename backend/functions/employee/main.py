@@ -23,6 +23,7 @@ SESSIONS_T = dynamo.Table("endevo-uat-sessions")
 TENANTS_T  = dynamo.Table("endevo-uat-tenants")
 MODULES_T  = dynamo.Table("endevo-uat-lms-user-modules")
 CONFIG_T   = dynamo.Table("endevo-uat-config")
+AUDIT_T    = dynamo.Table("endevo-uat-audit")
 
 ALLOWED_ORIGINS = [
     "https://uat.endevo.life",
@@ -47,6 +48,44 @@ def err(status, msg): return resp(status, {"success": False, "detail": msg})
 def get_body(event):
     try: return json.loads(event.get("body") or "{}")
     except: return {}
+
+def get_ip(event):
+    return event.get("requestContext", {}).get("http", {}).get("sourceIp", "unknown")
+
+def get_device(event):
+    headers = event.get("headers") or {}
+    return (headers.get("user-agent") or headers.get("User-Agent") or "unknown")[:200]
+
+def audit(tenant_id, actor, action, details="", ip="", device="", severity="INFO"):
+    """Write an audit log entry to the audit table."""
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        audit_id = str(uuid.uuid4())
+        item = {
+            "tenantId":  tenant_id,
+            "sk":        f"{now}#{audit_id}",
+            "auditId":   audit_id,
+            "actor":     actor,
+            "action":    action,
+            "details":   details[:500],
+            "severity":  severity,
+            "createdAt": now,
+        }
+        if ip:     item["ip_address"] = ip
+        if device: item["user_agent"] = device
+        AUDIT_T.put_item(Item=item)
+    except Exception as e:
+        print(f"AUDIT_WRITE_ERROR: {e}")
+
+def _get_modules_total(tenant_id):
+    """Return the total number of LMS modules for this tenant (dynamic, not hardcoded)."""
+    try:
+        from boto3.dynamodb.conditions import Key as _Key
+        courses_resp = TRAIN_T.query(KeyConditionExpression=_Key("tenantId").eq(tenant_id))
+        count = len(courses_resp.get("Items", []))
+        return count if count > 0 else 6  # fallback to 6 if no courses seeded yet
+    except Exception:
+        return 6  # safe fallback
 
 # ── Plan Config (DynamoDB-driven with fallback) ──────────────────────────────
 
@@ -110,11 +149,11 @@ def _get_plan_config() -> dict:
     return _DEFAULT_PLAN_CONFIG
 
 def get_caller(event):
-    """Extract (tenantId, email, userId) from Bearer token via session or WorkOS JWT."""
+    """Extract (tenantId, email, userId, role) from Bearer token via session or WorkOS JWT."""
     auth_header = (event.get("headers") or {}).get("authorization", "")
     token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header.strip()
     if not token:
-        return None, None, None
+        return None, None, None, None
 
     # Session token (from OTP login)
     if token.startswith("endevo_"):
@@ -134,17 +173,17 @@ def get_caller(event):
                     from datetime import datetime as _dt, timezone as _tz
                     exp_dt = _dt.fromisoformat(expires)
                     if _dt.now(_tz.utc) > exp_dt:
-                        return None, None, None
-                return u.get("tenantId"), u.get("email"), u.get("userId", "")
+                        return None, None, None, None
+                return u.get("tenantId"), u.get("email"), u.get("userId", ""), u.get("role", "EMPLOYEE")
         except Exception as e:
             print(f"SESSION_LOOKUP_ERROR: {e}")
-        return None, None, None
+        return None, None, None, None
 
     # SECURITY: JWT path removed — unverified JWT tokens are not accepted.
     # All authentication MUST go through the DynamoDB session token path (endevo_*).
     # WorkOS JWTs lack RSA signature verification and can be forged.
     print(f"AUTH_REJECTED: Non-session token presented to employee endpoint")
-    return None, None, None
+    return None, None, None, None
 
 def _handler_impl(event, context):
     global _current_event
@@ -154,22 +193,35 @@ def _handler_impl(event, context):
     path   = event.get("rawPath", "")
     if method == "OPTIONS": return resp(200, {})
     body = get_body(event)
-    tenant_id, email, user_sub = get_caller(event)
+    tenant_id, email, user_sub, user_role = get_caller(event)
     if not tenant_id: return err(401, "Not authenticated")
+
+    # Role validation: only EMPLOYEE, HR_ADMIN, GLOBAL_ADMIN may access employee endpoints
+    if user_role not in ("EMPLOYEE", "HR_ADMIN", "GLOBAL_ADMIN"):
+        return err(403, "Employee access required")
+
+    ip = get_ip(event)
+    device = get_device(event)
 
     # GET /api/employee/dashboard
     if path.endswith("/dashboard") and method == "GET":
         from boto3.dynamodb.conditions import Key as _Key, Attr as _Attr
-        courses_resp = TRAIN_T.query(KeyConditionExpression=_Key("tenantId").eq(tenant_id))
-        total_courses = len(courses_resp.get("Items", []))
-        progress = PROG_T.scan(FilterExpression=_Attr("userId").eq(user_sub))
-        completed = len([p for p in progress.get("Items", []) if p.get("completed")])
+        modules_total = _get_modules_total(tenant_id)
+        # Count USER-SPECIFIC module completion from the modules table
+        mod_result = MODULES_T.scan(
+            FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id)
+        )
+        mod_items = mod_result.get("Items", [])
+        completed = len([
+            m for m in mod_items
+            if m.get("lockStatus") == "complete" or m.get("status") == "completed" or m.get("completed")
+        ])
         certs = CERT_T.scan(FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id))
         return resp(200, {
-            "total_courses":     total_courses,
+            "total_courses":     modules_total,
             "completed_courses": completed,
             "certificates":      len(certs.get("Items", [])),
-            "progress_pct":      round((completed / total_courses * 100) if total_courses > 0 else 0, 1)
+            "progress_pct":      round((completed / modules_total * 100) if modules_total > 0 else 0, 1)
         })
 
     # GET /api/employee/profile
@@ -201,6 +253,8 @@ def _handler_impl(event, context):
         names = {f"#{k}": k for k in updates}
         vals  = {f":{k}": v for k, v in updates.items()}
         USERS_T.update_item(Key={"userId": user_id}, UpdateExpression=expr, ExpressionAttributeNames=names, ExpressionAttributeValues=vals)
+        audit(tenant_id, email, "PROFILE_UPDATED",
+              f"Fields updated: {', '.join(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "Profile updated"})
 
     # GET /api/employee/training
@@ -271,12 +325,15 @@ def _handler_impl(event, context):
                     raise
             # Auto-mark progress as completed
             PROG_T.put_item(Item={"userId": user_sub, "videoId": course_id, "progressId": str(uuid.uuid4()), "tenantId": tenant_id, "courseId": course_id, "progressPct": 100, "completed": True, "updatedAt": now})
+        audit(tenant_id, email, "ASSESSMENT_SUBMITTED",
+              f"Course {course_id}: score={score}, passed={passed}", ip=ip, device=device)
         return resp(200, {"score": score, "passed": passed, "correct": correct, "total": len(qs), "certificate_issued": passed})
 
     # POST /api/employee/certificate/check — Check eligibility and generate certificate
     if path.endswith("/certificate/check") and method == "POST":
         from boto3.dynamodb.conditions import Attr as _Attr
         now = datetime.now(timezone.utc).isoformat()
+        modules_total = _get_modules_total(tenant_id)
 
         # 1. Query all user modules
         mod_result = MODULES_T.scan(
@@ -284,22 +341,22 @@ def _handler_impl(event, context):
         )
         mod_items = mod_result.get("Items", [])
 
-        # 2. Check if module 6 is completed (lockStatus == "complete" or status == "completed")
-        module_6_complete = any(
-            (str(m.get("moduleNum", "")) == "6") and
+        # 2. Check if the last module is completed (lockStatus == "complete" or status == "completed")
+        last_module_complete = any(
+            (str(m.get("moduleNum", "")) == str(modules_total)) and
             (m.get("lockStatus") == "complete" or m.get("status") == "completed" or m.get("completed"))
             for m in mod_items
         )
-        if not module_6_complete:
+        if not last_module_complete:
             completed_count = len([
                 m for m in mod_items
                 if m.get("lockStatus") == "complete" or m.get("status") == "completed" or m.get("completed")
             ])
             return resp(200, {
                 "eligible": False,
-                "message": f"Complete all 6 modules to earn your certificate. {completed_count}/6 completed.",
+                "message": f"Complete all {modules_total} modules to earn your certificate. {completed_count}/{modules_total} completed.",
                 "modulesCompleted": completed_count,
-                "modulesTotal": 6,
+                "modulesTotal": modules_total,
             })
 
         # 3. Check if certificate already exists (idempotent)
@@ -333,7 +390,7 @@ def _handler_impl(event, context):
             "title": "Legacy Readiness Certification",
             "issuedAt": now,
             "status": "issued",
-            "completedModules": 6,
+            "completedModules": modules_total,
         }
         if score is not None:
             cert_item["score"] = score
@@ -344,6 +401,8 @@ def _handler_impl(event, context):
             print(f"CERT_CREATE_ERROR: {e}")
             return err(500, "Failed to create certificate")
 
+        audit(tenant_id, email, "CERTIFICATE_GENERATED",
+              f"Certificate {cert_id} issued (score={score})", ip=ip, device=device)
         return resp(200, {"eligible": True, "certificate": cert_item, "message": "Certificate issued"})
 
     # GET /api/employee/certificates
@@ -438,7 +497,9 @@ def _handler_impl(event, context):
             except Exception:
                 pass
 
-        total_allowed = 6 if plan == "premium" else 2
+        plan_cfg = _get_plan_config()
+        plan_detail = plan_cfg.get(plan, plan_cfg.get("basic", {}))
+        total_allowed = int(plan_detail.get("sessionsTotal", 2))
 
         # Fetch session history for this user
         sessions_list = []
@@ -503,7 +564,7 @@ def _handler_impl(event, context):
 
         # Module completion
         modules_completed = 0
-        modules_total = 6
+        modules_total = _get_modules_total(tenant_id)
         try:
             mod_result = MODULES_T.scan(
                 FilterExpression=_Attr("userId").eq(user_sub) & _Attr("tenantId").eq(tenant_id)

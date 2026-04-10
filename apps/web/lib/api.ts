@@ -136,7 +136,7 @@ export const api = {
   adminUnlockUser: (id: string) =>
     apiFetch(`/api/admin/users/${id}/unlock`, { method: 'POST' }),
   adminResetPassword: (id: string) =>
-    apiFetch<{ temporary_password: string }>(`/api/admin/users/${id}/reset-password`, { method: 'POST' }),
+    apiFetch<{ temporary_password: string }>(`/api/admin/users/${id}/credential-reset`, { method: 'POST' }),
 
   // Admin — Other
   adminAudit: () => apiFetch<{ logs: AuditLog[] }>('/api/admin/audit'),
@@ -164,6 +164,16 @@ export const api = {
   hrCertificates: () => apiFetch<{ certificates: Certificate[]; count: number }>('/api/hr/certificates'),
   hrReactivateEmployee: (id: string) =>
     apiFetch(`/api/hr/employees/${id}/reactivate`, { method: 'POST' }),
+  hrLockEmployee: (userId: string) =>
+    apiFetch<{ message: string }>(`/api/hr/employees/${userId}/lock`, { method: 'POST' }),
+  hrUnlockEmployee: (userId: string) =>
+    apiFetch<{ message: string }>(`/api/hr/employees/${userId}/unlock`, { method: 'POST' }),
+  hrResetPassword: (userId: string) =>
+    apiFetch<{ temporary_password: string }>(`/api/hr/employees/${userId}/credential-reset`, { method: 'POST' }),
+  hrChangePlan: (plan: string) =>
+    apiFetch<{ message: string; old_plan: string; new_plan: string }>('/api/hr/subscription/plan', {
+      method: 'PUT', body: JSON.stringify({ plan })
+    }),
 
   // File Upload — Admin
   adminGetUploadUrl: (type: string, filename: string, tenantId?: string) =>

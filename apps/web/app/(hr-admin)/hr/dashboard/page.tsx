@@ -209,9 +209,11 @@ export default function HrDashboard() {
         setMetrics(metricsData.value)
       } else {
         // Fallback: compute from employee list if metrics endpoint not ready
-        const employees = employeesData.status === 'fulfilled'
+        // Exclude archived/inactive users from metrics
+        const allEmployees = employeesData.status === 'fulfilled'
           ? (employeesData.value.employees || [])
           : []
+        const employees = allEmployees.filter((u: User) => u.status !== 'archived')
         const total = employees.length
         const active = employees.filter((u: User) => u.status === 'active').length
         setMetrics({
@@ -229,10 +231,11 @@ export default function HrDashboard() {
         setSubscription(subData.value)
       }
 
-      // Recent users — last 10 from employee list
+      // Recent users — last 10 non-archived from employee list
       if (employeesData.status === 'fulfilled') {
         const emps = employeesData.value.employees || []
         const sorted = [...emps]
+          .filter(u => u.status !== 'archived')
           .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
           .slice(0, 10)
         setRecentUsers(sorted.map(u => ({

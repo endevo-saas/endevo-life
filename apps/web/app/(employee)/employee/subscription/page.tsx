@@ -7,7 +7,6 @@ import {
   ArrowRight, XCircle,
 } from 'lucide-react'
 import { apiFetch } from '@/lib/api'
-import Cookies from 'js-cookie'
 
 // ── Types (aligned with backend response shapes) ────────────────────────────
 
@@ -37,46 +36,6 @@ interface SessionsData {
   total: number
   used: number
   remaining: number
-}
-
-// ── Mock Data (fallback until API is ready) ─────────────────────────────────
-
-function detectPlanFromCookie(): 'basic' | 'premium' {
-  const cookiePlan = Cookies.get('tenant_plan') || Cookies.get('user_plan')
-  if (cookiePlan?.toLowerCase() === 'premium') return 'premium'
-  return 'basic'
-}
-
-function getMockSubscription(plan: 'basic' | 'premium'): SubscriptionData {
-  const isPremium = plan === 'premium'
-  return {
-    plan,
-    planLabel: isPremium ? 'Endevo Premium' : 'Endevo Basic',
-    priceMonthly: isPremium ? 41.58 : 24.92,
-    priceYearly: isPremium ? 499 : 299,
-    sessionsTotal: isPremium ? 6 : 2,
-    sessionsUsed: 0,
-    sessionsRemaining: isPremium ? 6 : 2,
-    features: isPremium
-      ? ['Readiness Assessment', '6 Learning Modules', '6x 30-min 1:1 Sessions per year', 'AI Guide (Jesse)', 'Priority scheduling', 'Extended session recordings']
-      : ['Readiness Assessment', '6 Learning Modules', '2x 30-min 1:1 Sessions per year', 'AI Guide (Jesse)'],
-    premiumFeatures: [
-      'Everything in Basic',
-      '6x 30-min 1:1 Sessions per year',
-      'Priority scheduling',
-      'Extended session recordings',
-    ],
-    managedBy: 'Your Employer',
-  }
-}
-
-function getMockSessions(): SessionsData {
-  return {
-    sessions: [],
-    total: 0,
-    used: 0,
-    remaining: 0,
-  }
 }
 
 // ── Plan Comparison Data ────────────────────────────────────────────────────
@@ -191,30 +150,29 @@ export default function EmployeeSubscriptionPage() {
     setLoading(true)
     setError('')
 
-    const fallbackPlan = detectPlanFromCookie()
-
-    // Fetch subscription + sessions in parallel, fallback to mock on failure
     const [subResult, sessResult] = await Promise.allSettled([
       apiFetch<SubscriptionData>('/api/employee/subscription'),
       apiFetch<SessionsData>('/api/employee/sessions'),
     ])
 
-    const mockSub = getMockSubscription(fallbackPlan)
+    const errors: string[] = []
 
     if (subResult.status === 'fulfilled' && subResult.value) {
       setSubscription(subResult.value)
     } else {
-      setSubscription(mockSub)
+      setSubscription(null)
+      errors.push('Unable to load subscription data')
     }
 
     if (sessResult.status === 'fulfilled' && sessResult.value) {
       setSessions(sessResult.value)
     } else {
-      setSessions({
-        ...getMockSessions(),
-        total: mockSub.sessionsTotal,
-        remaining: mockSub.sessionsRemaining,
-      })
+      setSessions(null)
+      errors.push('Unable to load session data')
+    }
+
+    if (errors.length > 0) {
+      setError(errors[0])
     }
 
     setLoading(false)
@@ -258,10 +216,12 @@ export default function EmployeeSubscriptionPage() {
 
         {loading ? (
           <LoadingSkeleton />
-        ) : !subscription || !sessions ? (
+        ) : !subscription ? (
           <div className="glass p-8 text-center">
             <AlertCircle className="w-8 h-8 text-slate-500 mx-auto mb-3" />
-            <p className="text-sm text-slate-400 mb-3">Unable to load subscription data</p>
+            <p className="text-sm text-slate-400 mb-3">
+              {error || 'No subscription found. Contact your HR administrator.'}
+            </p>
             <button onClick={load} className="px-4 py-2 rounded-xl bg-[#2BBFC5]/10 text-[#2BBFC5] border border-[#2BBFC5]/30 text-sm font-medium hover:bg-[#2BBFC5]/20 transition-all">
               <RefreshCw className="w-4 h-4 inline mr-2" />Retry
             </button>
@@ -384,18 +344,18 @@ export default function EmployeeSubscriptionPage() {
                     border: `1px solid ${isPremium ? 'rgba(232,97,42,0.25)' : 'rgba(43,191,197,0.25)'}`,
                   }}
                 >
-                  {isPremium ? 'Premium — 6/yr' : 'Basic — 2/yr'}
+                  {isPremium ? `Premium — ${subscription.sessionsTotal}/yr` : `Basic — ${subscription.sessionsTotal}/yr`}
                 </span>
               </div>
 
               {/* Progress bar */}
               <SessionProgressBar
-                used={sessions.used}
-                total={sessions.total > 0 ? sessions.total : subscription.sessionsTotal}
+                used={sessions?.used ?? subscription.sessionsUsed}
+                total={(sessions?.total ?? 0) > 0 ? sessions!.total : subscription.sessionsTotal}
               />
 
               {/* Session history */}
-              {sessions.sessions.length > 0 && (
+              {(sessions?.sessions?.length ?? 0) > 0 && (
                 <div className="mt-5 space-y-2">
                   <h4
                     className="text-xs font-semibold uppercase tracking-wider mb-3"
@@ -403,7 +363,7 @@ export default function EmployeeSubscriptionPage() {
                   >
                     Session History
                   </h4>
-                  {sessions.sessions.map((s, i) => (
+                  {sessions!.sessions.map((s, i) => (
                     <div
                       key={s.sessionId || i}
                       className="flex items-center justify-between p-3 rounded-xl"
@@ -433,7 +393,7 @@ export default function EmployeeSubscriptionPage() {
                 </div>
               )}
 
-              {sessions.sessions.length === 0 && (
+              {(!sessions || sessions.sessions.length === 0) && (
                 <div
                   className="mt-5 p-4 rounded-xl text-center"
                   style={{ background: 'rgba(255,255,255,0.02)', border: '1px dashed rgba(255,255,255,0.08)' }}
@@ -449,7 +409,7 @@ export default function EmployeeSubscriptionPage() {
               )}
 
               {/* Book session button */}
-              {(sessions.total > 0 ? sessions.remaining : subscription.sessionsRemaining) > 0 && (
+              {((sessions?.total ?? 0) > 0 ? sessions!.remaining : subscription.sessionsRemaining) > 0 && (
                 <a
                   href={BOOKING_URL}
                   target="_blank"
@@ -464,7 +424,7 @@ export default function EmployeeSubscriptionPage() {
                 </a>
               )}
 
-              {(sessions.total > 0 ? sessions.remaining : subscription.sessionsRemaining) <= 0 && (
+              {((sessions?.total ?? 0) > 0 ? sessions!.remaining : subscription.sessionsRemaining) <= 0 && (
                 <div
                   className="mt-5 p-3 rounded-xl flex items-center gap-3"
                   style={{ background: 'rgba(239,68,68,0.06)', border: '1px solid rgba(239,68,68,0.15)' }}
@@ -505,7 +465,7 @@ export default function EmployeeSubscriptionPage() {
                         Feature
                       </th>
                       <th className="px-6 py-3 text-center text-xs font-medium relative" style={{ color: '#2BBFC5' }}>
-                        Basic ($24.92/mo)
+                        Basic{!isPremium && subscription ? ` ($${subscription.priceMonthly.toFixed(2)}/mo)` : ''}
                         {!isPremium && (
                           <div
                             className="absolute -top-0.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest"
@@ -516,7 +476,7 @@ export default function EmployeeSubscriptionPage() {
                         )}
                       </th>
                       <th className="px-6 py-3 text-center text-xs font-medium relative" style={{ color: '#E8612A' }}>
-                        Premium ($41.58/mo)
+                        Premium{isPremium && subscription ? ` ($${subscription.priceMonthly.toFixed(2)}/mo)` : ''}
                         {isPremium && (
                           <div
                             className="absolute -top-0.5 left-1/2 -translate-x-1/2 px-1.5 py-0.5 rounded-full text-[8px] font-bold uppercase tracking-widest"

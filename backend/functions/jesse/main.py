@@ -2054,6 +2054,268 @@ def _handle_async_job(event: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Bedrock Agent: invoke_agent + action execution (new architecture)
+# ---------------------------------------------------------------------------
+# Maps Bedrock Agent operationIds to internal copilot action names
+_AGENT_ACTION_MAP: dict[str, str] = {
+    "GetTenantMetrics": "view_metrics",
+    "CreateEmployee": "create_employee",
+    "DraftInviteEmail": "send_invite",
+    "ChangeTenantPlan": "change_plan",
+    "SendNudgeCampaign": "send_invite",  # reuse invite flow for nudge
+}
+
+# Minimum role required per agent action type
+_AGENT_ACTION_ROLES: dict[str, set[str]] = {
+    "GetTenantMetrics": {"GLOBAL_ADMIN", "HR_ADMIN"},
+    "CreateEmployee": {"GLOBAL_ADMIN", "HR_ADMIN"},
+    "DraftInviteEmail": {"GLOBAL_ADMIN", "HR_ADMIN"},
+    "ChangeTenantPlan": {"GLOBAL_ADMIN"},
+    "SendNudgeCampaign": {"GLOBAL_ADMIN", "HR_ADMIN"},
+}
+
+
+def _handle_bedrock_agent(body: dict, tenant_id: str, email: str, user_id: str) -> dict:
+    """Handle POST /api/jesse/agent -- Bedrock Agent endpoint.
+
+    Invokes the Bedrock Agent via invoke_agent. If the agent returns text,
+    concatenates it into a reply. If it returns a returnControl event, extracts
+    the proposed action and returns it for frontend confirmation.
+
+    Falls back to the existing copilot flow when:
+      - AGENT_ID is not configured
+      - Any error occurs during the agent invocation
+    """
+    message = (body.get("message") or "").strip()
+    if not message:
+        return err(400, "message is required")
+    if len(message) > 5000:
+        return err(400, "message too long (max 5000 characters)")
+
+    # Fall back to copilot if Bedrock Agent is not configured
+    if not AGENT_ID or not AGENT_ALIAS_ID:
+        print("AGENT_FALLBACK: JESSE_AGENT_ID or JESSE_AGENT_ALIAS_ID not configured, using copilot")
+        return _handle_copilot(body, tenant_id, email, user_id)
+
+    # Use userId as session ID for Bedrock Agent conversation persistence
+    session_id = user_id
+
+    try:
+        response = bedrock_agent.invoke_agent(
+            agentId=AGENT_ID,
+            agentAliasId=AGENT_ALIAS_ID,
+            sessionId=session_id,
+            inputText=message,
+            enableTrace=False,
+        )
+
+        # Iterate the event stream to collect the reply
+        reply_chunks: list[str] = []
+        return_control_event: dict | None = None
+
+        for event in response.get("completion", []):
+            # Text chunk from the agent
+            if "chunk" in event:
+                chunk_bytes = event["chunk"].get("bytes", b"")
+                if chunk_bytes:
+                    reply_chunks.append(
+                        chunk_bytes.decode("utf-8") if isinstance(chunk_bytes, bytes) else str(chunk_bytes)
+                    )
+
+            # Agent wants to call a function — return control to the client
+            if "returnControl" in event:
+                return_control_event = event["returnControl"]
+
+        # --- returnControl: agent proposes an action ---
+        if return_control_event:
+            invocation_id = return_control_event.get("invocationId", str(uuid.uuid4()))
+            invocation_inputs = return_control_event.get("invocationInputs", [])
+
+            # Extract the first action group invocation
+            action_info: dict = {}
+            for inv_input in invocation_inputs:
+                api_inv = inv_input.get("apiInvocationInput", {})
+                if api_inv:
+                    action_info = {
+                        "actionGroup": api_inv.get("actionGroupName", ""),
+                        "apiPath": api_inv.get("apiPath", ""),
+                        "httpMethod": api_inv.get("httpMethod", ""),
+                        "parameters": {
+                            p.get("name", ""): p.get("value", "")
+                            for p in api_inv.get("parameters", [])
+                        },
+                        "requestBody": api_inv.get("requestBody", {}),
+                    }
+                    break
+                func_inv = inv_input.get("functionInvocationInput", {})
+                if func_inv:
+                    action_info = {
+                        "actionGroup": func_inv.get("actionGroupName", ""),
+                        "function": func_inv.get("function", ""),
+                        "parameters": func_inv.get("parameters", {}),
+                    }
+                    break
+
+            operation_id = action_info.get("function", "") or action_info.get("apiPath", "").strip("/").split("/")[-1]
+            label = operation_id.replace("_", " ").replace("-", " ").title()
+
+            # Build a human-readable description from parameters
+            params = action_info.get("parameters", {})
+            param_desc = ", ".join(f"{k}={v}" for k, v in params.items() if v) if params else "no parameters"
+
+            # Save user message to copilot history for continuity
+            _save_chat_message(user_id, "user", message, source="copilot")
+
+            proposal_reply = "I'd like to help with that. Here's what I propose:"
+            _save_chat_message(user_id, "assistant", proposal_reply, source="copilot")
+
+            return resp(200, {
+                "reply": proposal_reply,
+                "action": {
+                    "actionId": invocation_id,
+                    "type": operation_id,
+                    "label": label,
+                    "description": f"{label} with {param_desc}",
+                    "params": params,
+                    "status": "pending",
+                },
+            })
+
+        # --- Normal text reply ---
+        reply_text = "".join(reply_chunks).strip()
+        if not reply_text:
+            reply_text = "I'm not sure how to help with that. Could you rephrase your question?"
+
+        # Save to copilot history for continuity
+        _save_chat_message(user_id, "user", message, source="copilot")
+        _save_chat_message(user_id, "assistant", reply_text, source="copilot")
+        _prune_chat_history(user_id)
+
+        return resp(200, {"reply": reply_text})
+
+    except Exception as e:
+        print(f"AGENT_ERROR: {e}, falling back to copilot")
+        # Fall back to copilot on any error
+        return _handle_copilot(body, tenant_id, email, user_id)
+
+
+def _handle_agent_execute(body: dict, tenant_id: str, email: str, user_id: str) -> dict:
+    """Handle POST /api/jesse/agent/execute -- execute an approved Bedrock Agent action.
+
+    The frontend sends an approved action (from /api/jesse/agent returnControl response).
+    This handler validates permissions, maps the action type to an internal action,
+    and executes it.
+    """
+    action_type = (body.get("actionType") or "").strip()
+    params = body.get("params", {})
+
+    if not action_type:
+        return err(400, "actionType is required")
+
+    # Determine caller's role
+    db_role = _get_user_role(tenant_id, email)
+    role = db_role if db_role else "EMPLOYEE"
+
+    # --- Permission check: verify caller's role is allowed for this action ---
+    allowed_roles = _AGENT_ACTION_ROLES.get(action_type)
+    if allowed_roles and role not in allowed_roles:
+        return err(403, f"Your role ({role}) is not authorized to execute '{action_type}'")
+
+    # Map the Bedrock Agent operation to the internal copilot action name
+    internal_action = _AGENT_ACTION_MAP.get(action_type)
+
+    if internal_action:
+        # Reuse the existing _execute_action logic
+        result = _execute_action(internal_action, params, role, tenant_id, email, user_id)
+        if result.get("success"):
+            _log_jesse_action(tenant_id, email, f"agent_{internal_action}", params, result)
+        return resp(200, {"result": result, "actionType": action_type})
+
+    # --- Direct handlers for action types not in the copilot action map ---
+
+    if action_type == "GetTenantMetrics":
+        # Already mapped above, but kept as safety net
+        result = _execute_action("view_metrics", params, role, tenant_id, email, user_id)
+        return resp(200, {"result": result, "actionType": action_type})
+
+    if action_type == "CreateEmployee":
+        result = _execute_action("create_employee", params, role, tenant_id, email, user_id)
+        return resp(200, {"result": result, "actionType": action_type})
+
+    if action_type == "DraftInviteEmail":
+        result = _execute_action("send_invite", params, role, tenant_id, email, user_id)
+        return resp(200, {"result": result, "actionType": action_type})
+
+    if action_type == "ChangeTenantPlan":
+        result = _execute_action("change_plan", params, role, tenant_id, email, user_id)
+        return resp(200, {"result": result, "actionType": action_type})
+
+    if action_type == "SendNudgeCampaign":
+        # Re-engagement: query inactive employees and send nudge emails
+        target_tenant = params.get("tenantId", tenant_id)
+        if role == "HR_ADMIN":
+            target_tenant = tenant_id
+
+        try:
+            from boto3.dynamodb.conditions import Attr as _Attr
+            result = USERS_T.scan(
+                FilterExpression=_Attr("tenantId").eq(target_tenant)
+                & _Attr("role").eq("EMPLOYEE")
+                & _Attr("status").eq("active"),
+                Limit=100,
+            )
+            employees = result.get("Items", [])
+            sent_count = 0
+            errors: list[str] = []
+            for emp in employees:
+                emp_email = emp.get("email", "")
+                if not emp_email:
+                    continue
+                try:
+                    ses.send_email(
+                        Source="noreply@endevo.life",
+                        Destination={"ToAddresses": [emp_email]},
+                        Message={
+                            "Subject": {"Data": "We miss you at Endevo Life!", "Charset": "UTF-8"},
+                            "Body": {
+                                "Html": {
+                                    "Data": (
+                                        "<h2>Time to check in!</h2>"
+                                        "<p>Your legacy planning journey is waiting for you at Endevo Life.</p>"
+                                        "<p><a href='https://uat.endevo.life'>Log in now</a> to continue where you left off.</p>"
+                                        "<br><p>-- The Endevo Life Team</p>"
+                                    ),
+                                    "Charset": "UTF-8",
+                                },
+                            },
+                        },
+                    )
+                    sent_count += 1
+                except Exception as e:
+                    errors.append(f"{emp_email}: {e}")
+
+            _log_jesse_action(tenant_id, email, "agent_send_nudge_campaign", params, {
+                "success": True, "sent": sent_count, "errors_count": len(errors),
+            })
+            return resp(200, {
+                "result": {
+                    "success": True,
+                    "message": f"Nudge campaign sent to {sent_count} employee(s) in {target_tenant}",
+                    "sent": sent_count,
+                    "errors": errors[:5] if errors else [],
+                },
+                "actionType": action_type,
+            })
+        except Exception as e:
+            return resp(200, {
+                "result": {"success": False, "error": f"Failed to send nudge campaign: {e}"},
+                "actionType": action_type,
+            })
+
+    return err(400, f"Unknown actionType: {action_type}")
+
+
+# ---------------------------------------------------------------------------
 # Route handler
 # ---------------------------------------------------------------------------
 def _handler_impl(event: dict, context) -> dict:
@@ -2095,6 +2357,14 @@ def _handler_impl(event: dict, context) -> dict:
             "hasAccess": True,
             "plan": "all",
         })
+
+    # POST /api/jesse/agent/execute -- Execute approved Bedrock Agent action
+    if path.endswith("/agent/execute") and method == "POST":
+        return _handle_agent_execute(body, tenant_id, email, user_id)
+
+    # POST /api/jesse/agent -- Bedrock Agent endpoint (falls back to copilot)
+    if path.endswith("/agent") and not path.endswith("/agent/execute") and method == "POST":
+        return _handle_bedrock_agent(body, tenant_id, email, user_id)
 
     # POST /api/jesse/copilot -- Unified AI endpoint (chat + RAG + actions)
     if path.endswith("/copilot") and not path.endswith("/copilot/history") and method == "POST":

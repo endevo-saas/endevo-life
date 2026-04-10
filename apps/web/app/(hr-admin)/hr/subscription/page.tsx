@@ -1,13 +1,13 @@
 'use client'
 export const dynamic = 'force-dynamic'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import {
   CreditCard, Loader2, RefreshCw, AlertCircle, Users, Globe,
   Mail, Building2, CheckCircle, Crown, Calendar, Shield, Star, Sparkles,
-  Video, ArrowRight, Receipt
+  Video, ArrowRight, Receipt, X, ArrowUpRight, ArrowDownRight
 } from 'lucide-react'
-import { api } from '@/lib/api'
+import { api, HrSubscription } from '@/lib/api'
 
 interface TenantInfo {
   tenantId: string
@@ -25,55 +25,152 @@ interface TenantInfo {
   hr_count: number
 }
 
-const BASIC_FEATURES = [
-  '6-module LMS access',
-  '40-question readiness assessment',
-  'Progress tracking',
-  'Completion certificates',
-  'Email support',
-]
-
-const PREMIUM_FEATURES = [
-  '1-on-1 live sessions with estate planning expert',
-  'Priority support (24-hour response)',
-  'Advanced analytics dashboard',
-  'Custom company branding',
-  'Dedicated account manager',
-  'API access',
-]
-
-const PLAN_META: Record<string, { label: string; priceYearly: number; priceMonthly: number; color: string; features: string[]; icon: typeof Star }> = {
+const FALLBACK_PLAN_META: Record<string, { label: string; priceYearly: number; priceMonthly: number; features: string[]; premiumFeatures: string[] }> = {
   basic: {
     label: 'Endevo Basic',
     priceYearly: 299,
     priceMonthly: 29,
-    color: 'brand',
-    features: BASIC_FEATURES,
-    icon: Star,
+    features: [
+      '6-module LMS access',
+      '40-question readiness assessment',
+      'Progress tracking',
+      'Completion certificates',
+      'Email support',
+    ],
+    premiumFeatures: [],
   },
   premium: {
     label: 'Endevo Premium',
     priceYearly: 499,
     priceMonthly: 49,
-    color: 'orange',
-    features: [...BASIC_FEATURES, ...PREMIUM_FEATURES],
-    icon: Crown,
+    features: [
+      '6-module LMS access',
+      '40-question readiness assessment',
+      'Progress tracking',
+      'Completion certificates',
+      'Email support',
+    ],
+    premiumFeatures: [
+      '1-on-1 live sessions with estate planning expert',
+      'Priority support (24-hour response)',
+      'Advanced analytics dashboard',
+      'Custom company branding',
+      'Dedicated account manager',
+      'API access',
+    ],
   },
+}
+
+interface ConfirmModalProps {
+  open: boolean
+  currentPlan: string
+  targetPlan: string
+  loading: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}
+
+function ConfirmPlanChangeModal({ open, currentPlan, targetPlan, loading, onConfirm, onCancel }: ConfirmModalProps) {
+  if (!open) return null
+
+  const isUpgrade = targetPlan === 'premium'
+  const targetLabel = targetPlan === 'premium' ? 'Endevo Premium' : 'Endevo Basic'
+  const currentLabel = currentPlan === 'premium' ? 'Endevo Premium' : 'Endevo Basic'
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className="relative w-full max-w-md mx-4 rounded-2xl border border-white/10 bg-slate-900 p-6 shadow-2xl">
+        <button
+          onClick={onCancel}
+          disabled={loading}
+          className="absolute top-4 right-4 p-1 text-slate-400 hover:text-white transition-colors"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="flex items-center gap-3 mb-4">
+          <div className={`w-10 h-10 rounded-xl flex items-center justify-center ${
+            isUpgrade
+              ? 'bg-[#E8612A]/10 border border-[#E8612A]/20'
+              : 'bg-[#2BBFC5]/10 border border-[#2BBFC5]/20'
+          }`}>
+            {isUpgrade
+              ? <ArrowUpRight className="w-5 h-5 text-[#E8612A]" />
+              : <ArrowDownRight className="w-5 h-5 text-[#2BBFC5]" />}
+          </div>
+          <h2 className="text-lg font-bold text-white">
+            {isUpgrade ? 'Upgrade' : 'Downgrade'} Plan
+          </h2>
+        </div>
+
+        <p className="text-sm text-slate-300 mb-4">
+          You are about to {isUpgrade ? 'upgrade' : 'downgrade'} your organisation from{' '}
+          <span className="font-semibold text-white">{currentLabel}</span> to{' '}
+          <span className="font-semibold text-white">{targetLabel}</span>.
+        </p>
+
+        {!isUpgrade && (
+          <div className="mb-4 p-3 bg-yellow-500/10 border border-yellow-500/30 rounded-xl text-yellow-400 text-sm">
+            Downgrading will remove access to premium features including 1-on-1 sessions, priority support, and advanced analytics.
+          </div>
+        )}
+
+        {isUpgrade && (
+          <div className="mb-4 p-3 bg-[#E8612A]/10 border border-[#E8612A]/30 rounded-xl text-[#E8612A] text-sm">
+            Upgrading unlocks 1-on-1 sessions with estate planning experts, priority support, advanced analytics, and more.
+          </div>
+        )}
+
+        <div className="flex gap-3">
+          <button
+            onClick={onCancel}
+            disabled={loading}
+            className="flex-1 py-2.5 rounded-xl text-sm font-medium bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10 transition-all disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={loading}
+            className={`flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all disabled:opacity-50 flex items-center justify-center gap-2 ${
+              isUpgrade
+                ? 'bg-[#E8612A] hover:bg-[#E8612A]/90 shadow-lg shadow-[#E8612A]/20'
+                : 'bg-[#2BBFC5] hover:bg-[#2BBFC5]/90 shadow-lg shadow-[#2BBFC5]/20'
+            }`}
+          >
+            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
+            {loading ? 'Changing...' : `Confirm ${isUpgrade ? 'Upgrade' : 'Downgrade'}`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function HrSubscriptionPage() {
   const [tenant, setTenant] = useState<TenantInfo | null>(null)
+  const [subscription, setSubscription] = useState<HrSubscription | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  async function load() {
-    setLoading(true); setError('')
+  // Plan change state
+  const [changingPlan, setChangingPlan] = useState(false)
+  const [confirmModal, setConfirmModal] = useState<{ open: boolean; targetPlan: string }>({ open: false, targetPlan: '' })
+  const [changeSuccess, setChangeSuccess] = useState('')
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    setChangeSuccess('')
     try {
-      const d = await api.hrTenant()
-      setTenant(d as TenantInfo)
+      const [tenantData, subData] = await Promise.all([
+        api.hrTenant(),
+        api.hrSubscription(),
+      ])
+      setTenant(tenantData as TenantInfo)
+      setSubscription(subData)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load tenant info')
-      // Set fallback tenant so plan cards still render
+      setError(e instanceof Error ? e.message : 'Failed to load subscription info')
       setTenant(prev => prev ?? {
         tenantId: '',
         name: 'Your Organisation',
@@ -85,13 +182,41 @@ export default function HrSubscriptionPage() {
         employee_count: 0,
         hr_count: 0,
       })
-    } finally { setLoading(false) }
-  }
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { load() }, [load])
 
   const activePlan = tenant?.plan || 'basic'
   const seatPct = tenant ? Math.round((tenant.user_count / Math.max(tenant.maxSeats, 1)) * 100) : 0
+
+  // Use subscription data for pricing if available, otherwise fallback
+  const priceYearly = subscription?.pricePerEmployee ?? FALLBACK_PLAN_META[activePlan]?.priceYearly ?? 299
+  const basicFeatures = FALLBACK_PLAN_META.basic.features
+  const premiumOnlyFeatures = FALLBACK_PLAN_META.premium.premiumFeatures
+
+  function handlePlanClick(targetPlan: string) {
+    if (targetPlan === activePlan) return
+    setConfirmModal({ open: true, targetPlan })
+  }
+
+  async function handleConfirmPlanChange() {
+    setChangingPlan(true)
+    setChangeSuccess('')
+    try {
+      const result = await api.hrChangePlan(confirmModal.targetPlan)
+      setChangeSuccess(result.message)
+      setConfirmModal({ open: false, targetPlan: '' })
+      // Reload data to reflect the change
+      await load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to change plan')
+    } finally {
+      setChangingPlan(false)
+    }
+  }
 
   return (
     <div className="p-6">
@@ -106,14 +231,24 @@ export default function HrSubscriptionPage() {
           </button>
         </div>
 
-        {error && <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex gap-2"><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5"/>{error}</div>}
+        {error && (
+          <div className="mb-4 p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-sm flex gap-2">
+            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5"/>{error}
+          </div>
+        )}
+
+        {changeSuccess && (
+          <div className="mb-4 p-3 bg-green-500/10 border border-green-500/30 rounded-xl text-green-400 text-sm flex gap-2">
+            <CheckCircle className="w-4 h-4 flex-shrink-0 mt-0.5"/>{changeSuccess}
+          </div>
+        )}
 
         {loading ? (
           <div className="glass p-12 flex justify-center"><Loader2 className="w-7 h-7 animate-spin text-[#2BBFC5]"/></div>
         ) : tenant ? (
           <div className="space-y-6">
 
-            {/* ── Plan Cards ── */}
+            {/* Plan Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
 
               {/* Basic Plan */}
@@ -139,13 +274,13 @@ export default function HrSubscriptionPage() {
                 <div className="mb-5">
                   <div className="flex items-baseline gap-1">
                     <span className="text-4xl font-black text-white">$299</span>
-                    <span className="text-slate-400 text-sm">/year</span>
+                    <span className="text-slate-400 text-sm">/year per seat</span>
                   </div>
                   <p className="text-slate-500 text-sm mt-1">or $29/month billed monthly</p>
                 </div>
 
                 <div className="space-y-3 mb-6">
-                  {BASIC_FEATURES.map(f => (
+                  {basicFeatures.map(f => (
                     <div key={f} className="flex items-start gap-2.5 text-sm text-slate-300">
                       <CheckCircle className="w-4 h-4 text-[#2BBFC5] flex-shrink-0 mt-0.5"/>
                       {f}
@@ -158,9 +293,13 @@ export default function HrSubscriptionPage() {
                     Your Active Plan
                   </div>
                 ) : (
-                  <div className="w-full py-2.5 rounded-xl text-center text-sm font-medium bg-white/5 text-slate-400 border border-white/10">
-                    Contact admin to switch
-                  </div>
+                  <button
+                    onClick={() => handlePlanClick('basic')}
+                    className="w-full py-2.5 rounded-xl text-center text-sm font-bold bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10 hover:border-white/20 transition-all flex items-center justify-center gap-2"
+                  >
+                    <ArrowDownRight className="w-4 h-4" />
+                    Downgrade to Basic
+                  </button>
                 )}
               </div>
 
@@ -190,14 +329,14 @@ export default function HrSubscriptionPage() {
                 <div className="mb-5">
                   <div className="flex items-baseline gap-1">
                     <span className="text-4xl font-black text-white">$499</span>
-                    <span className="text-slate-400 text-sm">/year</span>
+                    <span className="text-slate-400 text-sm">/year per seat</span>
                   </div>
                   <p className="text-slate-500 text-sm mt-1">or $49/month billed monthly</p>
                 </div>
 
                 <p className="text-xs text-[#E8612A] font-medium mb-3 uppercase tracking-wider">Everything in Basic, plus:</p>
                 <div className="space-y-3 mb-6">
-                  {PREMIUM_FEATURES.map(f => (
+                  {premiumOnlyFeatures.map(f => (
                     <div key={f} className="flex items-start gap-2.5 text-sm text-slate-300">
                       <CheckCircle className="w-4 h-4 text-[#E8612A] flex-shrink-0 mt-0.5"/>
                       {f}
@@ -210,14 +349,18 @@ export default function HrSubscriptionPage() {
                     Your Active Plan
                   </div>
                 ) : (
-                  <button className="w-full py-2.5 rounded-xl text-center text-sm font-bold bg-[#E8612A] text-white hover:bg-[#E8612A]/90 transition-all shadow-lg shadow-[#E8612A]/20">
-                    Contact admin to upgrade
+                  <button
+                    onClick={() => handlePlanClick('premium')}
+                    className="w-full py-2.5 rounded-xl text-center text-sm font-bold bg-[#E8612A] text-white hover:bg-[#E8612A]/90 transition-all shadow-lg shadow-[#E8612A]/20 flex items-center justify-center gap-2"
+                  >
+                    <ArrowUpRight className="w-4 h-4" />
+                    Upgrade to Premium
                   </button>
                 )}
               </div>
             </div>
 
-            {/* ── Feature Comparison Table ── */}
+            {/* Feature Comparison Table */}
             <div className="glass overflow-hidden">
               <div className="px-6 py-4 border-b border-white/5">
                 <h2 className="text-base font-semibold text-white">Feature Comparison</h2>
@@ -233,17 +376,8 @@ export default function HrSubscriptionPage() {
                   </thead>
                   <tbody className="divide-y divide-white/5">
                     {[
-                      { feature: '6-module LMS access', basic: true, premium: true },
-                      { feature: '40-question readiness assessment', basic: true, premium: true },
-                      { feature: 'Progress tracking', basic: true, premium: true },
-                      { feature: 'Completion certificates', basic: true, premium: true },
-                      { feature: 'Email support', basic: true, premium: true },
-                      { feature: '1-on-1 live sessions with expert', basic: false, premium: true },
-                      { feature: 'Priority support (24-hour response)', basic: false, premium: true },
-                      { feature: 'Advanced analytics dashboard', basic: false, premium: true },
-                      { feature: 'Custom company branding', basic: false, premium: true },
-                      { feature: 'Dedicated account manager', basic: false, premium: true },
-                      { feature: 'API access', basic: false, premium: true },
+                      ...basicFeatures.map(f => ({ feature: f, basic: true, premium: true })),
+                      ...premiumOnlyFeatures.map(f => ({ feature: f, basic: false, premium: true })),
                     ].map(row => (
                       <tr key={row.feature} className="hover:bg-white/[0.02]">
                         <td className="px-6 py-3 text-sm text-slate-300">{row.feature}</td>
@@ -264,7 +398,7 @@ export default function HrSubscriptionPage() {
               </div>
             </div>
 
-            {/* ── Seat Usage ── */}
+            {/* Seat Usage */}
             <div className="glass p-6">
               <div className="flex items-center gap-3 mb-5">
                 <Users className="w-5 h-5 text-slate-400"/>
@@ -299,7 +433,7 @@ export default function HrSubscriptionPage() {
               </div>
             </div>
 
-            {/* ── Organisation Details ── */}
+            {/* Organisation Details */}
             <div className="glass p-6">
               <div className="flex items-center gap-3 mb-5">
                 <Building2 className="w-5 h-5 text-slate-400"/>
@@ -335,7 +469,7 @@ export default function HrSubscriptionPage() {
               </div>
             </div>
 
-            {/* ── Billing Information ── */}
+            {/* Billing Information */}
             <div className="glass p-6">
               <div className="flex items-center gap-3 mb-5">
                 <Receipt className="w-5 h-5 text-slate-400"/>
@@ -370,15 +504,15 @@ export default function HrSubscriptionPage() {
               <div className="mt-4 p-3 rounded-xl bg-[#2BBFC5]/5 border border-[#2BBFC5]/15">
                 <p className="text-xs text-slate-400">
                   <span className="font-medium text-[#2BBFC5]">Per-seat pricing:</span>{' '}
-                  ${(PLAN_META[activePlan]?.priceYearly ?? 299)} / seat / year × {tenant.user_count} seats = {' '}
+                  ${priceYearly} / seat / year x {subscription?.usedSeats ?? tenant.user_count} seats = {' '}
                   <span className="font-bold text-white">
-                    ${((PLAN_META[activePlan]?.priceYearly ?? 299) * tenant.user_count).toLocaleString()}/year
+                    ${(priceYearly * (subscription?.usedSeats ?? tenant.user_count)).toLocaleString()}/year
                   </span>
                 </p>
               </div>
             </div>
 
-            {/* ── Premium Booking (if Premium plan) ── */}
+            {/* Premium Booking (if Premium plan) */}
             {activePlan === 'premium' && (
               <div className="rounded-2xl p-6"
                 style={{
@@ -394,9 +528,11 @@ export default function HrSubscriptionPage() {
                     <p className="text-sm text-slate-400 mt-1">
                       Included with your Premium subscription. Employees can book personalised sessions with certified estate planning experts.
                     </p>
-                    <p className="text-xs text-slate-500 mt-2">
-                      Booking link: <a href="https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH" target="_blank" rel="noopener noreferrer" className="text-[#E8612A] hover:underline">link.endevo.life/widget/booking/...</a>
-                    </p>
+                    {subscription && (
+                      <p className="text-xs text-slate-500 mt-2">
+                        Sessions: {subscription.usedSessions} used / {subscription.totalSessions} total ({subscription.totalSessions - subscription.usedSessions} remaining)
+                      </p>
+                    )}
                   </div>
                   <a
                     href="https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH"
@@ -414,9 +550,11 @@ export default function HrSubscriptionPage() {
               </div>
             )}
 
-            {/* ── Upgrade CTA ── */}
+            {/* Footer note */}
             <div className="mt-4 pt-4 border-t border-white/5">
-              <p className="text-xs text-slate-500">To upgrade your plan or change billing, contact your platform administrator or email <a href="mailto:support@endevo.life" className="text-[#2BBFC5] hover:underline">support@endevo.life</a>.</p>
+              <p className="text-xs text-slate-500">
+                Need help with billing? Contact <a href="mailto:support@endevo.life" className="text-[#2BBFC5] hover:underline">support@endevo.life</a>.
+              </p>
             </div>
 
           </div>
@@ -430,6 +568,16 @@ export default function HrSubscriptionPage() {
           </div>
         )}
       </div>
+
+      {/* Confirmation Modal */}
+      <ConfirmPlanChangeModal
+        open={confirmModal.open}
+        currentPlan={activePlan}
+        targetPlan={confirmModal.targetPlan}
+        loading={changingPlan}
+        onConfirm={handleConfirmPlanChange}
+        onCancel={() => setConfirmModal({ open: false, targetPlan: '' })}
+      />
     </div>
   )
 }

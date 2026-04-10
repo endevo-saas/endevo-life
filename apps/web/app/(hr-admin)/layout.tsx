@@ -34,7 +34,7 @@ const navGroups = [
     ],
   },
   {
-    label: 'Admin',
+    label: 'Account',
     items: [
       { href: '/hr/subscription', icon: CreditCard, label: 'Subscription' },
       { href: '/hr/settings',     icon: Settings,   label: 'Settings' },

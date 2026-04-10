@@ -15,6 +15,12 @@ Routes:
   POST /api/hr/sessions/book         — book a 1:1 session for an employee
   POST /api/hr/upload-url            — get S3 presigned upload URL (scoped to tenant)
   POST /api/hr/branding              — update own tenant branding
+  PUT  /api/hr/subscription/plan     — HR admin changes tenant plan (basic/premium)
+
+  Employee Actions:
+  POST /api/hr/employees/{id}/lock                     Lock employee (set status=locked)
+  POST /api/hr/employees/{id}/unlock                   Unlock employee (set status=active)
+  POST /api/hr/employees/{id}/credential-reset            Reset employee password (new OTP via WorkOS)
 
   Archive / Recycle Bin:
   GET  /api/hr/archive/employees                       List archived employees in own tenant
@@ -264,7 +270,12 @@ def _handler_impl(event, context):
 
     # ── GET /api/hr/dashboard ─────────────────────────────────────────────
     if path.endswith("/dashboard") and method == "GET":
-        base_filter = Attr("tenantId").eq(tenant_id)
+        # Only count non-archived employees in this tenant
+        base_filter = (
+            Attr("tenantId").eq(tenant_id)
+            & Attr("role").eq("EMPLOYEE")
+            & Attr("status").ne("archived")
+        )
         # Fetch tenant name for display
         t_name = ""
         try:
@@ -276,7 +287,7 @@ def _handler_impl(event, context):
             "total_users":     count_items(USERS_T, base_filter),
             "active_users":    count_items(USERS_T, base_filter & Attr("status").eq("active")),
             "pending_invites": count_items(USERS_T, base_filter & Attr("status").eq("pending")),
-            "total_employees": count_items(USERS_T, base_filter & Attr("role").eq("EMPLOYEE")),
+            "total_employees": count_items(USERS_T, base_filter),
             "tenant_name":     t_name,
         })
 
@@ -364,7 +375,7 @@ def _handler_impl(event, context):
         try:
             workos_user = _workos_api("POST", "/user_management/users", {
                 "email": email,
-                "password": temp_password,
+                "password": new_cred,
                 "first_name": first_name,
                 "last_name": last_name,
                 "email_verified": True,
@@ -496,6 +507,83 @@ def _handler_impl(event, context):
               ip=ip, device=device, severity="WARN")
         return resp(200, {"message": f"Employee {emp_email} restored"})
 
+    # ── POST /api/hr/employees/{id}/lock ────────────────────────────────
+    if "/employees/" in path and path.endswith("/lock") and method == "POST":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item or item.get("tenantId") != tenant_id:
+            return err(404, "Employee not found in your organisation")
+        if item.get("role") != "EMPLOYEE":
+            return err(403, "Can only lock employees in your organisation")
+        if item.get("status") == "locked":
+            return err(400, "Employee is already locked")
+        emp_email = item.get("email", "")
+        now = datetime.now(timezone.utc).isoformat()
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET #s = :v, lockedAt = :at, lockedBy = :by",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "locked", ":at": now, ":by": caller_email})
+        audit(tenant_id, caller_email, "EMPLOYEE_LOCKED",
+              json.dumps({"userId": user_id, "email": emp_email, "lockedBy": caller_email}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"Employee {emp_email} locked"})
+
+    # ── POST /api/hr/employees/{id}/unlock ────────────────────────────────
+    if "/employees/" in path and path.endswith("/unlock") and method == "POST":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item or item.get("tenantId") != tenant_id:
+            return err(404, "Employee not found in your organisation")
+        if item.get("role") != "EMPLOYEE":
+            return err(403, "Can only unlock employees in your organisation")
+        if item.get("status") != "locked":
+            return err(400, "Employee is not locked")
+        emp_email = item.get("email", "")
+        now = datetime.now(timezone.utc).isoformat()
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET #s = :v, unlockedAt = :at, unlockedBy = :by",
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={":v": "active", ":at": now, ":by": caller_email})
+        audit(tenant_id, caller_email, "EMPLOYEE_UNLOCKED",
+              json.dumps({"userId": user_id, "email": emp_email, "unlockedBy": caller_email}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"Employee {emp_email} unlocked"})
+
+    # ── POST /api/hr/employees/{id}/credential-reset ────────────────────────
+    if "/employees/" in path and path.endswith("/credential-reset") and method == "POST":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item or item.get("tenantId") != tenant_id:
+            return err(404, "Employee not found in your organisation")
+        if item.get("role") != "EMPLOYEE":
+            return err(403, "Can only reset password for employees in your organisation")
+        emp_email = item.get("email", "")
+        new_cred = f"Endevo@{str(uuid.uuid4())[:8]}!"
+        now = datetime.now(timezone.utc).isoformat()
+        # Update password in WorkOS
+        try:
+            from urllib.parse import quote
+            workos_users = _workos_api("GET", f"/user_management/users?email={quote(emp_email)}")
+            workos_data = workos_users.get("data", [])
+            if workos_data:
+                workos_uid = workos_data[0]["id"]
+                _workos_api("PUT", f"/user_management/users/{workos_uid}", {
+                    "password": new_cred,
+                })
+            else:
+                return err(404, f"No auth account found for {emp_email}")
+        except Exception as e:
+            print(f"WORKOS_RESET_PW_ERROR: {e}")
+            return err(500, f"Failed to reset password: {str(e)[:100]}")
+        # Record in DynamoDB
+        USERS_T.update_item(Key={"userId": user_id},
+            UpdateExpression="SET credResetAt = :at, credResetBy = :by",
+            ExpressionAttributeValues={":at": now, ":by": caller_email})
+        audit(tenant_id, caller_email, "EMPLOYEE_PASSWORD_RESET",
+              json.dumps({"userId": user_id, "email": emp_email, "resetBy": caller_email}),
+              ip=ip, device=device, severity="WARN")
+        return resp(200, {"message": f"Password reset for {emp_email}", "temporary_credential": new_cred})
+
     # ── GET /api/hr/tenant ────────────────────────────────────────────────
     if path.endswith("/tenant") and method == "GET":
         t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
@@ -574,7 +662,12 @@ def _handler_impl(event, context):
 
     # ── GET /api/hr/metrics ─────────────────────────────────────────────
     if path.endswith("/metrics") and method == "GET":
-        base_filter = Attr("tenantId").eq(tenant_id)
+        # Only count non-archived employees in this tenant
+        base_filter = (
+            Attr("tenantId").eq(tenant_id)
+            & Attr("role").eq("EMPLOYEE")
+            & Attr("status").ne("archived")
+        )
         all_users = scan_all(USERS_T, base_filter)
         total_users = len(all_users)
         active_users = [u for u in all_users if u.get("status") == "active"]
@@ -903,6 +996,61 @@ def _handler_impl(event, context):
               json.dumps({"userId": user_id, "email": emp_email, "restoredBy": caller_email}),
               ip=ip, device=device, severity="WARN")
         return resp(200, {"message": f"Employee {emp_email} restored from archive", "restoredAt": now})
+
+    # ── PUT /api/hr/subscription/plan — HR admin changes tenant plan ──────
+    if path.endswith("/subscription/plan") and method == "PUT":
+        new_plan = (body.get("plan") or "").lower().strip()
+        if new_plan not in ("basic", "premium"):
+            return err(400, "Invalid plan. Must be 'basic' or 'premium'.")
+
+        # Verify tenant exists
+        tenant_item = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+        if not tenant_item:
+            return err(404, "Tenant not found")
+
+        old_plan = tenant_item.get("plan", "basic").lower()
+        if old_plan == new_plan:
+            return err(400, f"Tenant is already on the '{new_plan}' plan.")
+
+        now = datetime.now(timezone.utc).isoformat()
+        change_id = str(uuid.uuid4())
+
+        # Update plan on tenant record
+        TENANTS_T.update_item(
+            Key={"tenantId": tenant_id},
+            UpdateExpression="SET #p = :plan, updatedAt = :now, planChangedAt = :now, planChangedBy = :by",
+            ExpressionAttributeNames={"#p": "plan"},
+            ExpressionAttributeValues={
+                ":plan": new_plan,
+                ":now":  now,
+                ":by":   caller_email,
+            },
+        )
+
+        # Create subscription change record
+        SUBSCRIPTIONS_T.put_item(Item={
+            "tenantId":  tenant_id,
+            "sk":        f"CHANGE#{now}#{change_id}",
+            "changeId":  change_id,
+            "fromPlan":  old_plan,
+            "toPlan":    new_plan,
+            "changedBy": caller_email,
+            "reason":    f"HR admin changed plan from {old_plan} to {new_plan}",
+            "createdAt": now,
+        })
+
+        # Audit log
+        audit(
+            tenant_id, caller_email, "PLAN_CHANGED",
+            json.dumps({"from": old_plan, "to": new_plan, "changeId": change_id}),
+            ip=ip, device=device, severity="WARN",
+        )
+
+        return resp(200, {
+            "message":  f"Plan changed from {old_plan} to {new_plan}",
+            "old_plan": old_plan,
+            "new_plan": new_plan,
+        })
 
     return err(404, f"Route not found: {method} {path}")
 

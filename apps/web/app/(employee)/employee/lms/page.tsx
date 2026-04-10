@@ -248,7 +248,7 @@ export default function LMSDashboard() {
               <span style={{ color: '#2BBFC5' }}>Training</span>
             </h1>
             <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-              6 modules to help you protect the people you love most
+              {modules.length > 0 ? `${modules.length} modules` : 'Modules'} to help you protect the people you love most
             </p>
           </div>
           {overallComplete && (
@@ -297,7 +297,7 @@ export default function LMSDashboard() {
                 Start with the Readiness Assessment to unlock all modules
               </p>
               <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
-                40 questions across 4 life domains. This helps us personalise your learning journey.
+                Answer questions across multiple life domains. This helps us personalise your learning journey.
               </p>
             </div>
             <Link
@@ -327,7 +327,7 @@ export default function LMSDashboard() {
                     Readiness Assessment Complete — Overall: {latestScorecard.overallScore}%
                   </p>
                   <p className="text-xs mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                    All 6 modules are unlocked
+                    All {modules.length} modules are unlocked
                   </p>
                 </div>
               </div>

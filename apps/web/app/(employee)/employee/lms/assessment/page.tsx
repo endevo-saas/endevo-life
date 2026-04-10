@@ -55,8 +55,13 @@ export default function AssessmentPage() {
     setError('')
     try {
       const res = await api.lmsGetAssessmentQuestions() as { questions: AssessmentQuestion[] }
-      setQuestions(res.questions || [])
-      setPhase('questions')
+      const loaded = res.questions || []
+      setQuestions(loaded)
+      if (loaded.length === 0) {
+        setError('No questions were returned. Please try again later.')
+      } else {
+        setPhase('questions')
+      }
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load questions')
     } finally {
@@ -134,7 +139,7 @@ export default function AssessmentPage() {
           >
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: 'Questions', value: '40', icon: '❓' },
+                { label: 'Questions', value: questions.length > 0 ? `${questions.length}` : '40', icon: '❓' },
                 { label: 'Unlocks All', value: '6 Modules', icon: '🔓' },
                 { label: 'Domains', value: '4', icon: '📚' },
                 { label: 'Est. Time', value: '20 min', icon: '⏱️' },
@@ -176,6 +181,13 @@ export default function AssessmentPage() {
               style={{ background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)', color: '#f87171' }}
             >
               {error}
+              <button
+                onClick={startAssessment}
+                disabled={loading}
+                className="ml-3 underline font-medium hover:opacity-70"
+              >
+                {loading ? 'Retrying…' : 'Retry'}
+              </button>
             </div>
           )}
 
@@ -286,7 +298,35 @@ export default function AssessmentPage() {
   }
 
   // ── Questions Screen ──────────────────────────────────────────────
-  if (!currentQuestion) return null
+  if (!currentQuestion) {
+    return (
+      <div className="min-h-screen flex items-center justify-center p-6" style={{ background: 'var(--bg-base)' }}>
+        <div className="text-center space-y-4">
+          <div className="text-5xl">📋</div>
+          <p className="text-lg font-bold text-white">No questions available</p>
+          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
+            The assessment questions could not be loaded. Please try again.
+          </p>
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={() => router.back()}
+              className="px-5 py-2.5 rounded-xl font-semibold text-sm transition-all"
+              style={{ background: 'var(--bg-elevated)', color: 'var(--text-secondary)', border: '1px solid var(--border-subtle)' }}
+            >
+              Go Back
+            </button>
+            <button
+              onClick={startAssessment}
+              className="px-5 py-2.5 rounded-xl font-bold text-sm text-white transition-all hover:scale-105"
+              style={{ background: 'linear-gradient(135deg,#E8612A,#f97316)' }}
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
 
   const domainColor = DOMAIN_COLORS[currentQuestion.domain] || 'var(--accent-1)'
 
@@ -332,7 +372,7 @@ export default function AssessmentPage() {
 
           {/* Answer options */}
           <div className="space-y-3">
-            {currentQuestion.answers.map(opt => {
+            {(currentQuestion.answers ?? []).map(opt => {
               const isSelected = selectedOption === opt.label
               return (
                 <button

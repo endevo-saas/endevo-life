@@ -111,10 +111,10 @@ export default function EmployeesPage() {
     setDeactivating(emp.userId)
     try {
       if (locking) {
-        await api.adminLockUser(emp.userId)
+        await api.hrLockEmployee(emp.userId)
         showSuccess(`${emp.email} locked`)
       } else {
-        await api.adminUnlockUser(emp.userId)
+        await api.hrUnlockEmployee(emp.userId)
         showSuccess(`${emp.email} unlocked`)
       }
       load()
@@ -129,7 +129,7 @@ export default function EmployeesPage() {
     if (!confirm(`Reset password for ${emp.email}? A new temporary password will be generated.`)) return
     setDeactivating(emp.userId)
     try {
-      const res = await api.adminResetPassword(emp.userId) as { temporary_password: string }
+      const res = await api.hrResetPassword(emp.userId) as { temporary_password: string }
       setResetPwResult({ email: emp.email, password: res.temporary_password })
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Reset failed')
