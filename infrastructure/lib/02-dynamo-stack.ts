@@ -81,11 +81,6 @@ export class DynamoStack extends cdk.Stack {
       partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     })
-    responses.addGlobalSecondaryIndex({
-      indexName: 'responseId-index',
-      partitionKey: { name: 'responseId', type: dynamodb.AttributeType.STRING },
-      projectionType: dynamodb.ProjectionType.ALL,
-    })
     tables.push(responses)
 
     // --- 6. Certificates ---

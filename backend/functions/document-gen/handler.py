@@ -52,10 +52,9 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if not all([response_id, user_id, tenant_id]):
             return {"statusCode": 400, "body": "Missing required fields: responseId, userId, tenantId"}
 
-        # Fetch assessment response from DynamoDB using responseId GSI
-        response_result = responses_table.query(
-            IndexName="responseId-index",
-            KeyConditionExpression="responseId = :rid",
+        # Fetch assessment response from DynamoDB using scan with filter
+        response_result = responses_table.scan(
+            FilterExpression="responseId = :rid",
             ExpressionAttributeValues={":rid": response_id}
         )
         if not response_result.get("Items"):
