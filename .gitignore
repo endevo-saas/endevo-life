@@ -63,3 +63,16 @@ _keys/
 *.key
 credentials
 backend/functions/jesse/knowledge_niki.txt
+
+# CDK named output directories (variant synths)
+infrastructure/cdk.out.*/
+
+# Next.js build artifacts (auto-generated, never edit)
+apps/web/next-env.d.ts
+apps/web/tsconfig.tsbuildinfo
+
+# Playwright test results
+apps/web/test-results/
+
+# package-lock.json (using pnpm)
+package-lock.json
