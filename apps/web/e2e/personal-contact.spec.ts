@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, Page } from '@playwright/test'
 import { injectAuthCookies } from './helpers/auth'
 
 /**
@@ -17,12 +17,6 @@ const API_BASE =
 // ---------------------------------------------------------------------------
 // Shared mock wiring
 // ---------------------------------------------------------------------------
-
-type Page = Parameters<typeof test>[1] extends (args: infer A) => unknown
-  ? A extends { page: infer P }
-    ? P
-    : never
-  : never
 
 async function wirePersonalContactMocks(page: Page): Promise<void> {
   await page.route(`${API_BASE}/api/employee/profile`, async (route) => {

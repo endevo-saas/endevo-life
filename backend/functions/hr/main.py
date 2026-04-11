@@ -265,7 +265,7 @@ def _handler_impl(event, context):
 
     if not tenant_id:
         return err(401, "Not authenticated")
-    if role not in ("HR_ADMIN", "GLOBAL_ADMIN"):
+    if role not in ("ADMIN", "GLOBAL_ADMIN"):
         return err(403, "HR Admin access required")
 
     # ── GET /api/hr/dashboard ─────────────────────────────────────────────
@@ -593,7 +593,7 @@ def _handler_impl(event, context):
         t["user_count"]     = count_items(USERS_T, Attr("tenantId").eq(tenant_id))
         t["active_count"]   = count_items(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("status").eq("active"))
         t["employee_count"] = count_items(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("role").eq("EMPLOYEE"))
-        t["hr_count"]       = count_items(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("role").eq("HR_ADMIN"))
+        t["hr_count"]       = count_items(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("role").eq("ADMIN"))
         return resp(200, t)
 
     # ── GET /api/hr/training ──────────────────────────────────────────────

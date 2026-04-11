@@ -21,7 +21,6 @@ Routes handled:
 """
 import json
 import logging
-import random
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -37,6 +36,66 @@ logger = logging.getLogger(__name__)
 
 REQUIRED_QUESTION_COUNT: int = 40
 TOTAL_MODULES: int = 6
+
+# ── Domain ordering — Phase D ─────────────────────────────────────────────────
+# Immutable tuple enforces a single source of truth for domain delivery order.
+DOMAIN_ORDER: tuple[str, ...] = ("legal", "financial", "physical", "digital")
+
+
+def sort_questions_by_domain(questions: list[dict]) -> list[dict]:
+    """Return a new list of questions sorted by domain order then by number.
+
+    Domain order: legal → financial → physical → digital.
+    Questions whose domain is not in DOMAIN_ORDER are appended at the end,
+    sorted by their number within that unknown-domain group.
+
+    The input list is never mutated.
+    """
+    domain_rank = {d: i for i, d in enumerate(DOMAIN_ORDER)}
+
+    def sort_key(q: dict) -> tuple[int, int]:
+        domain = q.get("domain", "")
+        rank = domain_rank.get(domain, len(DOMAIN_ORDER))  # unknown → end
+        number = q.get("number") or q.get("order") or 0
+        try:
+            number = int(number)
+        except (TypeError, ValueError):
+            number = 0
+        return (rank, number)
+
+    return sorted(questions, key=sort_key)
+
+
+def calculate_domain_progress(
+    questions: list[dict], answers: dict[str, str]
+) -> dict[str, int]:
+    """Return per-domain completion percentage (0-100) as integer values.
+
+    Args:
+        questions: Full ordered question list (each must have 'domain' and 'questionId').
+        answers: Mapping of questionId → selected answer label (any non-empty = answered).
+
+    Returns:
+        Dict with keys from DOMAIN_ORDER, each value 0-100.
+    """
+    domain_totals: dict[str, int] = {d: 0 for d in DOMAIN_ORDER}
+    domain_answered: dict[str, int] = {d: 0 for d in DOMAIN_ORDER}
+
+    for q in questions:
+        domain = q.get("domain", "")
+        if domain not in domain_totals:
+            continue
+        domain_totals[domain] += 1
+        if q.get("questionId") in answers:
+            domain_answered[domain] += 1
+
+    result: dict[str, int] = {}
+    for domain in DOMAIN_ORDER:
+        total = domain_totals[domain]
+        answered = domain_answered[domain]
+        result[domain] = int(round(answered / total * 100)) if total > 0 else 0
+
+    return result
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -174,18 +233,22 @@ def _fetch_all_questions(tenant_id: str) -> list[dict]:
 # ── Route handlers ────────────────────────────────────────────────────────────
 
 def _list_questions(tenant_id: str, user_id: str) -> dict:
-    """GET /api/lms/assessment/questions"""
+    """GET /api/lms/assessment/questions
+
+    Returns questions in deterministic domain order:
+    legal (1-10) → financial (11-20) → physical (21-30) → digital (31-40).
+    Randomisation is intentionally removed — Phase D requirement.
+    """
     try:
         questions = _fetch_all_questions(tenant_id)
 
-        # Shuffle order for each user session (keep questionId and number intact for scoring).
-        # shuffleIndex reflects the display position in this attempt (1-based).
-        random.shuffle(questions)
+        # Phase D: sort by domain order instead of random shuffle.
+        ordered = sort_questions_by_domain(questions)
 
         # Strip correctLabel / score data before returning to client.
         # Schema answers = [{label, text, score}] — send label and text only.
         safe_questions = []
-        for shuffle_idx, q in enumerate(questions, start=1):
+        for display_idx, q in enumerate(ordered, start=1):
             safe_answers = [
                 {"label": a.get("label", ""), "text": a.get("text", "")}
                 for a in (q.get("answers") or [])
@@ -198,10 +261,10 @@ def _list_questions(tenant_id: str, user_id: str) -> dict:
                     "domain": q.get("domain", ""),
                     "number": q.get("number"),
                     "order": q.get("order"),
-                    "shuffleIndex": shuffle_idx,
+                    "displayIndex": display_idx,
                 }
             )
-        return ok({"questions": safe_questions, "total": len(safe_questions)})
+        return ok({"questions": safe_questions, "totalQuestions": len(safe_questions)})
     except ClientError:
         return err(500, "Failed to load questions")
 

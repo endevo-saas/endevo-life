@@ -81,6 +81,11 @@ export class DynamoStack extends cdk.Stack {
       partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
       projectionType: dynamodb.ProjectionType.ALL,
     })
+    responses.addGlobalSecondaryIndex({
+      indexName: 'responseId-index',
+      partitionKey: { name: 'responseId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
     tables.push(responses)
 
     // --- 6. Certificates ---
@@ -127,11 +132,97 @@ export class DynamoStack extends cdk.Stack {
     })
     tables.push(config)
 
+    // --- 10. Checklist Templates ---
+    const checklistTemplates = new dynamodb.Table(this, 'ChecklistTemplates', {
+      tableName: 'endevo-uat-checklist-templates',
+      partitionKey: { name: 'templateId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'version', type: dynamodb.AttributeType.NUMBER },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    checklistTemplates.addGlobalSecondaryIndex({
+      indexName: 'status-createdAt-index',
+      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'createdAt', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    tables.push(checklistTemplates)
+
+    // --- 11. Checklist Progress ---
+    const checklistProgress = new dynamodb.Table(this, 'ChecklistProgress', {
+      tableName: 'endevo-uat-checklist-progress',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'templateId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    checklistProgress.addGlobalSecondaryIndex({
+      indexName: 'templateId-userId-index',
+      partitionKey: { name: 'templateId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    tables.push(checklistProgress)
+
+    // --- 12. Master Classes ---
+    const masterClasses = new dynamodb.Table(this, 'MasterClasses', {
+      tableName: 'endevo-uat-master-classes',
+      partitionKey: { name: 'tenantId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'classId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    masterClasses.addGlobalSecondaryIndex({
+      indexName: 'status-scheduledAt-index',
+      partitionKey: { name: 'status', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'scheduledAt', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    tables.push(masterClasses)
+
+    // --- 13. Documents ---
+    const documents = new dynamodb.Table(this, 'Documents', {
+      tableName: 'endevo-uat-documents',
+      partitionKey: { name: 'documentId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    documents.addGlobalSecondaryIndex({
+      indexName: 'userId-responseId-index',
+      partitionKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'responseId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    documents.addGlobalSecondaryIndex({
+      indexName: 'responseId-userId-index',
+      partitionKey: { name: 'responseId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      projectionType: dynamodb.ProjectionType.ALL,
+    })
+    tables.push(documents)
+
+    // --- 14. OTP ---
+    const otp = new dynamodb.Table(this, 'Otp', {
+      tableName: 'endevo-uat-otp',
+      partitionKey: { name: 'otpId', type: dynamodb.AttributeType.STRING },
+      sortKey: { name: 'userId', type: dynamodb.AttributeType.STRING },
+      billingMode: dynamodb.BillingMode.PAY_PER_REQUEST,
+      pointInTimeRecovery: true,
+      timeToLiveAttribute: 'ttl',
+      removalPolicy: cdk.RemovalPolicy.RETAIN,
+    })
+    tables.push(otp)
+
     this.tableArns = tables.map(t => t.tableArn)
 
     // --- Outputs (IDs must be hardcoded — CDK tokens not allowed in IDs) ---
     // Note: lmsModules and lmsUserModules are managed by LmsInfraStack (imported resources).
-    const tableNames = ['tenants','users','training','questions','responses','certificates','audit','videoProgress','config']
+    const tableNames = ['tenants','users','training','questions','responses','certificates','audit','videoProgress','config','checklistTemplates','checklistProgress','masterClasses','documents','otp']
     tables.forEach((t, i) => {
       new cdk.CfnOutput(this, `TableArn${tableNames[i]}`, {
         value: t.tableArn,

@@ -206,6 +206,33 @@ export const api = {
   employeeProfile: () => apiFetch('/api/employee/profile'),
   employeeUpdateProfile: (body: Record<string, string>) =>
     apiFetch('/api/employee/profile', { method: 'PUT', body: JSON.stringify(body) }),
+  employeeUpdatePersonalContact: (
+    body: { personal_email?: string; personal_phone_number?: string }
+  ) =>
+    apiFetch<{ success: boolean; message: string }>(
+      '/api/employee/profile/personal-contact',
+      { method: 'POST', body: JSON.stringify(body) }
+    ),
+  employeeSendPersonalEmailOtp: (personal_email: string) =>
+    apiFetch<{ success: boolean; otp_id: string; message: string }>(
+      '/api/employee/verify/personal-email',
+      { method: 'POST', body: JSON.stringify({ action: 'send', personal_email }) }
+    ),
+  employeeVerifyPersonalEmailOtp: (otp_id: string, code: string) =>
+    apiFetch<{ success: boolean; verified: boolean }>(
+      '/api/employee/verify/personal-email',
+      { method: 'POST', body: JSON.stringify({ action: 'verify', otp_id, code }) }
+    ),
+  employeeSendPersonalPhoneOtp: (personal_phone_number: string) =>
+    apiFetch<{ success: boolean; otp_id: string; message: string }>(
+      '/api/employee/verify/personal-phone',
+      { method: 'POST', body: JSON.stringify({ action: 'send', personal_phone_number }) }
+    ),
+  employeeVerifyPersonalPhoneOtp: (otp_id: string, code: string) =>
+    apiFetch<{ success: boolean; verified: boolean }>(
+      '/api/employee/verify/personal-phone',
+      { method: 'POST', body: JSON.stringify({ action: 'verify', otp_id, code }) }
+    ),
   employeeTraining: () => apiFetch<{ courses: Course[]; count: number }>('/api/employee/training'),
   employeeProgress: (course_id: string, progress_pct: number, completed: boolean) =>
     apiFetch('/api/employee/progress', { method: 'POST', body: JSON.stringify({ course_id, progress_pct, completed }) }),
@@ -593,6 +620,10 @@ export interface User {
   jobTitle?: string
   tenantId: string
   createdAt: string
+  personal_email?: string
+  personal_phone_number?: string
+  personal_email_verified?: boolean
+  personal_phone_verified?: boolean
 }
 
 export interface AuditLog {
@@ -618,9 +649,11 @@ export interface Course {
 
 export interface Question {
   questionId: string
-  courseId: string
+  courseId?: string
   question: string
   options: string[]
+  domain?: string
+  number?: number
 }
 
 export interface Certificate {

@@ -50,6 +50,8 @@ from utils.response import ok, err
 logger = logging.getLogger(__name__)
 
 VALID_QUESTION_TYPES: frozenset[str] = frozenset({"assessment", "inline"})
+VALID_ASSESSMENT_DOMAINS: frozenset[str] = frozenset({"legal", "financial", "physical", "digital"})
+MAX_QUESTIONS_PER_DOMAIN: int = 10
 # Not hardcoded — module count is dynamic, read from endevo-uat-lms-modules
 
 
@@ -91,6 +93,26 @@ def _paginate_scan(table, **kwargs) -> list[dict]:
 
 
 # ── Question CRUD ─────────────────────────────────────────────────────────────
+
+def _count_domain_questions(tenant_id: str, domain: str) -> int:
+    """Return count of existing assessment questions for a given domain/tenant."""
+    from boto3.dynamodb.conditions import Attr as _Attr
+    resp = QUESTIONS_T.query(
+        KeyConditionExpression=Key("tenantId").eq(tenant_id),
+        FilterExpression=_Attr("type").eq("assessment") & _Attr("domain").eq(domain),
+        Select="COUNT",
+    )
+    count = resp.get("Count", 0)
+    while "LastEvaluatedKey" in resp:
+        resp = QUESTIONS_T.query(
+            KeyConditionExpression=Key("tenantId").eq(tenant_id),
+            FilterExpression=_Attr("type").eq("assessment") & _Attr("domain").eq(domain),
+            Select="COUNT",
+            ExclusiveStartKey=resp["LastEvaluatedKey"],
+        )
+        count += resp.get("Count", 0)
+    return count
+
 
 def _list_questions(event: dict, tenant_id: str) -> dict:
     """GET /api/lms/admin/questions"""
@@ -164,6 +186,15 @@ def _create_question(event: dict, tenant_id: str) -> dict:
 
     domain = str(body.get("domain", "")).strip()
     if domain:
+        if q_type == "assessment":
+            if domain not in VALID_ASSESSMENT_DOMAINS:
+                return err(400, f"domain must be one of {sorted(VALID_ASSESSMENT_DOMAINS)}")
+            try:
+                current_count = _count_domain_questions(tenant_id, domain)
+            except ClientError:
+                return err(500, "Failed to validate domain question count")
+            if current_count >= MAX_QUESTIONS_PER_DOMAIN:
+                return err(400, f"Domain '{domain}' already has {MAX_QUESTIONS_PER_DOMAIN} assessment questions (maximum reached)")
         item["domain"] = domain
 
     number = body.get("number")
@@ -224,6 +255,30 @@ def _update_question(event: dict, tenant_id: str, question_id: str) -> dict:
         "#ts": "timestamp",
         "#ord": "order",
     }
+
+    # Validate domain when it is being updated
+    if "domain" in body:
+        new_domain = str(body.get("domain", "")).strip()
+        if new_domain and new_domain not in VALID_ASSESSMENT_DOMAINS:
+            return err(400, f"domain must be one of {sorted(VALID_ASSESSMENT_DOMAINS)}")
+        if new_domain:
+            # Fetch existing question to check its type and current domain
+            try:
+                existing_resp = QUESTIONS_T.get_item(
+                    Key={"tenantId": tenant_id, "questionId": question_id}
+                )
+            except ClientError:
+                return err(500, "Failed to validate domain question count")
+            existing_q = existing_resp.get("Item")
+            if existing_q and existing_q.get("type") == "assessment":
+                if existing_q.get("domain") != new_domain:
+                    # Moving to a different domain - check target domain capacity
+                    try:
+                        target_count = _count_domain_questions(tenant_id, new_domain)
+                    except ClientError:
+                        return err(500, "Failed to validate domain question count")
+                    if target_count >= MAX_QUESTIONS_PER_DOMAIN:
+                        return err(400, f"Domain '{new_domain}' already has {MAX_QUESTIONS_PER_DOMAIN} assessment questions (maximum reached)")
 
     for field, expr_field in allowed_fields.items():
         if field in body:

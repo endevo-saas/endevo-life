@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { injectGlobalAdminCookies, injectHrAdminCookies } from './helpers/auth'
 
 /**
@@ -18,7 +18,7 @@ import { injectGlobalAdminCookies, injectHrAdminCookies } from './helpers/auth'
  * since the API may return 401 with a test token.
  */
 
-async function waitForSkeletons(page: Parameters<typeof test>[1] extends (args: infer A) => unknown ? (A extends { page: infer P } ? P : never) : never) {
+async function waitForSkeletons(page: Page) {
   await page.waitForFunction(
     () => {
       // Wait for both spinners AND animate-pulse skeleton cards to disappear.

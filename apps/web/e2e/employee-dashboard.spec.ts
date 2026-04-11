@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test'
+import { test, expect, type Page } from '@playwright/test'
 import { injectAuthCookies } from './helpers/auth'
 
 /**
@@ -22,7 +22,7 @@ const LEARNING_TOOLS = [
   { label: '1:1 Sessions', href: '/employee/sessions' },
 ]
 
-async function waitForDashboardLoad(page: Parameters<typeof test>[1] extends (args: infer A) => unknown ? (A extends { page: infer P } ? P : never) : never) {
+async function waitForDashboardLoad(page: Page) {
   // Wait for the loading spinner to disappear (max 20s)
   await page.waitForFunction(
     () => document.querySelector('svg.animate-spin') === null,

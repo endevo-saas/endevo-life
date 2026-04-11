@@ -10,7 +10,14 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
-    "test:e2e:report": "playwright show-report"
+    "test:e2e:report": "playwright show-report",
+    "test:e2e:flow1": "playwright test flow-1-assessment-checklist-sync",
+    "test:e2e:flow2": "playwright test flow-2-assessment-playbook",
+    "test:e2e:flow3": "playwright test flow-3-auto-email-delivery",
+    "test:e2e:flow4": "playwright test flow-4-booking-sessions",
+    "test:e2e:flow5": "playwright test flow-5-master-classes",
+    "test:e2e:flow6": "playwright test flow-6-access-portability",
+    "test:e2e:flows": "playwright test flow-"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.9.0",
@@ -28,6 +35,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",
+    "wait-on": "^8.0.0",
     "@types/js-cookie": "^3.0.6",
     "@types/node": "^20",
     "@types/react": "^18",

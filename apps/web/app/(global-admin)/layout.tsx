@@ -30,7 +30,7 @@ const navGroups = [
     ]
   },
   {
-    label: 'LMS',
+    label: 'Training',
     items: [
       { href: '/admin/lms/modules',   icon: BookOpen,       label: 'Modules' },
       { href: '/admin/lms/questions', icon: ClipboardList,  label: 'Questions' },

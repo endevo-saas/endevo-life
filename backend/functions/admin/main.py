@@ -430,7 +430,7 @@ def _handler_impl(event, context):
             tid = t["tenantId"]
             t["user_count"]     = count_items(USERS_T, Attr("tenantId").eq(tid))
             t["active_count"]   = count_items(USERS_T, Attr("tenantId").eq(tid) & Attr("status").eq("active"))
-            t["hr_count"]       = count_items(USERS_T, Attr("tenantId").eq(tid) & Attr("role").eq("HR_ADMIN"))
+            t["hr_count"]       = count_items(USERS_T, Attr("tenantId").eq(tid) & Attr("role").eq("ADMIN"))
             t["employee_count"] = count_items(USERS_T, Attr("tenantId").eq(tid) & Attr("role").eq("EMPLOYEE"))
 
         return resp(200, {
@@ -520,13 +520,13 @@ def _handler_impl(event, context):
                 "userId": hr_user_id, "tenantId": tenant_id, "email": hr_email,
                 "firstName": hr_first or "HR", "lastName": hr_last or "Admin",
                 "phone": hr_phone,
-                "role": "HR_ADMIN", "status": "active", "inviteToken": invite_token,
+                "role": "ADMIN", "status": "active", "inviteToken": invite_token,
                 "createdBy": caller_email, "createdAt": now
             })
             hr_created = True
         except Exception as ce:
             # HR admin creation failed — don't fail the tenant, but note it
-            print(f"HR_ADMIN_CREATE_ERROR: {ce}")
+            logger.error(f"Admin creation failed: {ce}")
 
         if hr_created:
             invite_url = f"https://uat.endevo.life/login"
@@ -655,7 +655,7 @@ def _handler_impl(event, context):
             return err(404, "Tenant not found")
         all_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id))
         safe_users = [{k: v for k, v in u.items() if k != "inviteToken"} for u in all_users]
-        hr_admins = [u for u in safe_users if u.get("role") == "HR_ADMIN"]
+        hr_admins = [u for u in safe_users if u.get("role") == "ADMIN"]
         employees = [u for u in safe_users if u.get("role") == "EMPLOYEE"]
         active    = [u for u in safe_users if u.get("status") == "active"]
         t["users"]     = safe_users
@@ -809,10 +809,10 @@ def _handler_impl(event, context):
             return err(400, "Phone number is required")
         if not validate_email(email):
             return err(400, "Invalid email format")
-        if user_role not in ("GLOBAL_ADMIN", "HR_ADMIN", "EMPLOYEE"):
-            return err(400, "Role must be GLOBAL_ADMIN, HR_ADMIN, or EMPLOYEE")
-        if user_role in ("HR_ADMIN", "EMPLOYEE") and not tenant_id:
-            return err(400, "tenantId required for HR_ADMIN and EMPLOYEE")
+        if user_role not in ("GLOBAL_ADMIN", "ADMIN", "EMPLOYEE"):
+            return err(400, "Role must be GLOBAL_ADMIN, ADMIN, or EMPLOYEE")
+        if user_role in ("ADMIN", "EMPLOYEE") and not tenant_id:
+            return err(400, "tenantId required for ADMIN and EMPLOYEE")
 
         # Global admins belong to SYSTEM tenant
         if user_role == "GLOBAL_ADMIN":
@@ -940,7 +940,7 @@ def _handler_impl(event, context):
                 updates[k] = sanitize(str(body[k]), 100) if isinstance(body[k], str) else body[k]
         if not updates:
             return err(400, "Nothing to update")
-        if "role" in updates and updates["role"] not in ("GLOBAL_ADMIN", "HR_ADMIN", "EMPLOYEE"):
+        if "role" in updates and updates["role"] not in ("GLOBAL_ADMIN", "ADMIN", "EMPLOYEE"):
             return err(400, "Invalid role")
         if "status" in updates and updates["status"] not in ("active", "inactive", "locked", "pending", "archived"):
             return err(400, "Invalid status")
@@ -1069,10 +1069,10 @@ def _handler_impl(event, context):
             return err(400, "Phone number is required")
         if not validate_email(email):
             return err(400, "Invalid email format")
-        if user_role not in ("GLOBAL_ADMIN", "HR_ADMIN", "EMPLOYEE"):
+        if user_role not in ("GLOBAL_ADMIN", "ADMIN", "EMPLOYEE"):
             return err(400, "Invalid role")
-        if user_role in ("HR_ADMIN", "EMPLOYEE") and not tenant_id:
-            return err(400, "tenantId required for HR_ADMIN/EMPLOYEE")
+        if user_role in ("ADMIN", "EMPLOYEE") and not tenant_id:
+            return err(400, "tenantId required for ADMIN/EMPLOYEE")
 
         # Global admins belong to SYSTEM tenant (not a real tenant)
         if user_role == "GLOBAL_ADMIN":
@@ -1982,8 +1982,8 @@ def _handler_impl(event, context):
                         errors.append(f"Row {idx}: Invalid email '{email}'")
                         failed += 1
                         continue
-                    if role not in ("EMPLOYEE", "HR_ADMIN"):
-                        errors.append(f"Row {idx}: Invalid role '{role}' (must be EMPLOYEE or HR_ADMIN)")
+                    if role not in ("EMPLOYEE", "ADMIN"):
+                        errors.append(f"Row {idx}: Invalid role '{role}' (must be EMPLOYEE or ADMIN)")
                         failed += 1
                         continue
 

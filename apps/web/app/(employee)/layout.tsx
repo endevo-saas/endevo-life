@@ -4,7 +4,8 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
   ClipboardList, Award, User, BarChart3, LogOut, Settings,
-  MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera, Zap, BookOpen, CreditCard
+  MapPin, Monitor, Wifi, ChevronDown, ChevronUp, Camera, Zap, BookOpen, CreditCard,
+  CheckSquare2, Video, Users
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import { api } from '@/lib/api'
@@ -23,11 +24,15 @@ const navGroups = [
     ],
   },
   {
-    label: 'LMS',
+    label: 'Training',
     items: [
       { href: '/employee/lms',            icon: BookOpen,      label: 'My Modules' },
       { href: '/employee/lms/assessment', icon: ClipboardList, label: 'Readiness Assessment' },
       { href: '/employee/certificates',   icon: Award,         label: 'My Certificates' },
+      { href: '/employee/checklist',      icon: CheckSquare2,  label: 'Checklist' },
+      { href: '/employee/playbook', icon: BookOpen,      label: 'My Final Playbook' },
+      { href: '/employee/master-classes', icon: Video,         label: 'Master Classes' },
+      { href: '/employee/sessions',       icon: Users,         label: '1:1 Sessions' },
     ],
   },
   {

@@ -4,17 +4,22 @@ Routes: dashboard, profile, training list, video progress, assessment, certifica
         certificate/check, subscription, sessions, progress-summary, upload-url, avatar,
         playbook/generate (AI-powered My Playbook with Bedrock),
         email/send-playbook (Personalized assessment email via SES),
-        support/question (Q&A via Bedrock), support/faq (FAQ search)
+        support/question (Q&A via Bedrock), support/faq (FAQ search),
+        profile/personal-contact (add personal email/phone),
+        verify/personal-email (OTP via SES), verify/personal-phone (OTP via SNS)
 """
 import json, os, uuid, boto3
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from botocore.exceptions import ClientError
 
 REGION   = os.environ.get("AWS_REGION", "us-east-1")
 dynamo   = boto3.resource("dynamodb", region_name=REGION)
 s3_client = boto3.client("s3", region_name=REGION)
+ses_client = boto3.client("ses", region_name=REGION)
+sns_client = boto3.client("sns", region_name=REGION)
 UPLOAD_BUCKET = os.environ.get("S3_UPLOAD_BUCKET", "endevo-uat-uploads")
 CF_DOMAIN = os.environ.get("CF_DOMAIN", "")
+SES_FROM_ADDRESS = os.environ.get("SES_FROM_ADDRESS", "noreply@endevo.com")
 USERS_T  = dynamo.Table("endevo-uat-users")
 TRAIN_T  = dynamo.Table("endevo-uat-training")
 PROG_T   = dynamo.Table("endevo-uat-video-progress")
@@ -27,6 +32,7 @@ TENANTS_T  = dynamo.Table("endevo-uat-tenants")
 MODULES_T  = dynamo.Table("endevo-uat-lms-user-modules")
 CONFIG_T   = dynamo.Table("endevo-uat-config")
 AUDIT_T    = dynamo.Table("endevo-uat-audit")
+OTP_T      = dynamo.Table("endevo-uat-otp")
 
 ALLOWED_ORIGINS = [
     "https://uat.endevo.life",
@@ -200,7 +206,7 @@ def _handler_impl(event, context):
     if not tenant_id: return err(401, "Not authenticated")
 
     # Role validation: only EMPLOYEE, HR_ADMIN, GLOBAL_ADMIN may access employee endpoints
-    if user_role not in ("EMPLOYEE", "HR_ADMIN", "GLOBAL_ADMIN"):
+    if user_role not in ("EMPLOYEE", "ADMIN", "GLOBAL_ADMIN"):
         return err(403, "Employee access required")
 
     ip = get_ip(event)
@@ -259,6 +265,176 @@ def _handler_impl(event, context):
         audit(tenant_id, email, "PROFILE_UPDATED",
               f"Fields updated: {', '.join(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "Profile updated"})
+
+    # POST /api/employee/profile/personal-contact
+    if path.endswith("/profile/personal-contact") and method == "POST":
+        from employee.personal_contact import update_personal_contact
+        from boto3.dynamodb.conditions import Key as _Key3
+        result3 = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key3("email").eq(email),
+        )
+        items3 = [i for i in result3.get("Items", []) if i.get("tenantId") == tenant_id]
+        if not items3: return err(404, "Profile not found")
+        user_id3 = items3[0]["userId"]
+        personal_email = body.get("personal_email")
+        personal_phone_number = body.get("personal_phone_number")
+        try:
+            update_personal_contact(
+                users_table=USERS_T,
+                user_id=user_id3,
+                tenant_id=tenant_id,
+                personal_email=personal_email,
+                personal_phone_number=personal_phone_number,
+            )
+        except ValueError as ve:
+            return err(400, str(ve))
+        audit(tenant_id, email, "PERSONAL_CONTACT_UPDATED",
+              f"personal_email={'set' if personal_email else 'unchanged'} "
+              f"personal_phone={'set' if personal_phone_number else 'unchanged'}",
+              ip=ip, device=device)
+        return resp(200, {"message": "Personal contact updated"})
+
+    # POST /api/employee/verify/personal-email
+    if path.endswith("/verify/personal-email") and method == "POST":
+        from employee.personal_contact import generate_otp, send_email_otp
+        action = body.get("action", "send")
+        if action == "send":
+            personal_email_target = body.get("personal_email", "")
+            if not personal_email_target:
+                return err(400, "personal_email is required")
+            from employee.personal_contact import validate_personal_email
+            validation_result = validate_personal_email(personal_email_target)
+            if not validation_result.get("valid"):
+                return err(400, validation_result.get("reason", "Invalid email address"))
+            otp_code = generate_otp()
+            otp_id = str(uuid.uuid4())
+            expires_at_dt = datetime.now(timezone.utc) + timedelta(minutes=10)
+            expires_at_iso = expires_at_dt.isoformat()
+            expires_at_unix = int(expires_at_dt.timestamp())
+            OTP_T.put_item(Item={
+                "otpId": otp_id,
+                "userId": user_sub,
+                "tenantId": tenant_id,
+                "channel": "email",
+                "code": otp_code,
+                "expiresAt": expires_at_iso,
+                "ttl": expires_at_unix,
+                "used": False,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            })
+            send_result = send_email_otp(
+                ses_client=ses_client,
+                recipient_email=personal_email_target,
+                otp_code=otp_code,
+                from_address=SES_FROM_ADDRESS,
+            )
+            if not send_result.get("success"):
+                return err(500, f"Failed to send OTP: {send_result.get('error', 'Unknown')}")
+            audit(tenant_id, email, "PERSONAL_EMAIL_OTP_SENT",
+                  f"OTP sent to {personal_email_target}", ip=ip, device=device)
+            return resp(200, {"success": True, "otp_id": otp_id, "message": "OTP sent"})
+        # action == "verify"
+        from employee.personal_contact import verify_otp
+        otp_id = body.get("otp_id", "")
+        code = body.get("code", "")
+        if not otp_id or not code:
+            return err(400, "otp_id and code are required")
+        verify_result = verify_otp(
+            otp_store=OTP_T,
+            user_id=user_sub,
+            channel="email",
+            otp_id=otp_id,
+            code=code,
+        )
+        if not verify_result.get("verified"):
+            return err(400, verify_result.get("reason", "Verification failed"))
+        # Mark personal_email_verified = True in users table
+        from boto3.dynamodb.conditions import Key as _Key4
+        result4 = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key4("email").eq(email),
+        )
+        items4 = [i for i in result4.get("Items", []) if i.get("tenantId") == tenant_id]
+        if items4:
+            USERS_T.update_item(
+                Key={"userId": items4[0]["userId"]},
+                UpdateExpression="SET #pev = :pev",
+                ExpressionAttributeNames={"#pev": "personal_email_verified"},
+                ExpressionAttributeValues={":pev": True},
+            )
+        audit(tenant_id, email, "PERSONAL_EMAIL_VERIFIED", ip=ip, device=device)
+        return resp(200, {"success": True, "verified": True})
+
+    # POST /api/employee/verify/personal-phone
+    if path.endswith("/verify/personal-phone") and method == "POST":
+        from employee.personal_contact import generate_otp, send_phone_otp
+        action = body.get("action", "send")
+        if action == "send":
+            personal_phone_target = body.get("personal_phone_number", "")
+            if not personal_phone_target:
+                return err(400, "personal_phone_number is required")
+            from employee.personal_contact import validate_personal_phone
+            validation_result = validate_personal_phone(personal_phone_target)
+            if not validation_result.get("valid"):
+                return err(400, validation_result.get("reason", "Invalid phone number"))
+            otp_code = generate_otp()
+            otp_id = str(uuid.uuid4())
+            expires_at_dt = datetime.now(timezone.utc) + timedelta(minutes=10)
+            expires_at_iso = expires_at_dt.isoformat()
+            expires_at_unix = int(expires_at_dt.timestamp())
+            OTP_T.put_item(Item={
+                "otpId": otp_id,
+                "userId": user_sub,
+                "tenantId": tenant_id,
+                "channel": "phone",
+                "code": otp_code,
+                "expiresAt": expires_at_iso,
+                "ttl": expires_at_unix,
+                "used": False,
+                "createdAt": datetime.now(timezone.utc).isoformat(),
+            })
+            send_result = send_phone_otp(
+                sns_client=sns_client,
+                phone_number=personal_phone_target,
+                otp_code=otp_code,
+            )
+            if not send_result.get("success"):
+                return err(500, f"Failed to send SMS: {send_result.get('error', 'Unknown')}")
+            audit(tenant_id, email, "PERSONAL_PHONE_OTP_SENT",
+                  f"SMS sent to {personal_phone_target}", ip=ip, device=device)
+            return resp(200, {"success": True, "otp_id": otp_id, "message": "SMS sent"})
+        # action == "verify"
+        from employee.personal_contact import verify_otp
+        otp_id = body.get("otp_id", "")
+        code = body.get("code", "")
+        if not otp_id or not code:
+            return err(400, "otp_id and code are required")
+        verify_result = verify_otp(
+            otp_store=OTP_T,
+            user_id=user_sub,
+            channel="phone",
+            otp_id=otp_id,
+            code=code,
+        )
+        if not verify_result.get("verified"):
+            return err(400, verify_result.get("reason", "Verification failed"))
+        # Mark personal_phone_verified = True
+        from boto3.dynamodb.conditions import Key as _Key5
+        result5 = USERS_T.query(
+            IndexName="email-index",
+            KeyConditionExpression=_Key5("email").eq(email),
+        )
+        items5 = [i for i in result5.get("Items", []) if i.get("tenantId") == tenant_id]
+        if items5:
+            USERS_T.update_item(
+                Key={"userId": items5[0]["userId"]},
+                UpdateExpression="SET #ppv = :ppv",
+                ExpressionAttributeNames={"#ppv": "personal_phone_verified"},
+                ExpressionAttributeValues={":ppv": True},
+            )
+        audit(tenant_id, email, "PERSONAL_PHONE_VERIFIED", ip=ip, device=device)
+        return resp(200, {"success": True, "verified": True})
 
     # GET /api/employee/training
     if path.endswith("/training") and method == "GET":
@@ -765,6 +941,14 @@ def _handler_impl(event, context):
         milestone_msg = generate_milestone_message(domain, overall_progress, user_name)
 
         now = datetime.now(timezone.utc).isoformat()
+
+        # Persist updated playbook to DynamoDB
+        from boto3.dynamodb.conditions import Attr as _Attr2
+        RESP_T.update_item(
+            Key={"userId": user_sub, "submittedAt": latest_playbook.get("submittedAt")},
+            UpdateExpression="SET playbook = :playbook",
+            ExpressionAttributeValues={":playbook": {"tasks": tasks}}
+        )
 
         # Audit completion
         audit(tenant_id, email, "TASK_COMPLETED",

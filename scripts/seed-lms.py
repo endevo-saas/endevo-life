@@ -44,10 +44,10 @@ def build_questions(tenant_id: str, now_iso: str) -> list[dict]:
             "version": 1,
         }
 
-    legal = "Legal Readiness"
-    financial = "Financial Readiness"
-    physical = "Physical Readiness"
-    digital = "Digital Readiness"
+    legal = "legal"
+    financial = "financial"
+    physical = "physical"
+    digital = "digital"
 
     return [
         # --- Legal Readiness ---

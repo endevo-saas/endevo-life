@@ -631,7 +631,7 @@ FORMATTING RULES (CRITICAL):
 - Write in a warm professional tone like a human colleague
 - Respond like a quick Slack message, not an essay""",
 
-    "HR_ADMIN": """You are Jesse, the AI HR Operations Assistant for Endevo Life.
+    "ADMIN": """You are Jesse, the AI HR Operations Assistant for Endevo Life.
 You manage employees and HR operations for YOUR tenant organization only.
 
 YOUR POWERS:
@@ -1151,7 +1151,7 @@ ROLE_ACTIONS: dict[str, dict[str, bool]] = {
         "view_system_status": True,
         "manage_mfa": True,
     },
-    "HR_ADMIN": {
+    "ADMIN": {
         "create_employee": True,
         "list_employees": True,
         "send_invite": True,
@@ -1240,7 +1240,7 @@ def _execute_action(
             emp_plan = "basic"
 
         # HR_ADMIN always scoped to own tenant
-        if role == "HR_ADMIN":
+        if role == "ADMIN":
             target_tenant = tenant_id
 
         # Check for duplicate
@@ -1332,7 +1332,7 @@ def _execute_action(
     if action == "list_employees":
         target_tenant = params.get("tenantId", tenant_id)
         # HR_ADMIN scoped to own tenant
-        if role == "HR_ADMIN":
+        if role == "ADMIN":
             target_tenant = tenant_id
 
         try:
@@ -1391,7 +1391,7 @@ def _execute_action(
                 }
             else:
                 target = params.get("tenantId", tenant_id)
-                if role == "HR_ADMIN":
+                if role == "ADMIN":
                     target = tenant_id
                 emp_count = USERS_T.scan(
                     FilterExpression=_Attr("tenantId").eq(target), Select="COUNT"
@@ -1416,7 +1416,7 @@ def _execute_action(
             return {"success": False, "error": "Email address is required for invitation"}
 
         # HR_ADMIN scoped to own tenant
-        if role == "HR_ADMIN":
+        if role == "ADMIN":
             target_tenant = tenant_id
             invite_role = "EMPLOYEE"
 
@@ -1504,7 +1504,7 @@ def _execute_action(
                 }
             else:
                 # Export employees (scoped to tenant for HR_ADMIN)
-                if role == "HR_ADMIN":
+                if role == "ADMIN":
                     target_tenant = tenant_id
                 result = USERS_T.scan(
                     FilterExpression=_Attr("tenantId").eq(target_tenant) & _Attr("role").eq("EMPLOYEE"),
@@ -1672,7 +1672,7 @@ def _execute_action(
             if not hr_email and not hr_contact:
                 # Fall back: find HR_ADMIN user for this tenant
                 hr_result = USERS_T.scan(
-                    FilterExpression=_Attr("tenantId").eq(tenant_id) & _Attr("role").eq("HR_ADMIN"),
+                    FilterExpression=_Attr("tenantId").eq(tenant_id) & _Attr("role").eq("ADMIN"),
                     Limit=1,
                 )
                 hr_items = hr_result.get("Items", [])
@@ -1698,7 +1698,7 @@ def _execute_action(
     # ------------------------------------------------------------------
     if action == "view_tenant_info":
         target = params.get("tenantId", tenant_id)
-        if role == "HR_ADMIN":
+        if role == "ADMIN":
             target = tenant_id
         try:
             tenant = TENANTS_T.get_item(Key={"tenantId": target}).get("Item", {})
@@ -1843,7 +1843,7 @@ def _load_copilot_stats(role: str, tenant_id: str, user_id: str) -> str:
             user_count = users_resp.get("Count", 0)
             return f"Platform stats: {tenant_count} tenants, {user_count} total users."
 
-        if role == "HR_ADMIN":
+        if role == "ADMIN":
             users_resp = USERS_T.scan(
                 FilterExpression=_Attr("tenantId").eq(tenant_id),
                 Select="COUNT",
@@ -1921,7 +1921,7 @@ def _handle_copilot(body: dict, tenant_id: str, email: str, user_id: str) -> dic
 
     # --- 2. Build context ---
     stats_context = _load_copilot_stats(role, tenant_id, user_id)
-    tenant_name = _get_tenant_name(tenant_id) if role == "HR_ADMIN" else ""
+    tenant_name = _get_tenant_name(tenant_id) if role == "ADMIN" else ""
     actions_prompt = _build_actions_prompt(role)
 
     # --- 3. RAG knowledge retrieval (dual source, same as /chat) ---
@@ -2067,11 +2067,11 @@ _AGENT_ACTION_MAP: dict[str, str] = {
 
 # Minimum role required per agent action type
 _AGENT_ACTION_ROLES: dict[str, set[str]] = {
-    "GetTenantMetrics": {"GLOBAL_ADMIN", "HR_ADMIN"},
-    "CreateEmployee": {"GLOBAL_ADMIN", "HR_ADMIN"},
-    "DraftInviteEmail": {"GLOBAL_ADMIN", "HR_ADMIN"},
+    "GetTenantMetrics": {"GLOBAL_ADMIN", "ADMIN"},
+    "CreateEmployee": {"GLOBAL_ADMIN", "ADMIN"},
+    "DraftInviteEmail": {"GLOBAL_ADMIN", "ADMIN"},
     "ChangeTenantPlan": {"GLOBAL_ADMIN"},
-    "SendNudgeCampaign": {"GLOBAL_ADMIN", "HR_ADMIN"},
+    "SendNudgeCampaign": {"GLOBAL_ADMIN", "ADMIN"},
 }
 
 
@@ -2253,7 +2253,7 @@ def _handle_agent_execute(body: dict, tenant_id: str, email: str, user_id: str) 
     if action_type == "SendNudgeCampaign":
         # Re-engagement: query inactive employees and send nudge emails
         target_tenant = params.get("tenantId", tenant_id)
-        if role == "HR_ADMIN":
+        if role == "ADMIN":
             target_tenant = tenant_id
 
         try:

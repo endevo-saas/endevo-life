@@ -4,6 +4,7 @@ export const dynamic = 'force-dynamic'
 import { useEffect, useState } from 'react'
 import { User, Pencil, Check, X, Loader2, AlertCircle, RefreshCw } from 'lucide-react'
 import { api, User as UserType } from '@/lib/api'
+import PersonalContactSection from '@/components/ui/PersonalContactSection'
 
 export default function ProfilePage() {
   const [profile, setProfile] = useState<UserType | null>(null)
@@ -179,6 +180,9 @@ export default function ProfilePage() {
                 ))}
               </div>
             )}
+
+            {/* Personal contact — always visible regardless of edit state */}
+            <PersonalContactSection profile={profile} onUpdate={load} />
           </div>
         )}
       </div>
