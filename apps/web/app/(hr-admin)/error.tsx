@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import * as Sentry from '@sentry/nextjs'
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
 
 export default function HrError({
@@ -11,7 +12,7 @@ export default function HrError({
   reset: () => void
 }) {
   useEffect(() => {
-    console.error('[HR Error]', error)
+    Sentry.captureException(error, { tags: { boundary: 'hr-admin' } })
   }, [error])
 
   return (

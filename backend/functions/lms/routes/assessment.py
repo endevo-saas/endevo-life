@@ -206,6 +206,52 @@ def _list_questions(tenant_id: str, user_id: str) -> dict:
         return err(500, "Failed to load questions")
 
 
+def _list_questions_by_domain(tenant_id: str, user_id: str) -> dict:
+    """GET /api/lms/assessment/questions/by-domain — Get questions organized by domain."""
+    try:
+        questions = _fetch_all_questions(tenant_id)
+
+        # Organize questions by domain
+        domains = {}
+        for q in questions:
+            domain = q.get("domain", "general")
+            if domain not in domains:
+                domains[domain] = []
+
+            safe_answers = [
+                {"label": a.get("label", ""), "text": a.get("text", "")}
+                for a in (q.get("answers") or [])
+            ]
+            domains[domain].append(
+                {
+                    "questionId": q.get("questionId"),
+                    "text": q.get("text", ""),
+                    "answers": safe_answers,
+                    "domain": domain,
+                    "number": q.get("number"),
+                    "order": q.get("order"),
+                }
+            )
+
+        # Sort questions within each domain by number
+        for domain in domains:
+            domains[domain].sort(key=lambda x: x.get("number", 0))
+
+        # Define domain order (legal, financial, physical, digital)
+        domain_order = ["legal", "financial", "physical", "digital"]
+        ordered_domains = {d: domains.get(d, []) for d in domain_order if d in domains}
+        ordered_domains.update({d: domains[d] for d in domains if d not in domain_order})
+
+        return ok({
+            "domains": ordered_domains,
+            "domainList": list(ordered_domains.keys()),
+            "totalQuestions": sum(len(qs) for qs in ordered_domains.values()),
+            "questionsByDomain": {d: len(qs) for d, qs in ordered_domains.items()},
+        })
+    except ClientError:
+        return err(500, "Failed to load questions")
+
+
 def _submit_assessment(event: dict, tenant_id: str, user_id: str) -> dict:
     """POST /api/lms/assessment/submit
 
@@ -384,6 +430,9 @@ def handle(
     auth_err = require_auth(tenant_id, user_id)
     if auth_err:
         return auth_err
+
+    if method == "GET" and path.endswith("/assessment/questions/by-domain"):
+        return _list_questions_by_domain(tenant_id, user_id)
 
     if method == "GET" and path.endswith("/assessment/questions"):
         return _list_questions(tenant_id, user_id)

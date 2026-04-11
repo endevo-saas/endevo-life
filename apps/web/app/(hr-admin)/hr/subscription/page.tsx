@@ -535,7 +535,7 @@ export default function HrSubscriptionPage() {
                     )}
                   </div>
                   <a
-                    href="https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH"
+                    href={process.env.NEXT_PUBLIC_BOOKING_LINK || '#'}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"

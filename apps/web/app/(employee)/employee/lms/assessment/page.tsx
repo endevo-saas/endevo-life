@@ -14,6 +14,10 @@ interface AssessmentQuestion {
   scoreWeight?: number
 }
 
+interface DomainQuestions {
+  [domain: string]: AssessmentQuestion[]
+}
+
 interface SubmitResult {
   submittedAt: string
   attemptNumber: number
@@ -25,25 +29,28 @@ interface SubmitResult {
 type Phase = 'intro' | 'questions' | 'submitting' | 'results'
 
 const DOMAIN_COLORS: Record<string, string> = {
-  Legal: '#5E6AD2',
-  Financial: '#E8612A',
-  Physical: '#2BBFC5',
-  Digital: '#8B5CF6',
+  legal: '#5E6AD2',
+  financial: '#E8612A',
+  physical: '#2BBFC5',
+  digital: '#8B5CF6',
 }
 
 const DOMAIN_ICONS: Record<string, string> = {
-  Legal: '⚖️',
-  Financial: '💰',
-  Physical: '🏠',
-  Digital: '💻',
+  legal: '⚖️',
+  financial: '💰',
+  physical: '🏠',
+  digital: '💻',
 }
+
+const DOMAIN_ORDER = ['legal', 'financial', 'physical', 'digital']
 
 export default function AssessmentPage() {
   const router = useRouter()
 
   const [phase, setPhase] = useState<Phase>('intro')
-  const [questions, setQuestions] = useState<AssessmentQuestion[]>([])
-  const [currentIndex, setCurrentIndex] = useState(0)
+  const [domainQuestions, setDomainQuestions] = useState<DomainQuestions>({})
+  const [currentDomain, setCurrentDomain] = useState<string>('')
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0)
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [result, setResult] = useState<SubmitResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -54,12 +61,20 @@ export default function AssessmentPage() {
     setLoading(true)
     setError('')
     try {
-      const res = await api.lmsGetAssessmentQuestions() as { questions: AssessmentQuestion[] }
-      const loaded = res.questions || []
-      setQuestions(loaded)
-      if (loaded.length === 0) {
+      const res = await api.lmsGetAssessmentQuestionsByDomain() as {
+        domains: DomainQuestions
+        domainList: string[]
+        totalQuestions: number
+      }
+      const domains = res.domains || {}
+      const domainList = res.domainList || DOMAIN_ORDER
+
+      setDomainQuestions(domains)
+      if (domainList.length === 0) {
         setError('No questions were returned. Please try again later.')
       } else {
+        setCurrentDomain(domainList[0])
+        setCurrentQuestionIndex(0)
         setPhase('questions')
       }
     } catch (e: unknown) {
@@ -75,16 +90,34 @@ export default function AssessmentPage() {
 
   function handleNext() {
     if (!selectedOption) return
-    const q = questions[currentIndex]
+    const domainQs = domainQuestions[currentDomain] || []
+    const q = domainQs[currentQuestionIndex]
     const newAnswers = { ...answers, [q.questionId]: selectedOption }
     setAnswers(newAnswers)
     setSelectedOption(null)
 
-    if (currentIndex < questions.length - 1) {
-      setCurrentIndex(prev => prev + 1)
+    // Check if there are more questions in current domain
+    if (currentQuestionIndex < domainQs.length - 1) {
+      setCurrentQuestionIndex(prev => prev + 1)
     } else {
-      submitAssessment(newAnswers)
+      // Find next domain
+      const currentDomainIdx = DOMAIN_ORDER.indexOf(currentDomain)
+      const remainingDomains = DOMAIN_ORDER.slice(currentDomainIdx + 1).filter(d => domainQuestions[d])
+
+      if (remainingDomains.length > 0) {
+        setCurrentDomain(remainingDomains[0])
+        setCurrentQuestionIndex(0)
+      } else {
+        // All domains done, submit
+        submitAssessment(newAnswers)
+      }
     }
+  }
+
+  function goToDomain(domain: string) {
+    setCurrentDomain(domain)
+    setCurrentQuestionIndex(0)
+    setSelectedOption(null)
   }
 
   async function submitAssessment(finalAnswers: Record<string, string>) {
@@ -104,16 +137,21 @@ export default function AssessmentPage() {
   }
 
   function handleRetake() {
-    setQuestions([])
+    setDomainQuestions({})
     setAnswers({})
-    setCurrentIndex(0)
+    setCurrentDomain('')
+    setCurrentQuestionIndex(0)
     setSelectedOption(null)
     setResult(null)
     setPhase('intro')
   }
 
-  const currentQuestion = questions[currentIndex]
-  const progressPct = questions.length > 0 ? Math.round(((currentIndex + 1) / questions.length) * 100) : 0
+  const domainQs = domainQuestions[currentDomain] || []
+  const currentQuestion = domainQs[currentQuestionIndex]
+  const totalAnswered = Object.keys(answers).length
+  const totalQuestions = Object.values(domainQuestions).reduce((sum, qs) => sum + qs.length, 0)
+  const progressPct = totalQuestions > 0 ? Math.round((totalAnswered / totalQuestions) * 100) : 0
+  const domainProgressPct = domainQs.length > 0 ? Math.round(((currentQuestionIndex + 1) / domainQs.length) * 100) : 0
 
   // ── Intro Screen ──────────────────────────────────────────────────
   if (phase === 'intro') {
@@ -139,7 +177,7 @@ export default function AssessmentPage() {
           >
             <div className="grid grid-cols-2 gap-3">
               {[
-                { label: 'Questions', value: questions.length > 0 ? `${questions.length}` : '40', icon: '❓' },
+                { label: 'Questions', value: totalQuestions > 0 ? `${totalQuestions}` : '40', icon: '❓' },
                 { label: 'Unlocks All', value: '6 Modules', icon: '🔓' },
                 { label: 'Domains', value: '4', icon: '📚' },
                 { label: 'Est. Time', value: '20 min', icon: '⏱️' },
@@ -161,14 +199,14 @@ export default function AssessmentPage() {
             <div>
               <p className="text-xs font-semibold text-white mb-2">4 Life Domains We Cover</p>
               <div className="grid grid-cols-2 gap-2">
-                {['Legal', 'Financial', 'Physical', 'Digital'].map(domain => (
+                {DOMAIN_ORDER.map(domain => (
                   <div
                     key={domain}
                     className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium"
                     style={{ background: 'var(--bg-base)', color: DOMAIN_COLORS[domain] }}
                   >
                     <span>{DOMAIN_ICONS[domain]}</span>
-                    {domain}
+                    {domain.charAt(0).toUpperCase() + domain.slice(1)}
                   </div>
                 ))}
               </div>
@@ -328,7 +366,7 @@ export default function AssessmentPage() {
     )
   }
 
-  const domainColor = DOMAIN_COLORS[currentQuestion.domain] || 'var(--accent-1)'
+  const domainColor = DOMAIN_COLORS[currentDomain] || 'var(--accent-1)'
 
   return (
     <div className="min-h-screen flex flex-col p-6" style={{ background: 'var(--bg-base)' }}>
@@ -337,6 +375,34 @@ export default function AssessmentPage() {
       </div>
 
       <div className="relative max-w-2xl mx-auto w-full flex-1 flex flex-col gap-5">
+        {/* Domain tabs */}
+        <div className="overflow-x-auto">
+          <div className="flex gap-2 pb-2 min-w-max">
+            {DOMAIN_ORDER.map(domain => {
+              const domainQs = domainQuestions[domain] || []
+              const answered = domainQs.filter(q => q.questionId in answers).length
+              const isActive = domain === currentDomain
+              return (
+                <button
+                  key={domain}
+                  onClick={() => goToDomain(domain)}
+                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all whitespace-nowrap ${
+                    isActive ? 'opacity-100 scale-100' : 'opacity-60 hover:opacity-80'
+                  }`}
+                  style={{
+                    background: isActive ? `${DOMAIN_COLORS[domain]}20` : 'transparent',
+                    color: DOMAIN_COLORS[domain],
+                    border: isActive ? `2px solid ${DOMAIN_COLORS[domain]}` : '2px solid transparent',
+                  }}
+                >
+                  {DOMAIN_ICONS[domain]} {domain.charAt(0).toUpperCase() + domain.slice(1)}
+                  <span className="text-xs ml-1">({answered}/{domainQs.length})</span>
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
         {/* Progress header */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
@@ -344,20 +410,24 @@ export default function AssessmentPage() {
               className="text-xs font-bold px-2.5 py-1 rounded-full"
               style={{ background: `${domainColor}20`, color: domainColor }}
             >
-              {DOMAIN_ICONS[currentQuestion.domain]} {currentQuestion.domain}
+              {DOMAIN_ICONS[currentDomain]} {currentDomain.charAt(0).toUpperCase() + currentDomain.slice(1)}
             </span>
             <span className="text-xs font-semibold" style={{ color: 'var(--text-muted)' }}>
-              Question {currentIndex + 1} of {questions.length}
+              {currentQuestionIndex + 1} of {domainQs.length} in domain • {totalAnswered}/{totalQuestions} total
             </span>
           </div>
           <div className="w-full rounded-full h-1.5" style={{ background: 'var(--bg-elevated)' }}>
             <div
               className="h-1.5 rounded-full transition-all duration-500"
               style={{
-                width: `${progressPct}%`,
+                width: `${domainProgressPct}%`,
                 background: `linear-gradient(90deg, ${domainColor}, var(--accent-2))`,
               }}
             />
+          </div>
+          <div className="text-xs flex justify-between" style={{ color: 'var(--text-muted)' }}>
+            <span>{domainProgressPct}% of this domain</span>
+            <span>{progressPct}% overall</span>
           </div>
         </div>
 
@@ -421,7 +491,7 @@ export default function AssessmentPage() {
         {/* Navigation */}
         <div className="flex items-center justify-between gap-3">
           <p className="text-xs" style={{ color: 'var(--text-muted)' }}>
-            {Object.keys(answers).length} answered
+            {totalAnswered} answered
           </p>
           <button
             onClick={handleNext}
@@ -429,7 +499,11 @@ export default function AssessmentPage() {
             className="px-6 py-3 rounded-xl font-bold text-sm text-white transition-all hover:scale-105 disabled:opacity-40 disabled:cursor-not-allowed"
             style={{ background: 'linear-gradient(135deg,#E8612A,#f97316)' }}
           >
-            {currentIndex === questions.length - 1 ? 'Submit Assessment' : 'Next Question →'}
+            {currentQuestionIndex === domainQs.length - 1 && DOMAIN_ORDER.indexOf(currentDomain) === DOMAIN_ORDER.length - 1
+              ? 'Submit Assessment'
+              : currentQuestionIndex === domainQs.length - 1
+                ? `Next: ${(DOMAIN_ORDER[DOMAIN_ORDER.indexOf(currentDomain) + 1] || '').charAt(0).toUpperCase()}${(DOMAIN_ORDER[DOMAIN_ORDER.indexOf(currentDomain) + 1] || '').slice(1)} →`
+                : 'Next Question →'}
           </button>
         </div>
       </div>

@@ -600,6 +600,39 @@ export default function EmployeeDashboard() {
           })}
         </div>
 
+        {/* ── 4a. New Features ──────────────────────────────────────── */}
+        <div className="fade-slide-up fade-slide-up-4">
+          <h2 className="text-sm font-bold text-white mb-3 flex items-center gap-2">
+            <Sparkles className="w-4 h-4" style={{ color: COLORS.orange }} />
+            Learning Tools
+          </h2>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            {[
+              { href: '/employee/lms/assessment', icon: '🛡️', label: 'Assessment', desc: 'Domain readiness' },
+              { href: '/employee/playbook', icon: '📋', label: 'Playbook', desc: 'Interactive guides' },
+              { href: '/employee/checklist', icon: '✅', label: 'Checklist', desc: 'Task tracking' },
+              { href: '/employee/master-classes', icon: '🎥', label: 'Master Classes', desc: 'Video library' },
+              { href: '/employee/sessions', icon: '👥', label: '1:1 Sessions', desc: 'Expert coaching' },
+            ].map(feature => (
+              <Link
+                key={feature.label}
+                href={feature.href}
+                className="group relative rounded-xl p-4 flex flex-col items-center text-center transition-all duration-200 hover:scale-105"
+                style={{
+                  background: COLORS.card,
+                  border: `1px solid ${COLORS.border}`,
+                }}
+              >
+                <div className="text-2xl mb-2">{feature.icon}</div>
+                <p className="text-xs font-bold text-white leading-tight">{feature.label}</p>
+                <p className="text-[10px]" style={{ color: COLORS.textMuted }}>
+                  {feature.desc}
+                </p>
+              </Link>
+            ))}
+          </div>
+        </div>
+
         {/* ── 4b. Premium Booking Card ──────────────────────────────── */}
         {userPlan === 'premium' ? (
           <div
@@ -623,7 +656,7 @@ export default function EmployeeDashboard() {
                 </p>
               </div>
               <a
-                href="https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH"
+                href={process.env.NEXT_PUBLIC_BOOKING_LINK || '#'}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="flex-shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white transition-all hover:scale-105"

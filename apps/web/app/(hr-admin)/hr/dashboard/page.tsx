@@ -332,13 +332,13 @@ export default function HrDashboard() {
               <MetricCard
                 title="Module Completion"
                 value={metrics?.completionRate ?? 0}
-                subtitle={`Active users who completed at least 1 module`}
+                subtitle={`Users completing assessments, checklists & playbooks`}
                 icon={CheckCircle2}
               />
               <MetricCard
                 title="Overall User Progress"
                 value={metrics?.overallProgress ?? 0}
-                subtitle="Average progress across all users"
+                subtitle="Domain-wise learning & engagement"
                 icon={TrendingUp}
               />
             </>
@@ -385,6 +385,34 @@ export default function HrDashboard() {
             </div>
           </div>
         )}
+
+        {/* ── New Employee Features ── */}
+        <div className="space-y-3">
+          <h2 className="text-base font-bold text-white flex items-center gap-2">
+            ✨ New Employee Features
+          </h2>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { emoji: '📋', name: 'Playbook', desc: 'Interactive domain guides', href: '/admin/lms/progress?feature=playbook' },
+              { emoji: '✅', name: 'Checklist', desc: 'Task tracking per domain', href: '/admin/lms/progress?feature=checklist' },
+              { emoji: '🎥', name: 'Master Classes', desc: 'Video library by domain', href: '/admin/lms/progress?feature=masterclasses' },
+              { emoji: '👥', name: '1:1 Sessions', desc: 'Coach bookings & transcripts', href: '/admin/lms/progress?feature=sessions' },
+            ].map(feature => (
+              <Link
+                key={feature.name}
+                href={feature.href}
+                className="group relative overflow-hidden rounded-xl border border-white/8 bg-gradient-to-br from-white/5 to-white/2 p-4 hover:border-white/20 hover:bg-white/8 transition-all duration-200 hover:-translate-y-0.5"
+              >
+                <div className="absolute top-0 right-0 w-16 h-16 bg-white/3 rounded-full blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-300" />
+                <div className="relative">
+                  <div className="text-2xl mb-2">{feature.emoji}</div>
+                  <h3 className="text-sm font-bold text-white mb-1">{feature.name}</h3>
+                  <p className="text-xs text-slate-400">{feature.desc}</p>
+                </div>
+              </Link>
+            ))}
+          </div>
+        </div>
 
         {/* ── Recent User Activity ── */}
         <div className="rounded-2xl border border-white/8 bg-white/3 p-6">

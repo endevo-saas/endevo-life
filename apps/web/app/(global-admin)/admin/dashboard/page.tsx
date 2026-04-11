@@ -186,35 +186,35 @@ export default function AdminDashboard() {
           )}
         </div>
 
-        {/* Row 2: LMS + Subscriptions (4 cards) */}
+        {/* Row 2: LMS + Feature Engagement (4 cards) */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {loading ? (
             [1,2,3,4].map(i => <SkeletonCard key={i} />)
           ) : (
             <>
               <StatCard
-                icon={BookOpen}
-                label="LMS Modules"
-                value={6}
-                sub="15 lessons in Module 1"
-                color="text-teal-400"
-                href="/admin/lms/modules"
-                gradient="bg-gradient-to-br from-teal-600/20 to-teal-800/10 border-teal-500/30"
-              />
-              <StatCard
                 icon={ClipboardList}
                 label="Assessments Taken"
                 value={data?.lms_assessments_taken ?? 0}
-                sub="Readiness diagnostics completed"
+                sub="Domain-wise readiness diagnostics"
                 color="text-indigo-400"
                 href="/admin/lms/progress"
                 gradient="bg-gradient-to-br from-indigo-600/20 to-indigo-800/10 border-indigo-500/30"
               />
               <StatCard
+                icon={BookOpen}
+                label="Playlists Active"
+                value={data?.lms_certificates_issued ?? 0}
+                sub="Interactive guides & checklists"
+                color="text-emerald-400"
+                href="/admin/lms/progress"
+                gradient="bg-gradient-to-br from-emerald-600/20 to-emerald-800/10 border-emerald-500/30"
+              />
+              <StatCard
                 icon={CreditCard}
                 label="Basic Plans"
                 value={data?.subscription_basic ?? 0}
-                sub="Active basic subscriptions"
+                sub="2 sessions per employee included"
                 color="text-purple-400"
                 href="/admin/subscriptions"
                 gradient="bg-gradient-to-br from-purple-600/20 to-purple-800/10 border-purple-500/30"
@@ -223,7 +223,7 @@ export default function AdminDashboard() {
                 icon={CreditCard}
                 label="Premium Plans"
                 value={data?.subscription_premium ?? 0}
-                sub="Active premium subscriptions"
+                sub="6 sessions per employee included"
                 color="text-amber-400"
                 href="/admin/subscriptions"
                 gradient="bg-gradient-to-br from-amber-600/20 to-amber-800/10 border-amber-500/30"
@@ -362,6 +362,41 @@ export default function AdminDashboard() {
                 <p className="text-sm font-semibold text-white">User Progress</p>
                 <p className="text-xs text-slate-500">Scorecard &amp; module completion</p>
               </div>
+            </Link>
+          </div>
+        </div>
+
+        {/* New Employee Features Section */}
+        <div>
+          <h2 className="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-3">✨ New Employee Features</h2>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            <Link href="/admin/lms/progress" className="flex flex-col items-start p-4 rounded-xl border border-emerald-500/30 bg-emerald-600/10 hover:bg-emerald-600/15 transition-colors">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-500/20 mb-2">
+                <span className="text-sm">📋</span>
+              </div>
+              <p className="text-sm font-semibold text-white">Playbook</p>
+              <p className="text-xs text-slate-400">Interactive domain guides</p>
+            </Link>
+            <Link href="/admin/lms/progress" className="flex flex-col items-start p-4 rounded-xl border border-teal-500/30 bg-teal-600/10 hover:bg-teal-600/15 transition-colors">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-teal-500/20 mb-2">
+                <span className="text-sm">✅</span>
+              </div>
+              <p className="text-sm font-semibold text-white">Checklist</p>
+              <p className="text-xs text-slate-400">Task tracking per domain</p>
+            </Link>
+            <Link href="/admin/lms/progress" className="flex flex-col items-start p-4 rounded-xl border border-orange-500/30 bg-orange-600/10 hover:bg-orange-600/15 transition-colors">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-orange-500/20 mb-2">
+                <span className="text-sm">🎥</span>
+              </div>
+              <p className="text-sm font-semibold text-white">Master Classes</p>
+              <p className="text-xs text-slate-400">Video library by domain</p>
+            </Link>
+            <Link href="/admin/lms/progress" className="flex flex-col items-start p-4 rounded-xl border border-purple-500/30 bg-purple-600/10 hover:bg-purple-600/15 transition-colors">
+              <div className="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-500/20 mb-2">
+                <span className="text-sm">👥</span>
+              </div>
+              <p className="text-sm font-semibold text-white">1:1 Sessions</p>
+              <p className="text-xs text-slate-400">Coach bookings & transcripts</p>
             </Link>
           </div>
         </div>

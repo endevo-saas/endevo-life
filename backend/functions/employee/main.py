@@ -1,7 +1,10 @@
 """
 Endevo Life — Employee Lambda (pure boto3, no pip needed)
 Routes: dashboard, profile, training list, video progress, assessment, certificates,
-        certificate/check, subscription, sessions, progress-summary, upload-url, avatar
+        certificate/check, subscription, sessions, progress-summary, upload-url, avatar,
+        playbook/generate (AI-powered My Playbook with Bedrock),
+        email/send-playbook (Personalized assessment email via SES),
+        support/question (Q&A via Bedrock), support/faq (FAQ search)
 """
 import json, os, uuid, boto3
 from datetime import datetime, timezone
@@ -405,6 +408,405 @@ def _handler_impl(event, context):
               f"Certificate {cert_id} issued (score={score})", ip=ip, device=device)
         return resp(200, {"eligible": True, "certificate": cert_item, "message": "Certificate issued"})
 
+    # POST /api/employee/playbook/generate — Generate AI-powered My Playbook
+    if path.endswith("/playbook/generate") and method == "POST":
+        from boto3.dynamodb.conditions import Attr as _Attr, Key as _Key2
+        from employee.utils.bedrock_analyzer import analyze_assessment, generate_playbook
+
+        # 1. Get latest assessment responses
+        resp_result = RESP_T.scan(FilterExpression=_Attr("userId").eq(user_sub))
+        responses = resp_result.get("Items", [])
+        if not responses:
+            return err(404, "No assessment found. Complete the assessment first.")
+
+        # Get latest response
+        latest_resp = max(responses, key=lambda r: r.get("submittedAt", ""))
+        answers = latest_resp.get("answers", {})
+
+        # 2. Get all questions to analyze
+        questions = QUEST_T.scan(FilterExpression=_Attr("tenantId").eq(tenant_id))
+        qs = questions.get("Items", [])
+        if not qs:
+            return err(404, "Questions not found")
+
+        # 3. Analyze assessment with Bedrock
+        analysis = analyze_assessment(answers, qs)
+
+        # 4. Generate personalized playbook
+        user_name = body.get("userName", "User")
+        try:
+            user_result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key2("email").eq(email),
+            )
+            user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
+            if user_items:
+                user_name = f"{user_items[0].get('firstName', '')} {user_items[0].get('lastName', '')}".strip() or user_name
+        except Exception:
+            pass
+
+        playbook = generate_playbook(user_name, analysis["domainScores"], analysis["weakDomains"])
+
+        # 5. Store playbook in DynamoDB for persistence
+        playbook_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        playbook_item = {
+            "playbookId": playbook_id,
+            "userId": user_sub,
+            "tenantId": tenant_id,
+            "overallScore": analysis["overallScore"],
+            "domainScores": analysis["domainScores"],
+            "playbook": playbook,
+            "analysis": analysis["analysis"],
+            "weakDomains": analysis["weakDomains"],
+            "createdAt": now,
+            "updatedAt": now,
+        }
+
+        # Create playbookId table reference if doesn't exist — use RESP_T as fallback storage
+        try:
+            # Store in a custom table or use responses table with special courseId
+            RESP_T.put_item(Item={
+                **playbook_item,
+                "responseId": playbook_id,
+                "courseId": "MY_PLAYBOOK",
+            })
+        except Exception as e:
+            print(f"PLAYBOOK_STORAGE_WARNING: {e}")
+
+        audit(tenant_id, email, "PLAYBOOK_GENERATED",
+              f"Overall score: {analysis['overallScore']}%, Weak domains: {', '.join(analysis['weakDomains'])}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "playbookId": playbook_id,
+            "overallScore": analysis["overallScore"],
+            "domainScores": analysis["domainScores"],
+            "weakDomains": analysis["weakDomains"],
+            "strongDomains": analysis["strongDomains"],
+            "analysis": analysis["analysis"],
+            "playbook": playbook,
+            "generatedAt": now,
+        })
+
+    # POST /api/employee/email/send-playbook — Send personalized assessment email
+    if path.endswith("/email/send-playbook") and method == "POST":
+        from boto3.dynamodb.conditions import Attr as _Attr, Key as _Key2
+        from employee.utils.email_generator import send_assessment_email
+
+        # 1. Get latest playbook data
+        playbook_result = RESP_T.scan(
+            FilterExpression=_Attr("userId").eq(user_sub) & _Attr("courseId").eq("MY_PLAYBOOK")
+        )
+        playbooks = playbook_result.get("Items", [])
+        if not playbooks:
+            return err(404, "No playbook found. Generate playbook first.")
+
+        playbook_data = max(playbooks, key=lambda p: p.get("createdAt", ""))
+
+        # 2. Get user details
+        user_name = "User"
+        try:
+            user_result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key2("email").eq(email),
+            )
+            user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
+            if user_items:
+                user_name = f"{user_items[0].get('firstName', '')} {user_items[0].get('lastName', '')}".strip() or user_name
+        except Exception:
+            pass
+
+        # 3. Get assessment tasks from latest response
+        resp_result = RESP_T.scan(FilterExpression=_Attr("userId").eq(user_sub))
+        responses = resp_result.get("Items", [])
+        latest_resp = max(responses, key=lambda r: r.get("submittedAt", "")) if responses else {}
+
+        # Get task list from playbook
+        tasks = playbook_data.get("playbook", {}).get("tasks", [])
+
+        # 4. Send email via SES
+        email_result = send_assessment_email(
+            recipient_email=email,
+            recipient_name=user_name,
+            overall_score=playbook_data.get("overallScore", 0),
+            domain_scores=playbook_data.get("domainScores", {}),
+            weak_domains=playbook_data.get("weakDomains", []),
+            tasks=tasks
+        )
+
+        if not email_result.get("success"):
+            audit(tenant_id, email, "PLAYBOOK_EMAIL_FAILED",
+                  f"Error: {email_result.get('error', 'Unknown')}",
+                  ip=ip, device=device, severity="WARNING")
+            return err(500, f"Email send failed: {email_result.get('error', 'Unknown')}")
+
+        # 5. Audit successful send
+        audit(tenant_id, email, "PLAYBOOK_EMAIL_SENT",
+              f"Email sent to {email}, MessageId: {email_result.get('messageId', '')}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "success": True,
+            "messageId": email_result.get("messageId", ""),
+            "email": email_result.get("email", ""),
+            "subject": email_result.get("subject", ""),
+            "sentAt": email_result.get("sentAt", ""),
+        })
+
+    # POST /api/employee/support/question — Post a question to support Q&A
+    if path.endswith("/support/question") and method == "POST":
+        from employee.utils.support_qa import answer_question, SAMPLE_FAQ
+
+        body_data = get_body(event)
+        user_question = body_data.get("question", "").strip()
+
+        if not user_question:
+            return err(400, "Question cannot be empty")
+
+        if len(user_question) > 1000:
+            return err(400, "Question too long (max 1000 characters)")
+
+        # Generate AI answer using Nova Micro
+        user_name = "User"
+        try:
+            from boto3.dynamodb.conditions import Key as _Key2
+            user_result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key2("email").eq(email),
+            )
+            user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
+            if user_items:
+                user_name = f"{user_items[0].get('firstName', '')} {user_items[0].get('lastName', '')}".strip() or user_name
+        except Exception:
+            pass
+
+        qa_result = answer_question(user_question, user_name)
+
+        # Store question in DynamoDB
+        question_id = str(uuid.uuid4())
+        now = datetime.now(timezone.utc).isoformat()
+        question_item = {
+            "questionId": question_id,
+            "userId": user_sub,
+            "tenantId": tenant_id,
+            "question": user_question,
+            "answer": qa_result["answer"],
+            "confidence": qa_result["confidence"],
+            "shouldEscalate": qa_result["shouldEscalate"],
+            "source": "ai",
+            "createdAt": now,
+            "rating": None,
+            "ratingFeedback": None,
+        }
+
+        # Create support questions table if using RESP_T as fallback
+        try:
+            from boto3.dynamodb.conditions import Attr as _Attr
+            AUDIT_T.put_item(Item={
+                "tenantId": tenant_id,
+                "sk": f"SUPPORT#{now}#{question_id}",
+                "questionId": question_id,
+                "userId": user_sub,
+                "question": user_question,
+                "confidence": qa_result["confidence"],
+                "shouldEscalate": qa_result["shouldEscalate"],
+            })
+        except Exception as e:
+            print(f"SUPPORT_QUESTION_STORAGE_WARNING: {e}")
+
+        # Audit question
+        audit(tenant_id, email, "SUPPORT_QUESTION_POSTED",
+              f"Question: {user_question[:100]}, Confidence: {qa_result['confidence']}, Escalate: {qa_result['shouldEscalate']}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "questionId": question_id,
+            "question": user_question,
+            "answer": qa_result["answer"],
+            "confidence": qa_result["confidence"],
+            "shouldEscalate": qa_result["shouldEscalate"],
+            "source": "ai",
+            "createdAt": now,
+        })
+
+    # POST /api/employee/support/question/{questionId}/rate — Rate answer helpfulness
+    if path.endswith("/rate") and "/support/question/" in path and method == "POST":
+        from employee.utils.support_qa import rate_answer
+
+        body_data = get_body(event)
+        rating = int(body_data.get("rating", 0))
+        feedback = body_data.get("feedback", "")
+
+        # Extract questionId from path
+        path_parts = path.split("/")
+        question_id = path_parts[path_parts.index("question") + 1] if "question" in path_parts else None
+
+        if not question_id or rating < 1 or rating > 5:
+            return err(400, "Invalid rating (must be 1-5)")
+
+        rate_result = rate_answer(question_id, rating, feedback)
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Audit rating
+        audit(tenant_id, email, "SUPPORT_ANSWER_RATED",
+              f"QuestionId: {question_id}, Rating: {rating}, Escalated: {rate_result.get('escalatedToHR')}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "success": True,
+            "rating": rating,
+            "escalatedToHR": rate_result.get("escalatedToHR", False),
+            "ratedAt": now,
+        })
+
+    # GET /api/employee/support/faq — Get FAQ entries
+    if path.endswith("/support/faq") and method == "GET":
+        from employee.utils.support_qa import SAMPLE_FAQ
+
+        query_param = (event.get("queryStringParameters") or {}).get("search", "")
+
+        if query_param:
+            from employee.utils.support_qa import get_faq_by_search
+            faq_list = get_faq_by_search(query_param)
+        else:
+            faq_list = SAMPLE_FAQ
+
+        return resp(200, {
+            "faq": faq_list,
+            "count": len(faq_list),
+        })
+
+    # GET /api/employee/checklist — Get personalized task checklist
+    if path.endswith("/checklist") and method == "GET":
+        from boto3.dynamodb.conditions import Attr as _Attr
+        from employee.utils.checklist_manager import calculate_domain_progress
+
+        # Get latest playbook for tasks
+        playbook_result = RESP_T.scan(
+            FilterExpression=_Attr("userId").eq(user_sub) & _Attr("courseId").eq("MY_PLAYBOOK")
+        )
+        playbooks = playbook_result.get("Items", [])
+        if not playbooks:
+            return err(404, "No playbook found. Generate playbook first.")
+
+        latest_playbook = max(playbooks, key=lambda p: p.get("createdAt", ""))
+        tasks = latest_playbook.get("playbook", {}).get("tasks", [])
+
+        # Calculate progress per domain
+        domain_progress = calculate_domain_progress(tasks)
+        overall_progress = round(sum(domain_progress.values()) / len(domain_progress)) if domain_progress else 0
+
+        return resp(200, {
+            "tasks": tasks,
+            "domainProgress": domain_progress,
+            "overallProgress": overall_progress,
+            "totalTasks": len(tasks),
+            "completedTasks": len([t for t in tasks if t.get("status") == "completed"]),
+        })
+
+    # POST /api/employee/checklist/{taskId}/complete — Mark task as complete
+    if path.endswith("/complete") and "/checklist/" in path and method == "POST":
+        from boto3.dynamodb.conditions import Attr as _Attr
+        from employee.utils.checklist_manager import generate_milestone_message
+
+        # Extract taskId from path
+        path_parts = path.split("/")
+        task_id = path_parts[path_parts.index("checklist") + 1] if "checklist" in path_parts else None
+
+        if not task_id:
+            return err(400, "Invalid task ID")
+
+        # Get latest playbook and update task status
+        playbook_result = RESP_T.scan(
+            FilterExpression=_Attr("userId").eq(user_sub) & _Attr("courseId").eq("MY_PLAYBOOK")
+        )
+        playbooks = playbook_result.get("Items", [])
+        if not playbooks:
+            return err(404, "No playbook found")
+
+        latest_playbook = max(playbooks, key=lambda p: p.get("createdAt", ""))
+        playbook_data = latest_playbook.get("playbook", {})
+        tasks = playbook_data.get("tasks", [])
+
+        # Find and update task
+        task_found = False
+        for task in tasks:
+            if task.get("rank") == int(task_id):
+                task["status"] = "completed"
+                task_found = True
+                task_name = task.get("title", "Task")
+                domain = task.get("domain", "general")
+                break
+
+        if not task_found:
+            return err(404, "Task not found")
+
+        # Calculate new progress
+        from employee.utils.checklist_manager import calculate_domain_progress
+        domain_progress = calculate_domain_progress(tasks)
+        overall_progress = round(sum(domain_progress.values()) / len(domain_progress)) if domain_progress else 0
+
+        # Generate milestone message
+        user_name = "User"
+        try:
+            from boto3.dynamodb.conditions import Key as _Key2
+            user_result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key2("email").eq(email),
+            )
+            user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
+            if user_items:
+                user_name = f"{user_items[0].get('firstName', '')} {user_items[0].get('lastName', '')}".strip() or user_name
+        except Exception:
+            pass
+
+        milestone_msg = generate_milestone_message(domain, overall_progress, user_name)
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Audit completion
+        audit(tenant_id, email, "TASK_COMPLETED",
+              f"TaskId: {task_id}, TaskName: {task_name}, DomainProgress: {domain_progress}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "success": True,
+            "taskId": task_id,
+            "taskName": task_name,
+            "domain": domain,
+            "domainProgress": domain_progress,
+            "overallProgress": overall_progress,
+            "milestoneMessage": milestone_msg,
+            "completedAt": now,
+        })
+
+    # GET /api/employee/checklist/progress — Get overall progress summary
+    if path.endswith("/progress") and "/checklist/" in path and method == "GET":
+        from boto3.dynamodb.conditions import Attr as _Attr
+        from employee.utils.checklist_manager import calculate_domain_progress
+
+        playbook_result = RESP_T.scan(
+            FilterExpression=_Attr("userId").eq(user_sub) & _Attr("courseId").eq("MY_PLAYBOOK")
+        )
+        playbooks = playbook_result.get("Items", [])
+        if not playbooks:
+            return err(404, "No playbook found")
+
+        latest_playbook = max(playbooks, key=lambda p: p.get("createdAt", ""))
+        tasks = latest_playbook.get("playbook", {}).get("tasks", [])
+
+        domain_progress = calculate_domain_progress(tasks)
+        overall_progress = round(sum(domain_progress.values()) / len(domain_progress)) if domain_progress else 0
+
+        return resp(200, {
+            "overallProgress": overall_progress,
+            "domainProgress": domain_progress,
+            "totalTasks": len(tasks),
+            "completedTasks": len([t for t in tasks if t.get("status") == "completed"]),
+        })
+
     # GET /api/employee/certificates
     if path.endswith("/certificates") and method == "GET":
         from boto3.dynamodb.conditions import Attr as _Attr
@@ -526,6 +928,257 @@ def _handler_impl(event, context):
             "total": total_allowed,
             "used": used_count,
             "remaining": max(0, total_allowed - used_count),
+        })
+
+    # POST /api/employee/sessions/book — Book a new 1:1 session
+    if path.endswith("/sessions/book") and method == "POST":
+        from employee.utils.sessions import book_session, validate_session_booking
+
+        body_data = get_body(event)
+        scheduled_at = body_data.get("scheduledAt", "")
+        notes = body_data.get("notes", "")
+
+        if not scheduled_at:
+            return err(400, "scheduledAt is required")
+
+        # Get user name
+        user_name = "User"
+        try:
+            from boto3.dynamodb.conditions import Key as _Key
+            user_result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key("email").eq(email),
+            )
+            user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
+            if user_items:
+                user_name = f"{user_items[0].get('firstName', '')} {user_items[0].get('lastName', '')}".strip() or user_name
+        except Exception:
+            pass
+
+        # Fetch existing sessions for validation
+        existing_sessions = []
+        try:
+            from boto3.dynamodb.conditions import Attr as _Attr
+            result = SESSIONS_T.scan(
+                FilterExpression=_Attr("userId").eq(user_sub)
+            )
+            existing_sessions = result.get("Items", [])
+        except Exception:
+            pass
+
+        # Validate booking
+        is_valid, error_msg = validate_session_booking(scheduled_at, existing_sessions)
+        if not is_valid:
+            return err(400, error_msg or "Cannot book session at this time")
+
+        # Create session
+        session_data = book_session(user_sub, user_name, scheduled_at, notes=notes)
+
+        # Store session in SESSIONS_T
+        try:
+            SESSIONS_T.put_item(Item={
+                "userId": user_sub,
+                "sk": f"{scheduled_at}#{session_data['sessionId']}",
+                "sessionId": session_data["sessionId"],
+                "userName": user_name,
+                "scheduledAt": scheduled_at,
+                "status": "scheduled",
+                "notes": notes,
+                "tenantId": tenant_id,
+                "createdAt": session_data["createdAt"],
+            })
+        except Exception as e:
+            print(f"SESSION_STORAGE_ERROR: {e}")
+            return err(500, "Failed to store session")
+
+        # Audit booking
+        audit(tenant_id, email, "SESSION_BOOKED",
+              f"SessionId: {session_data['sessionId']}, ScheduledAt: {scheduled_at}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "sessionId": session_data["sessionId"],
+            "userId": user_sub,
+            "userName": user_name,
+            "scheduledAt": scheduled_at,
+            "status": "scheduled",
+            "notes": notes,
+            "createdAt": session_data["createdAt"],
+        })
+
+    # POST /api/employee/sessions/{sessionId}/complete — Complete session with transcript
+    if path.endswith("/complete") and "/sessions/" in path and method == "POST":
+        from employee.utils.sessions import complete_session
+
+        body_data = get_body(event)
+        transcript = body_data.get("transcript", "")
+        session_title = body_data.get("title", "Session")
+
+        # Extract sessionId from path
+        path_parts = path.split("/")
+        session_id = path_parts[path_parts.index("sessions") + 1] if "sessions" in path_parts else None
+
+        if not session_id:
+            return err(400, "Invalid session ID")
+
+        if not transcript:
+            return err(400, "Transcript is required")
+
+        # Get session from SESSIONS_T
+        session_item = None
+        try:
+            from boto3.dynamodb.conditions import Attr as _Attr
+            result = SESSIONS_T.scan(
+                FilterExpression=_Attr("sessionId").eq(session_id) & _Attr("userId").eq(user_sub)
+            )
+            items = result.get("Items", [])
+            if items:
+                session_item = items[0]
+        except Exception as e:
+            print(f"SESSION_LOOKUP_ERROR: {e}")
+
+        if not session_item:
+            return err(404, "Session not found")
+
+        # Generate summary
+        completion_data = complete_session(session_id, transcript, session_title)
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        # Update session in SESSIONS_T
+        try:
+            SESSIONS_T.put_item(Item={
+                **session_item,
+                "status": "completed",
+                "transcript": transcript[:1000],  # Store excerpt
+                "summary": completion_data["summary"],
+                "duration": len(transcript.split()) // 130,  # Estimate ~130 wpm
+                "completedAt": completion_data["completedAt"],
+            })
+        except Exception as e:
+            print(f"SESSION_UPDATE_ERROR: {e}")
+
+        # Audit completion
+        audit(tenant_id, email, "SESSION_COMPLETED",
+              f"SessionId: {session_id}, Summary: {completion_data['summary'][:100]}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "sessionId": session_id,
+            "status": "completed",
+            "summary": completion_data["summary"],
+            "transcriptLength": completion_data["transcriptLength"],
+            "duration": len(transcript.split()) // 130,
+            "completedAt": completion_data["completedAt"],
+        })
+
+    # GET /api/employee/master-classes — Get all master classes
+    if path.endswith("/master-classes") and method == "GET":
+        from employee.utils.master_classes import DEFAULT_MASTER_CLASSES
+
+        return resp(200, {
+            "classes": DEFAULT_MASTER_CLASSES,
+            "count": len(DEFAULT_MASTER_CLASSES),
+        })
+
+    # GET /api/employee/master-classes/recommended — Get recommended classes
+    if path.endswith("/master-classes/recommended") and method == "GET":
+        from employee.utils.master_classes import DEFAULT_MASTER_CLASSES, get_recommended_classes
+        from boto3.dynamodb.conditions import Attr as _Attr
+
+        # Get user's weak domains from latest playbook
+        weak_domains = []
+        try:
+            playbook_result = RESP_T.scan(
+                FilterExpression=_Attr("userId").eq(user_sub) & _Attr("courseId").eq("MY_PLAYBOOK")
+            )
+            playbooks = playbook_result.get("Items", [])
+            if playbooks:
+                latest = max(playbooks, key=lambda p: p.get("createdAt", ""))
+                weak_domains = latest.get("playbook", {}).get("weakDomains", [])
+        except Exception:
+            pass
+
+        recommended = get_recommended_classes(weak_domains, DEFAULT_MASTER_CLASSES)
+
+        return resp(200, {
+            "classes": recommended,
+            "count": len(recommended),
+            "basedOnDomains": weak_domains,
+        })
+
+    # POST /api/employee/master-classes/{classId}/register — Register for a class
+    if path.endswith("/register") and "/master-classes/" in path and method == "POST":
+        from employee.utils.master_classes import register_for_class
+
+        # Extract classId from path
+        path_parts = path.split("/")
+        class_id = path_parts[path_parts.index("master-classes") + 1] if "master-classes" in path_parts else None
+
+        if not class_id:
+            return err(400, "Invalid class ID")
+
+        # Get user name
+        user_name = "User"
+        try:
+            from boto3.dynamodb.conditions import Key as _Key
+            user_result = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_Key("email").eq(email),
+            )
+            user_items = [i for i in user_result.get("Items", []) if i.get("tenantId") == tenant_id]
+            if user_items:
+                user_name = f"{user_items[0].get('firstName', '')} {user_items[0].get('lastName', '')}".strip() or user_name
+        except Exception:
+            pass
+
+        # Create registration
+        registration = register_for_class(user_sub, class_id, user_name)
+
+        # Store in AUDIT_T as registration record
+        try:
+            AUDIT_T.put_item(Item={
+                "tenantId": tenant_id,
+                "sk": f"REGISTRATION#{registration['registeredAt']}#{registration['registrationId']}",
+                "registrationId": registration["registrationId"],
+                "userId": user_sub,
+                "classId": class_id,
+                "userName": user_name,
+                "registeredAt": registration["registeredAt"],
+                "eventType": "class_registration",
+            })
+        except Exception as e:
+            print(f"REGISTRATION_STORAGE_ERROR: {e}")
+
+        # Audit registration
+        audit(tenant_id, email, "CLASS_REGISTERED",
+              f"ClassId: {class_id}, ClassName: {registration['registrationId']}",
+              ip=ip, device=device)
+
+        return resp(200, {
+            "registrationId": registration["registrationId"],
+            "classId": class_id,
+            "userId": user_sub,
+            "registeredAt": registration["registeredAt"],
+            "status": "registered",
+        })
+
+    # GET /api/employee/master-classes/registrations — Get user's class registrations
+    if "/master-classes/registrations" in path and method == "GET":
+        from boto3.dynamodb.conditions import Attr as _Attr
+
+        registrations = []
+        try:
+            result = AUDIT_T.scan(
+                FilterExpression=_Attr("userId").eq(user_sub) & _Attr("eventType").eq("class_registration")
+            )
+            registrations = result.get("Items", [])
+        except Exception as e:
+            print(f"REGISTRATIONS_LOOKUP_ERROR: {e}")
+
+        return resp(200, {
+            "registrations": registrations,
+            "count": len(registrations),
         })
 
     # GET /api/employee/progress-summary

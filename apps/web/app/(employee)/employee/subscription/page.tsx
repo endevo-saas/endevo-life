@@ -50,7 +50,7 @@ const COMPARISON_ROWS = [
   { feature: 'Extended session recordings', basic: false, premium: true },
 ]
 
-const BOOKING_URL = 'https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH'
+const BOOKING_URL = process.env.NEXT_PUBLIC_BOOKING_LINK || 'https://link.endevo.life/widget/booking/HUYkq6QZs0fI7AMtt6qH'
 
 // ── Skeleton Loader ─────────────────────────────────────────────────────────
 

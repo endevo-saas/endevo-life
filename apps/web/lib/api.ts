@@ -215,9 +215,71 @@ export const api = {
     apiFetch(`/api/employee/assessment/${courseId}/submit`, { method: 'POST', body: JSON.stringify({ answers }) }),
   employeeCertificates: () => apiFetch<{ certificates: Certificate[]; count: number }>('/api/employee/certificates'),
   employeeCertificateCheck: () => apiFetch<CertificateCheckResult>('/api/employee/certificate/check', { method: 'POST' }),
+  employeeGeneratePlaybook: (userName?: string) =>
+    apiFetch('/api/employee/playbook/generate', { method: 'POST', body: JSON.stringify({ userName }) }),
+  employeeSendPlaybookEmail: () =>
+    apiFetch<{ success: boolean; messageId: string; email: string; subject: string; sentAt: string }>(
+      '/api/employee/email/send-playbook',
+      { method: 'POST' }
+    ),
+  employeePostQuestion: (question: string) =>
+    apiFetch<{
+      questionId: string
+      question: string
+      answer: string
+      confidence: number
+      shouldEscalate: boolean
+      source: string
+      createdAt: string
+    }>('/api/employee/support/question', { method: 'POST', body: JSON.stringify({ question }) }),
+  employeeRateAnswer: (questionId: string, rating: number, feedback?: string) =>
+    apiFetch<{ success: boolean; rating: number; escalatedToHR: boolean; ratedAt: string }>(
+      `/api/employee/support/question/${questionId}/rate`,
+      { method: 'POST', body: JSON.stringify({ rating, feedback }) }
+    ),
+  employeeGetFAQ: (search?: string) =>
+    apiFetch<{ faq: Array<{ id: string; question: string; answer: string; category: string }>; count: number }>(
+      `/api/employee/support/faq${search ? `?search=${encodeURIComponent(search)}` : ''}`
+    ),
+  employeeGetChecklist: () =>
+    apiFetch<{
+      tasks: Array<{
+        taskId: string
+        title: string
+        description: string
+        domain: string
+        status: 'pending' | 'in_progress' | 'completed'
+        priority: number
+        guidance?: string
+        completedAt?: string
+      }>
+      domainProgress: { [key: string]: number }
+      overallProgress: number
+      totalTasks: number
+      completedTasks: number
+    }>('/api/employee/checklist'),
+  employeeCompleteChecklistTask: (taskId: string) =>
+    apiFetch<{
+      success: boolean
+      taskId: string
+      taskName: string
+      domain: string
+      domainProgress: { [key: string]: number }
+      overallProgress: number
+      milestoneMessage: string
+      completedAt: string
+    }>(`/api/employee/checklist/${taskId}/complete`, { method: 'POST' }),
+  employeeGetChecklistProgress: () =>
+    apiFetch<{
+      overallProgress: number
+      domainProgress: { [key: string]: number }
+      totalTasks: number
+      completedTasks: number
+    }>('/api/employee/checklist/progress'),
 
   // LMS — Assessment
   lmsGetAssessmentQuestions: () => apiFetch('/api/lms/assessment/questions'),
+  lmsGetAssessmentQuestionsByDomain: () => apiFetch('/api/lms/assessment/questions/by-domain'),
   lmsSubmitAssessment: (answers: AssessmentAnswer[]) =>
     apiFetch('/api/lms/assessment/submit', { method: 'POST', body: JSON.stringify({ answers }) }),
   lmsGetAssessmentStatus: () => apiFetch('/api/lms/assessment/status'),
@@ -314,7 +376,77 @@ export const api = {
   // Employee — Subscription & Sessions
   employeeSubscription: () => apiFetch<EmployeeSubscription>('/api/employee/subscription'),
   employeeSessions: () => apiFetch<EmployeeSessionOverview>('/api/employee/sessions'),
+  employeeBookSession: (scheduledAt: string, notes?: string) =>
+    apiFetch<{
+      sessionId: string
+      userId: string
+      userName: string
+      scheduledAt: string
+      status: 'scheduled' | 'completed'
+      notes: string
+      createdAt: string
+    }>('/api/employee/sessions/book', {
+      method: 'POST',
+      body: JSON.stringify({ scheduledAt, notes })
+    }),
+  employeeCompleteSession: (sessionId: string, transcript: string, title?: string) =>
+    apiFetch<{
+      sessionId: string
+      status: 'completed'
+      summary: string
+      transcriptLength: number
+      duration: number
+      completedAt: string
+    }>(`/api/employee/sessions/${sessionId}/complete`, {
+      method: 'POST',
+      body: JSON.stringify({ transcript, title })
+    }),
   employeeProgressSummary: () => apiFetch<ProgressSummary>('/api/employee/progress-summary'),
+
+  // Employee — Master Classes
+  employeeGetMasterClasses: () =>
+    apiFetch<{
+      classes: Array<{
+        classId: string
+        title: string
+        description: string
+        domain: string
+        instructor: string
+        durationMinutes: number
+        maxAttendees: number
+      }>
+      count: number
+    }>('/api/employee/master-classes'),
+  employeeGetRecommendedClasses: () =>
+    apiFetch<{
+      classes: Array<{
+        classId: string
+        title: string
+        description: string
+        domain: string
+        instructor: string
+      }>
+      count: number
+      basedOnDomains: string[]
+    }>('/api/employee/master-classes/recommended'),
+  employeeRegisterForClass: (classId: string) =>
+    apiFetch<{
+      registrationId: string
+      classId: string
+      userId: string
+      registeredAt: string
+      status: 'registered'
+    }>(`/api/employee/master-classes/${classId}/register`, { method: 'POST' }),
+  employeeGetClassRegistrations: () =>
+    apiFetch<{
+      registrations: Array<{
+        registrationId: string
+        classId: string
+        userId: string
+        registeredAt: string
+      }>
+      count: number
+    }>('/api/employee/master-classes/registrations'),
 
   // Bulk Import/Export
   adminImportTenants: (tenants: ImportTenant[]) =>
@@ -417,6 +549,10 @@ export const api = {
   jesseChatHistory: () => apiFetch<JesseChatHistory>('/api/jesse/chat/history'),
   jesseHealth: () => apiFetch('/api/jesse/health'),
   jesseAccess: () => apiFetch<{ hasAccess: boolean; plan: string }>('/api/jesse/access'),
+
+  // Generic
+  post: <T = unknown>(path: string, body?: Record<string, unknown>) =>
+    apiFetch<T>(path, { method: 'POST', body: JSON.stringify(body || {}) }),
 }
 
 // Types

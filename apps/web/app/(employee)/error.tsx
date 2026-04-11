@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
+import * as Sentry from '@sentry/nextjs'
 import { AlertTriangle, RefreshCw, Home } from 'lucide-react'
 
 export default function EmployeeError({
@@ -11,7 +12,7 @@ export default function EmployeeError({
   reset: () => void
 }) {
   useEffect(() => {
-    console.error('[Employee Error]', error)
+    Sentry.captureException(error, { tags: { boundary: 'employee' } })
   }, [error])
 
   return (
