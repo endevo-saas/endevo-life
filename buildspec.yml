@@ -1,0 +1,45 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.12
+
+  build:
+    commands:
+      - echo "=== Deploying Endevo Lambda Functions ==="
+      - cd backend/functions
+
+      - echo "--- fn-auth ---"
+      - cd auth && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - aws lambda update-function-code --function-name endevo-uat-fn-auth --zip-file fileb://function.zip --region us-east-1
+      - rm function.zip && cd ..
+
+      - echo "--- fn-admin ---"
+      - cd admin && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - aws lambda update-function-code --function-name endevo-uat-fn-admin --zip-file fileb://function.zip --region us-east-1
+      - rm function.zip && cd ..
+
+      - echo "--- fn-hr ---"
+      - cd hr && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - aws lambda update-function-code --function-name endevo-uat-fn-hr --zip-file fileb://function.zip --region us-east-1
+      - rm function.zip && cd ..
+
+      - echo "--- fn-employee ---"
+      - cd employee && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - aws lambda update-function-code --function-name endevo-uat-fn-employee --zip-file fileb://function.zip --region us-east-1
+      - rm function.zip && cd ..
+
+      - echo "--- fn-lms ---"
+      - cd lms && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - aws lambda update-function-code --function-name endevo-uat-fn-lms --zip-file fileb://function.zip --region us-east-1
+      - rm function.zip && cd ..
+
+      - echo "--- fn-jesse ---"
+      - cd jesse && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - aws lambda update-function-code --function-name endevo-uat-fn-jesse --zip-file fileb://function.zip --region us-east-1
+      - rm function.zip && cd ..
+
+  post_build:
+    commands:
+      - echo "=== All 6 Lambda functions deployed ==="
