@@ -743,9 +743,33 @@ def _handler_impl(event, context):
               ip=ip, device=device, severity="WARNING")
         return resp(200, {"message": f"Tenant '{t.get('name')}' re-enabled. {reactivated} users reactivated."})
 
+    # ── DELETE /api/admin/tenants/{id}/permanent — Hard delete (GLOBAL_ADMIN only) ──
+    if "/tenants/" in path and path.endswith("/permanent") and method == "DELETE":
+        tenant_id = path.split("/")[-2]
+        t = TENANTS_T.get_item(Key={"tenantId": tenant_id}).get("Item")
+        if not t:
+            return err(404, "Tenant not found")
+        if t.get("status") != "archived":
+            return err(400, "Tenant must be archived before permanent deletion")
+        active_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id) & Attr("status").ne("archived"))
+        if active_users:
+            return err(400, f"Tenant has {len(active_users)} active user(s). Archive all users first.")
+        archived_users = scan_all(USERS_T, Attr("tenantId").eq(tenant_id))
+        for u in archived_users:
+            try:
+                cognito_idp.admin_delete_user(UserPoolId=COGNITO_USER_POOL_ID, Username=u.get("email", u["userId"]))
+            except Exception:
+                pass
+            USERS_T.delete_item(Key={"userId": u["userId"]})
+        TENANTS_T.delete_item(Key={"tenantId": tenant_id})
+        audit("SYSTEM", caller_email, "HARD_DELETE_TENANT",
+              json.dumps({"tenantId": tenant_id, "name": t.get("name"), "usersDeleted": len(archived_users)}),
+              ip=ip, device=device, severity="CRITICAL")
+        return resp(204, {"message": f"Tenant '{t.get('name')}' permanently deleted. {len(archived_users)} user(s) removed."})
+
     # ── DELETE /api/admin/tenants/{id} — BLOCKED, no hard delete ─────────
     if "/tenants/" in path and method == "DELETE":
-        return err(405, "Tenants cannot be deleted. Use POST /disable to disable or /enable to re-activate.")
+        return err(405, "Tenants cannot be deleted. Use POST /disable to disable, or DELETE /permanent for hard delete of archived tenants.")
 
     # ── GET /api/admin/users ──────────────────────────────────────────────
     if path.endswith("/users") and method == "GET" and "/archive/" not in path:
@@ -924,9 +948,28 @@ def _handler_impl(event, context):
               f"Updated user: {item['email']} fields: {list(updates.keys())}", ip=ip, device=device)
         return resp(200, {"message": "User updated"})
 
+    # ── DELETE /api/admin/users/{id}/permanent — Hard delete (GLOBAL_ADMIN only) ──
+    if "/users/" in path and path.endswith("/permanent") and method == "DELETE":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item:
+            return err(404, "User not found")
+        if item.get("status") != "archived":
+            return err(400, "User must be archived before permanent deletion")
+        email = item.get("email", "")
+        try:
+            cognito_idp.admin_delete_user(UserPoolId=COGNITO_USER_POOL_ID, Username=email)
+        except Exception:
+            pass
+        USERS_T.delete_item(Key={"userId": user_id})
+        audit(item.get("tenantId", "SYSTEM"), caller_email, "HARD_DELETE_USER",
+              json.dumps({"userId": user_id, "email": email}),
+              ip=ip, device=device, severity="CRITICAL")
+        return resp(204, {"message": f"User {email} permanently deleted."})
+
     # ── DELETE /api/admin/users/{id} — BLOCKED, no hard delete ───────────
-    if "/users/" in path and method == "DELETE" and not any(x in path for x in ["/lock", "/unlock", "/reset-password"]):
-        return err(405, "Users cannot be deleted. Use POST /lock to deactivate or /unlock to re-activate.")
+    if "/users/" in path and method == "DELETE" and not any(x in path for x in ["/lock", "/unlock", "/reset-password", "/permanent"]):
+        return err(405, "Users cannot be deleted. Use POST /lock to deactivate, or DELETE /permanent for hard delete of archived users.")
 
     # ── POST /api/admin/users/{id}/deactivate ─────────────────────────────
     if "/users/" in path and path.endswith("/deactivate") and method == "POST":

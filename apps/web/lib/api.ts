@@ -467,6 +467,10 @@ export const api = {
     apiFetch(`/api/admin/archive/users/${userId}/restore`, { method: 'POST' }),
   adminRestoreTenant: (tenantId: string) =>
     apiFetch(`/api/admin/archive/tenants/${tenantId}/restore`, { method: 'POST' }),
+  adminHardDeleteUser: (userId: string) =>
+    apiFetch(`/api/admin/users/${userId}/permanent`, { method: 'DELETE' }),
+  adminHardDeleteTenant: (tenantId: string) =>
+    apiFetch(`/api/admin/tenants/${tenantId}/permanent`, { method: 'DELETE' }),
   hrArchivedEmployees: () =>
     apiFetch<{ employees: User[] }>('/api/hr/archive/employees'),
   hrRestoreEmployee: (userId: string) =>
