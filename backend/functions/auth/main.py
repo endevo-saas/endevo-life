@@ -73,7 +73,7 @@ def resp(status: int, body: dict) -> dict:
 
 
 def err(status: int, msg: str) -> dict:
-    return resp(status, {"success": False, "detail": msg})
+    return resp(status, {"success": False, "error": msg, "detail": msg})
 
 
 def get_body(event: dict) -> dict:

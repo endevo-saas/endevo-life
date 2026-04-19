@@ -222,8 +222,8 @@ export default function LoginPage() {
       })
       const data: VerifyResponse = await res.json()
       if (!res.ok) {
-        const errData = data as unknown as { error?: string; message?: string }
-        throw new Error(errData.error || errData.message || 'Verification failed')
+        const errData = data as unknown as { error?: string; detail?: string; message?: string }
+        throw new Error(errData.error || errData.detail || errData.message || 'Verification failed')
       }
       // Store auth tokens
       if (data.access_token) {
