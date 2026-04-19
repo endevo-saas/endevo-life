@@ -31,7 +31,7 @@ export default function StatusPage() {
     { label: 'Amplify Frontend',         ok: true,  note: 'uat.endevo.life live with SSL' },
     { label: 'API Gateway',              ok: true,  note: '4jms6sdzk9.execute-api.us-east-1' },
     { label: 'DynamoDB (9 tables)',      ok: true,  note: 'PAY_PER_REQUEST · PITR enabled' },
-    { label: 'WorkOS Auth',              ok: true,  note: 'AuthKit SSO · JWT' },
+    { label: 'Amazon Cognito Auth',       ok: true,  note: 'Passwordless OTP · JWT RS256' },
     { label: 'SES Email',                ok: true,  note: 'endevo.life domain verified' },
     { label: 'DNS uat.endevo.life',      ok: true,  note: 'CNAME → CloudFront · SSL valid' },
     { label: 'API Health (live check)',  ok: api?.status === 'healthy', note: loading ? 'Checking...' : `${api?.status} · ${latency}ms` },

@@ -91,12 +91,34 @@ export class IamStack extends cdk.Stack {
       resources: ['*'],
     }))
 
-    // Secrets Manager — WorkOS API key + client ID
+    // Secrets Manager — Cognito app config (replaces WorkOS secrets)
+    // WorkOS secrets (endevo/workos/*) are left in place for 60 days; IAM access removed here.
     this.lambdaRole.addToPolicy(new iam.PolicyStatement({
       sid: 'SecretsManagerAccess',
       effect: iam.Effect.ALLOW,
       actions: ['secretsmanager:GetSecretValue'],
-      resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:endevo/workos/*`],
+      resources: [`arn:aws:secretsmanager:${this.region}:${this.account}:secret:endevo/cognito/*`],
+    }))
+
+    // Cognito — Lambdas call cognito-idp for custom-auth initiation and user management
+    this.lambdaRole.addToPolicy(new iam.PolicyStatement({
+      sid: 'CognitoIdpAccess',
+      effect: iam.Effect.ALLOW,
+      actions: [
+        'cognito-idp:InitiateAuth',
+        'cognito-idp:RespondToAuthChallenge',
+        'cognito-idp:RevokeToken',
+        'cognito-idp:AdminCreateUser',
+        'cognito-idp:AdminDeleteUser',
+        'cognito-idp:AdminDisableUser',
+        'cognito-idp:AdminEnableUser',
+        'cognito-idp:AdminAddUserToGroup',
+        'cognito-idp:AdminRemoveUserFromGroup',
+        'cognito-idp:AdminListGroupsForUser',
+        'cognito-idp:AdminGetUser',
+        'cognito-idp:ListUsers',
+      ],
+      resources: [`arn:aws:cognito-idp:${this.region}:${this.account}:userpool/*`],
     }))
 
     // SNS — publish SMS/notifications

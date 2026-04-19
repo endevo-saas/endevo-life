@@ -20,7 +20,7 @@ Routes:
   Employee Actions:
   POST /api/hr/employees/{id}/lock                     Lock employee (set status=locked)
   POST /api/hr/employees/{id}/unlock                   Unlock employee (set status=active)
-  POST /api/hr/employees/{id}/credential-reset            Reset employee password (new OTP via WorkOS)
+  POST /api/hr/employees/{id}/credential-reset            Returns 410 Gone (passwordless — use OTP login)
 
   Archive / Recycle Bin:
   GET  /api/hr/archive/employees                       List archived employees in own tenant
@@ -32,10 +32,11 @@ from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Attr
 
 REGION    = os.environ.get("AWS_REGION", "us-east-1")
-dynamo    = boto3.resource("dynamodb", region_name=REGION)
-ses       = boto3.client("ses", region_name=REGION)
-s3_client = boto3.client("s3", region_name=REGION)
-_secrets  = boto3.client("secretsmanager", region_name=REGION)
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
+dynamo      = boto3.resource("dynamodb",   region_name=REGION)
+ses         = boto3.client("ses",          region_name=REGION)
+s3_client   = boto3.client("s3",           region_name=REGION)
+cognito_idp = boto3.client("cognito-idp",  region_name=REGION)
 UPLOAD_BUCKET = os.environ.get("S3_UPLOAD_BUCKET", "endevo-uat-uploads")
 CF_DOMAIN = os.environ.get("CF_DOMAIN", "")
 USERS_T        = dynamo.Table("endevo-uat-users")
@@ -47,30 +48,34 @@ USER_MODULES_T = dynamo.Table("endevo-uat-lms-user-modules")
 RESPONSES_T    = dynamo.Table("endevo-uat-responses")
 TENANTS_T      = dynamo.Table("endevo-uat-tenants")
 
-# ── Secrets & WorkOS ─────────────────────────────────────────────────────────
+# ── Cognito helpers ───────────────────────────────────────────────────────────
 
-_secret_cache = {}
-
-def _get_secret(name):
-    if name in _secret_cache:
-        return _secret_cache[name]
-    val = _secrets.get_secret_value(SecretId=name)["SecretString"]
-    _secret_cache[name] = val
-    return val
-
-def _workos_api(method, path, body=None):
-    import urllib.request
-    api_key = _get_secret("endevo/workos/api-key")
-    url = f"https://api.workos.com{path}"
-    data = json.dumps(body).encode() if body else None
-    req = urllib.request.Request(url, data=data, method=method, headers={
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    })
-    with urllib.request.urlopen(req, timeout=10) as r:
-        if r.status == 204:
-            return {}
-        return json.loads(r.read())
+def _cognito_create_user(email: str, first_name: str, last_name: str) -> str:
+    """Create EMPLOYEE in Cognito pool. Returns email (username) or '' on failure."""
+    if not COGNITO_USER_POOL_ID:
+        return ""
+    try:
+        cognito_idp.admin_create_user(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Username=email,
+            MessageAction="SUPPRESS",
+            UserAttributes=[
+                {"Name": "email",           "Value": email},
+                {"Name": "email_verified",  "Value": "true"},
+                {"Name": "given_name",      "Value": first_name},
+                {"Name": "family_name",     "Value": last_name},
+                {"Name": "custom:role",     "Value": "EMPLOYEE"},
+            ],
+        )
+        cognito_idp.admin_add_user_to_group(
+            UserPoolId=COGNITO_USER_POOL_ID, Username=email, GroupName="EMPLOYEE"
+        )
+        return email
+    except cognito_idp.exceptions.UsernameExistsException:
+        return email
+    except Exception as exc:
+        print(f"COGNITO_CREATE_USER_ERROR: {exc}")
+        return ""
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 
@@ -114,43 +119,18 @@ def get_body(event):
         return {}
 
 def get_caller(event):
-    """Extract (tenantId, role, email) from Bearer token via session or WorkOS JWT."""
-    auth_header = (event.get("headers") or {}).get("authorization", "")
-    token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header.strip()
-    if not token:
+    """Extract (tenantId, role, email) from Cognito JWT Bearer token."""
+    import sys as _sys, os as _os
+    _shared = _os.path.join(_os.path.dirname(__file__), "..", "..", "shared")
+    if _shared not in _sys.path:
+        _sys.path.insert(0, _shared)
+    try:
+        from cognito_auth import get_caller as _get_caller
+        caller = _get_caller(event)
+        return caller["tenantId"], caller["role"], caller["email"]
+    except Exception as exc:
+        print(f"AUTH_REJECTED: {exc}")
         return None, None, None
-
-    # Session token (from OTP login)
-    if token.startswith("endevo_"):
-        try:
-            from boto3.dynamodb.conditions import Key as _SessKey
-            result = USERS_T.query(
-                IndexName="sessionToken-index",
-                KeyConditionExpression=_SessKey("sessionToken").eq(token),
-                Limit=1,
-            )
-            items = result.get("Items", [])
-            if items:
-                u = items[0]
-                if u.get("status") in ("inactive", "archived"):
-                    return None, None, None
-                # Check session expiry (24h TTL)
-                expires = u.get("sessionExpiresAt", "")
-                if expires:
-                    from datetime import datetime, timezone
-                    exp_dt = datetime.fromisoformat(expires)
-                    if datetime.now(timezone.utc) > exp_dt:
-                        return None, None, None
-                return u.get("tenantId"), u.get("role"), u.get("email")
-        except Exception as e:
-            print(f"SESSION_LOOKUP_ERROR: {e}")
-        return None, None, None
-
-    # SECURITY: JWT path removed — unverified JWT tokens are not accepted.
-    # All authentication MUST go through the DynamoDB session token path (endevo_*).
-    # WorkOS JWTs lack RSA signature verification and can be forged.
-    print(f"AUTH_REJECTED: Non-session token presented to HR endpoint")
-    return None, None, None
 
 def sanitize(value, max_len=200):
     if not isinstance(value, str):
@@ -349,7 +329,6 @@ def _handler_impl(event, context):
             return err(409, f"{email} is already a member of this organisation")
 
         invite_token  = str(uuid.uuid4())
-        temp_password = f"Invite@{str(uuid.uuid4())[:8]}!"
         user_id       = str(uuid.uuid4())
         now           = datetime.now(timezone.utc).isoformat()
 
@@ -371,28 +350,17 @@ def _handler_impl(event, context):
             existing_role = global_existing[0].get("role", "unknown")
             return err(409, f"{email} is already registered as {existing_role} in the system. One email can only hold one role.")
 
-        # Create WorkOS user
-        try:
-            workos_user = _workos_api("POST", "/user_management/users", {
-                "email": email,
-                "password": new_cred,
-                "first_name": first_name,
-                "last_name": last_name,
-                "email_verified": True,
-            })
-        except Exception as e:
-            error_msg = str(e)
-            if "409" in error_msg or "already exists" in error_msg.lower():
-                return err(409, f"User {email} already exists in the system")
-            print(f"WORKOS_CREATE_USER_ERROR: {e}")
-            return err(400, f"Failed to create user account: {error_msg}")
+        # Create Cognito user (MessageAction=SUPPRESS — invite email sent via SES below)
+        cognito_sub = _cognito_create_user(email, first_name, last_name)
 
         USERS_T.put_item(Item={
             "userId": user_id, "tenantId": tenant_id, "email": email,
             "firstName": first_name, "lastName": last_name,
             "role": "EMPLOYEE", "status": "pending",
             "department": department, "jobTitle": job_title, "phone": phone,
-            "inviteToken": invite_token, "invitedBy": caller_email, "createdAt": now
+            "inviteToken": invite_token, "invitedBy": caller_email, "createdAt": now,
+            "cognitoSub": cognito_sub,
+            "authProvider": "cognito",
         })
 
         invite_url = f"https://uat.endevo.life/register?token={invite_token}&email={email}"
@@ -550,39 +518,13 @@ def _handler_impl(event, context):
         return resp(200, {"message": f"Employee {emp_email} unlocked"})
 
     # ── POST /api/hr/employees/{id}/credential-reset ────────────────────────
+    # Passwordless platform — no passwords to reset. Users log in via email OTP.
     if "/employees/" in path and path.endswith("/credential-reset") and method == "POST":
-        user_id = path.split("/")[-2]
-        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
-        if not item or item.get("tenantId") != tenant_id:
-            return err(404, "Employee not found in your organisation")
-        if item.get("role") != "EMPLOYEE":
-            return err(403, "Can only reset password for employees in your organisation")
-        emp_email = item.get("email", "")
-        new_cred = f"Endevo@{str(uuid.uuid4())[:8]}!"
-        now = datetime.now(timezone.utc).isoformat()
-        # Update password in WorkOS
-        try:
-            from urllib.parse import quote
-            workos_users = _workos_api("GET", f"/user_management/users?email={quote(emp_email)}")
-            workos_data = workos_users.get("data", [])
-            if workos_data:
-                workos_uid = workos_data[0]["id"]
-                _workos_api("PUT", f"/user_management/users/{workos_uid}", {
-                    "password": new_cred,
-                })
-            else:
-                return err(404, f"No auth account found for {emp_email}")
-        except Exception as e:
-            print(f"WORKOS_RESET_PW_ERROR: {e}")
-            return err(500, f"Failed to reset password: {str(e)[:100]}")
-        # Record in DynamoDB
-        USERS_T.update_item(Key={"userId": user_id},
-            UpdateExpression="SET credResetAt = :at, credResetBy = :by",
-            ExpressionAttributeValues={":at": now, ":by": caller_email})
-        audit(tenant_id, caller_email, "EMPLOYEE_PASSWORD_RESET",
-              json.dumps({"userId": user_id, "email": emp_email, "resetBy": caller_email}),
-              ip=ip, device=device, severity="WARN")
-        return resp(200, {"message": f"Password reset for {emp_email}", "temporary_credential": new_cred})
+        return resp(410, {
+            "success": True,
+            "message": "Password reset is not available — this platform uses passwordless OTP login. "
+                       "The employee can log in at /login using their email address.",
+        })
 
     # ── GET /api/hr/tenant ────────────────────────────────────────────────
     if path.endswith("/tenant") and method == "GET":

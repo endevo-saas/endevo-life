@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import 'source-map-support/register'
 import * as cdk from 'aws-cdk-lib'
-// CognitoStack import removed — WorkOS replaces Cognito (01-cognito-stack.ts kept as safety net for 30 days)
+import { CognitoStack } from '../lib/01-cognito-stack'
+import { CognitoTriggersStack } from '../lib/07-cognito-triggers-stack'
 import { DynamoStack } from '../lib/02-dynamo-stack'
 import { S3Stack } from '../lib/03-s3-stack'
 import { IamStack } from '../lib/04-iam-stack'
@@ -29,7 +30,7 @@ const env = {
 
 // Cost Allocation Tags — applied to ALL resources for FinOps per-tenant tracking
 const tags = {
-  Project: 'endevo',
+  Project: 'uat-endevo-life',
   Environment: 'uat',
   ManagedBy: 'cdk',
   Owner: 'shahzad',
@@ -37,7 +38,23 @@ const tags = {
   Service: 'endevo-life',
 }
 
-// Stack 1 — Cognito REMOVED (WorkOS replaces Cognito; 01-cognito-stack.ts kept as safety net for 30 days)
+// Apply tags at app level — propagates to all stacks and their resources
+Object.entries(tags).forEach(([k, v]) => cdk.Tags.of(app).add(k, v))
+
+// Stack 0a — Cognito Triggers (Lambdas for custom-auth OTP flow)
+// Must be deployed BEFORE CognitoStack so trigger ARNs are available.
+const cognitoTriggers = new CognitoTriggersStack(app, 'EndevoUatCognitoTriggers', { env, tags })
+
+// Stack 0b — Cognito User Pool (uat-endevo-users-v2, passwordless OTP)
+// Receives trigger Lambda references from CognitoTriggersStack.
+const cognito = new CognitoStack(app, 'EndevoUatCognito', {
+  env, tags,
+  defineChallengeFn:  cognitoTriggers.defineChallengeFn,
+  createChallengeFn:  cognitoTriggers.createChallengeFn,
+  verifyChallengeFn:  cognitoTriggers.verifyChallengeFn,
+  preTokenGenFn:      cognitoTriggers.preTokenGenFn,
+  postConfirmationFn: cognitoTriggers.postConfirmationFn,
+})
 
 // Stack 2 — DynamoDB (database)
 new DynamoStack(app, 'EndevoUatDynamo', { env, tags })
@@ -46,22 +63,24 @@ new DynamoStack(app, 'EndevoUatDynamo', { env, tags })
 new S3Stack(app, 'EndevoUatS3', { env, tags })
 
 // Stack 4 — IAM (roles + policies)
-// Note: no dynamoTableArns/s3BucketArns props — IAM uses wildcard endevo-uat-* ARNs
-// to avoid cross-stack ResourceExistenceCheck failures when new tables are added
-const iam = new IamStack(app, 'EndevoUatIam', {
-  env, tags,
-})
+const iam = new IamStack(app, 'EndevoUatIam', { env, tags })
 
 // Stack 5 — API Gateway + Python Lambdas
 const api = new ApiStack(app, 'EndevoUatApi', {
   env, tags,
   lambdaRole: iam.lambdaRole,
+  cognitoUserPoolId: cdk.Fn.importValue('endevo-uat-cognito-pool-id-v2'),
+  cognitoClientId:   cdk.Fn.importValue('endevo-uat-cognito-client-id-v2'),
+  cognitoJwksUrl:    cdk.Fn.importValue('endevo-uat-cognito-jwks-url'),
 })
 
 // Stack 6 — Amplify (frontend hosting)
+// Cognito values sourced from named CF exports (decoupled from auto-exports)
 new AmplifyStack(app, 'EndevoUatAmplify', {
   env, tags,
-  apiUrl: api.apiUrl,
+  apiUrl:            api.apiUrl,
+  cognitoUserPoolId: cdk.Fn.importValue('endevo-uat-cognito-pool-id-v2'),
+  cognitoClientId:   cdk.Fn.importValue('endevo-uat-cognito-client-id-v2'),
 })
 
 // Stack 7 — CloudFront LMS (secure video delivery)

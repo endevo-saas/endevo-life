@@ -59,7 +59,6 @@ bedrock = boto3.client("bedrock-runtime", region_name=REGION)
 bedrock_agent = boto3.client("bedrock-agent-runtime", region_name=REGION)
 polly = boto3.client("polly", region_name=REGION)
 ses = boto3.client("ses", region_name=REGION)
-_secrets = boto3.client("secretsmanager", region_name=REGION)
 dynamo_client = boto3.client("dynamodb", region_name=REGION)
 lambda_client = boto3.client("lambda", region_name=REGION)
 LAMBDA_FUNCTION_NAME = os.environ.get("AWS_LAMBDA_FUNCTION_NAME", "")
@@ -178,19 +177,6 @@ VOICE_MAP = {
     "male": "Matthew",    # US English male (Neural)
 }
 
-# ---------------------------------------------------------------------------
-# Secrets cache
-# ---------------------------------------------------------------------------
-_secret_cache: dict = {}
-
-
-def _get_secret(name: str) -> str:
-    if name in _secret_cache:
-        return _secret_cache[name]
-    val = _secrets.get_secret_value(SecretId=name)["SecretString"]
-    _secret_cache[name] = val
-    return val
-
 
 # ---------------------------------------------------------------------------
 # Bedrock Knowledge Base retrieval (cloned from Aryan's bedrock.ts)
@@ -275,49 +261,36 @@ def get_body(event: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Auth -- identical to fn-employee
+# Auth
 # ---------------------------------------------------------------------------
+_shared_path = os.path.join(os.path.dirname(__file__), "..", "..", "shared")
+
+
 def get_caller(event: dict) -> tuple:
-    """Extract (tenantId, email, userId) from Bearer token via session or WorkOS JWT."""
-    auth_header = (event.get("headers") or {}).get("authorization", "")
-    token = (
-        auth_header[7:].strip()
-        if auth_header.lower().startswith("bearer ")
-        else auth_header.strip()
-    )
-    if not token:
-        return None, None, None
-
-    # Session token (from OTP login)
-    if token.startswith("endevo_"):
+    """Extract (tenantId, email, userId) from a Cognito JWT Bearer token."""
+    import sys
+    if _shared_path not in sys.path:
+        sys.path.insert(0, _shared_path)
+    try:
+        from cognito_auth import get_caller as _get_caller
+        caller = _get_caller(event)
+        user_id: str = ""
         try:
-            from boto3.dynamodb.conditions import Key as _SessKey
-
-            result = USERS_T.query(
-                IndexName="sessionToken-index",
-                KeyConditionExpression=_SessKey("sessionToken").eq(token),
+            from boto3.dynamodb.conditions import Key as _K
+            res = USERS_T.query(
+                IndexName="email-index",
+                KeyConditionExpression=_K("email").eq(caller["email"]),
                 Limit=1,
             )
-            items = result.get("Items", [])
+            items = res.get("Items", [])
             if items:
-                u = items[0]
-                expires = u.get("sessionExpiresAt", "")
-                if expires:
-                    from datetime import datetime as _dt, timezone as _tz
-
-                    exp_dt = _dt.fromisoformat(expires)
-                    if _dt.now(_tz.utc) > exp_dt:
-                        return None, None, None
-                return u.get("tenantId"), u.get("email"), u.get("userId", "")
-        except Exception as e:
-            print(f"SESSION_LOOKUP_ERROR: {e}")
+                user_id = items[0].get("userId", "")
+        except Exception as exc:
+            print(f"USER_LOOKUP_ERROR: {exc}")
+        return caller["tenantId"], caller["email"], user_id
+    except Exception as exc:
+        print(f"AUTH_REJECTED: {exc}")
         return None, None, None
-
-    # SECURITY: JWT path removed — unverified JWT tokens are not accepted.
-    # All authentication MUST go through the DynamoDB session token path (endevo_*).
-    # WorkOS JWTs lack RSA signature verification and can be forged.
-    print(f"AUTH_REJECTED: Non-session token presented to Jesse endpoint")
-    return None, None, None
 
 
 # ---------------------------------------------------------------------------

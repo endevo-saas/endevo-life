@@ -18,12 +18,12 @@ interface HealthData {
 // ── REAL AWS INFRASTRUCTURE (verified 2026-03-30) ──────────────────────────
 const AWS_SERVICES = [
   {
-    key: 'workos',
-    label: 'WorkOS',
-    sub: 'AuthKit SSO · Organization-based auth · RBAC',
+    key: 'cognito',
+    label: 'Amazon Cognito',
+    sub: 'Passwordless OTP · JWT RS256 · Pool Groups RBAC',
     icon: Shield,
     group: 'Identity',
-    detail: 'SSO · Directory Sync · MFA · JWT tokens · role, tenantId, tenantName claims',
+    detail: 'Email OTP · Custom auth triggers · JWT tokens · role, tenantId, tenantName claims',
   },
   {
     key: 'dynamodb',
@@ -87,7 +87,7 @@ const AWS_SERVICES = [
     sub: 'endevo-uat-lambda-role · Least-privilege · inline policy',
     icon: Lock,
     group: 'Security',
-    detail: 'Permissions: DynamoDB(9 tables) S3(2 buckets) SES WorkOS(API) CloudWatch',
+    detail: 'Permissions: DynamoDB(9 tables) S3(2 buckets) SES Cognito(IdP) CloudWatch',
   },
 ]
 
@@ -167,15 +167,15 @@ const SECURITY = [
   { label: 'Email OTP (Global Admin)', status: true,  note: 'SES 6-digit, 10-min TTL, single-use' },
   { label: 'Math CAPTCHA',             status: true,  note: 'All login roles, all portals' },
   { label: 'Brute-force Protection',   status: true,  note: '5 fails → 15-min IP lockout' },
-  { label: 'JWT Auth (WorkOS)',         status: true,  note: 'Access + ID tokens, short-lived' },
+  { label: 'JWT Auth (Cognito RS256)',  status: true,  note: 'Access + ID tokens, short-lived' },
   { label: 'RBAC (3 Roles)',           status: true,  note: 'GLOBAL_ADMIN / HR_ADMIN / EMPLOYEE' },
   { label: 'Tenant Isolation',         status: true,  note: 'JWT tenantId enforced on every query' },
   { label: 'No Hard Deletes',          status: true,  note: 'Tenants + users: disable only' },
   { label: 'Email Uniqueness',         status: true,  note: 'One email = one role globally' },
   { label: 'Input Sanitization',       status: true,  note: 'XSS strips, HTML tag removal' },
-  { label: 'WorkOS Rollback',          status: true,  note: 'DynamoDB fail → WorkOS cleanup' },
+  { label: 'Cognito Rollback',         status: true,  note: 'DynamoDB fail → Cognito cleanup' },
   { label: 'HTTPS / TLS 1.3',         status: true,  note: 'Amplify + API Gateway enforced' },
-  { label: 'MFA (TOTP)',               status: true,  note: 'Optional — WorkOS MFA policy' },
+  { label: 'MFA (TOTP)',               status: true,  note: 'Optional — Cognito TOTP policy' },
   { label: 'Error Boundaries',         status: true,  note: 'All 4 route groups + root level' },
   { label: 'Audit Logging',            status: true,  note: '65 events · IP + device tracked' },
   { label: 'WAF',                      status: false, note: 'Phase 3 roadmap' },
@@ -313,7 +313,7 @@ export default function HealthPage() {
               <p className="text-2xl font-black text-white">{healthy ? 'All Systems Operational' : 'Partial Degradation'}</p>
               <p className="text-sm mt-0.5" style={{ color: 'var(--text-secondary)' }}>
                 {healthy
-                  ? '13 DynamoDB tables · 5 Lambda functions · WorkOS · API Gateway · Amplify · CloudFront · SES · S3'
+                  ? '13 DynamoDB tables · 5 Lambda functions · Cognito · API Gateway · Amplify · CloudFront · SES · S3'
                   : 'Some services reporting errors — see below'}
               </p>
             </div>
@@ -498,19 +498,19 @@ export default function HealthPage() {
           </div>
         </div>
 
-        {/* WorkOS */}
+        {/* Cognito */}
         <div className="glass rounded-2xl p-6">
           <h2 className="text-base font-black text-white flex items-center gap-2 mb-4">
             <Key className="w-4 h-4 text-orange-400" />
-            WorkOS Identity
-            <span className="ml-2 text-xs font-normal text-orange-400">AuthKit SSO · Organization-based</span>
+            Amazon Cognito Identity
+            <span className="ml-2 text-xs font-normal text-orange-400">Passwordless OTP · Pool Groups</span>
           </h2>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
             {[
-              { label: 'Total WorkOS Users',  value: '77',       icon: Users,    color: 'text-blue-400' },
-              { label: 'DynamoDB Users',      value: '42',       icon: Database, color: 'text-green-400' },
-              { label: 'MFA Config',          value: 'OPTIONAL', icon: Shield,   color: 'text-yellow-400' },
-              { label: 'Auth Status',         value: 'ACTIVE',   icon: Activity, color: 'text-emerald-400' },
+              { label: 'Cognito Pool',    value: 'v2',       icon: Users,    color: 'text-blue-400' },
+              { label: 'DynamoDB Users',  value: 'live',     icon: Database, color: 'text-green-400' },
+              { label: 'MFA Config',      value: 'OPTIONAL', icon: Shield,   color: 'text-yellow-400' },
+              { label: 'Auth Status',     value: 'ACTIVE',   icon: Activity, color: 'text-emerald-400' },
             ].map(s => {
               const Icon = s.icon
               return (
@@ -524,7 +524,7 @@ export default function HealthPage() {
           </div>
           <div className="mt-3 p-3 rounded-xl text-xs" style={{ background: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>
             <strong className="text-white">Custom claims:</strong> role (GLOBAL_ADMIN / HR_ADMIN / EMPLOYEE) · tenantId · tenantName
-            <span className="ml-4"><strong className="text-white">Auth Method:</strong> WorkOS AuthKit · SSO + Email/Password</span>
+            <span className="ml-4"><strong className="text-white">Auth Method:</strong> Email OTP via Cognito custom auth triggers</span>
           </div>
         </div>
 
