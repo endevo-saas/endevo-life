@@ -785,8 +785,8 @@ export default function ExecutiveBriefPage() {
             />
             <SecurityBadge
               icon={Lock}
-              title="WorkOS SSO / SAML Federation"
-              description="Enterprise identity federation with your existing IdP. Zero additional credentials for employees to manage."
+              title="Amazon Cognito Passwordless Auth"
+              description="Passwordless email OTP — no passwords to phish or breach. RS256 JWT tokens verified at the API layer."
             />
             <SecurityBadge
               icon={ScrollText}
@@ -913,7 +913,7 @@ export default function ExecutiveBriefPage() {
             </div>
           </div>
           <p className="eb-footer-powered">
-            Powered by AWS Serverless &bull; Anthropic Claude AI &bull; WorkOS
+            Powered by AWS Serverless &bull; Anthropic Claude AI &bull; Amazon Cognito
           </p>
           <div className="eb-confidential">
             <Eye className="w-3 h-3" />

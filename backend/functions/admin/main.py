@@ -71,12 +71,13 @@ from datetime import datetime, timezone
 from boto3.dynamodb.conditions import Attr, Key
 
 REGION    = os.environ.get("AWS_REGION", "us-east-1")
-dynamo    = boto3.resource("dynamodb", region_name=REGION)
-ses       = boto3.client("ses", region_name=REGION)
-s3_client = boto3.client("s3", region_name=REGION)
-_secrets  = boto3.client("secretsmanager", region_name=REGION)
-ce_client = boto3.client("ce", region_name=REGION)
-events_client = boto3.client("events", region_name=REGION)
+COGNITO_USER_POOL_ID = os.environ.get("COGNITO_USER_POOL_ID", "")
+dynamo       = boto3.resource("dynamodb", region_name=REGION)
+ses          = boto3.client("ses",              region_name=REGION)
+s3_client    = boto3.client("s3",              region_name=REGION)
+cognito_idp  = boto3.client("cognito-idp",     region_name=REGION)
+ce_client    = boto3.client("ce",              region_name=REGION)
+events_client = boto3.client("events",         region_name=REGION)
 UPLOAD_BUCKET = os.environ.get("S3_UPLOAD_BUCKET", "endevo-uat-uploads")
 CF_DOMAIN = os.environ.get("CF_DOMAIN", "")
 USERS_T          = dynamo.Table("endevo-uat-users")
@@ -122,31 +123,49 @@ CONFIG_DEFAULTS = {
     }
 }
 
-# ── Secrets & WorkOS ─────────────────────────────────────────────────────────
+# ── Cognito user management helpers ──────────────────────────────────────────
 
-_secret_cache = {}
+def _cognito_create_user(email: str, first_name: str, last_name: str, role: str, tenant_id: str) -> str:
+    """Create a Cognito user (MessageAction=SUPPRESS — no welcome email, OTP handles it).
+    Returns the Cognito username (email) or '' on failure."""
+    if not COGNITO_USER_POOL_ID:
+        return ""
+    try:
+        cognito_idp.admin_create_user(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Username=email,
+            MessageAction="SUPPRESS",   # we send our own invite email via SES
+            UserAttributes=[
+                {"Name": "email",                 "Value": email},
+                {"Name": "email_verified",        "Value": "true"},
+                {"Name": "given_name",            "Value": first_name},
+                {"Name": "family_name",           "Value": last_name},
+                {"Name": "custom:role",           "Value": role},
+                {"Name": "custom:tenantId",       "Value": tenant_id or "SYSTEM"},
+            ],
+        )
+        cognito_idp.admin_add_user_to_group(
+            UserPoolId=COGNITO_USER_POOL_ID,
+            Username=email,
+            GroupName=role,
+        )
+        return email
+    except cognito_idp.exceptions.UsernameExistsException:
+        return email  # already exists — acceptable
+    except Exception as exc:
+        print(f"COGNITO_CREATE_USER_ERROR: {exc}")
+        return ""
 
-def _get_secret(name):
-    if name in _secret_cache:
-        return _secret_cache[name]
-    val = _secrets.get_secret_value(SecretId=name)["SecretString"]
-    _secret_cache[name] = val
-    return val
 
-def _workos_api(method, path, body=None):
-    """Call WorkOS User Management API."""
-    import urllib.request
-    api_key = _get_secret("endevo/workos/api-key")
-    url = f"https://api.workos.com{path}"
-    data = json.dumps(body).encode() if body else None
-    req = urllib.request.Request(url, data=data, method=method, headers={
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-    })
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        if resp.status == 204:
-            return {}
-        return json.loads(resp.read())
+def _cognito_disable_user(email: str) -> None:
+    """Disable a Cognito user (soft delete — cannot log in)."""
+    if not COGNITO_USER_POOL_ID or not email:
+        return
+    try:
+        cognito_idp.admin_disable_user(UserPoolId=COGNITO_USER_POOL_ID, Username=email)
+    except Exception as exc:
+        print(f"COGNITO_DISABLE_USER_ERROR: {exc}")
+
 
 # ── CORS ─────────────────────────────────────────────────────────────────────
 
@@ -190,42 +209,18 @@ def get_body(event):
         return {}
 
 def get_caller(event):
-    """Extract (role, email) from Bearer token via session token or WorkOS JWT."""
-    auth_header = (event.get("headers") or {}).get("authorization", "")
-    token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header.strip()
-    if not token:
+    """Extract (role, email) from Cognito JWT Bearer token."""
+    import sys as _sys, os as _os
+    _shared = _os.path.join(_os.path.dirname(__file__), "..", "..", "shared")
+    if _shared not in _sys.path:
+        _sys.path.insert(0, _shared)
+    try:
+        from cognito_auth import get_caller as _get_caller, UnauthorizedError
+        caller = _get_caller(event)
+        return caller["role"], caller["email"]
+    except Exception as exc:
+        print(f"AUTH_REJECTED: {exc}")
         return None, None
-
-    # Session token (from OTP login) — look up in DynamoDB
-    if token.startswith("endevo_"):
-        try:
-            result = USERS_T.query(
-                IndexName="sessionToken-index",
-                KeyConditionExpression=Key("sessionToken").eq(token),
-                Limit=1,
-            )
-            items = result.get("Items", [])
-            if items:
-                u = items[0]
-                # Block archived users from authenticating
-                if u.get("status") == "archived":
-                    return None, None
-                # Check session expiry (24h TTL)
-                expires = u.get("sessionExpiresAt", "")
-                if expires:
-                    exp_dt = datetime.fromisoformat(expires)
-                    if datetime.now(timezone.utc) > exp_dt:
-                        return None, None
-                return u.get("role"), u.get("email")
-        except Exception as e:
-            print(f"SESSION_LOOKUP_ERROR: {e}")
-        return None, None
-
-    # SECURITY: JWT path removed — unverified JWT tokens are not accepted.
-    # All authentication MUST go through the DynamoDB session token path (endevo_*).
-    # WorkOS JWTs lack RSA signature verification and can be forged.
-    print(f"AUTH_REJECTED: Non-session token presented to admin endpoint")
-    return None, None
 
 def sanitize(value, max_len=200):
     """Strip whitespace, remove ALL HTML tags, limit length, block XSS patterns."""
@@ -502,25 +497,21 @@ def _handler_impl(event, context):
         })
 
         # Auto-create HR Admin account and send invite email
-        invite_token  = str(uuid.uuid4())
-        temp_password = f"Endevo@{str(uuid.uuid4())[:8]}!"
-        hr_user_id    = str(uuid.uuid4())
-        hr_created    = False
-        email_sent    = False
+        invite_token = str(uuid.uuid4())
+        hr_user_id   = str(uuid.uuid4())
+        hr_created   = False
+        email_sent   = False
 
         try:
-            _workos_api("POST", "/user_management/users", {
-                "email": hr_email,
-                "password": temp_password,
-                "first_name": hr_first or "HR",
-                "last_name": hr_last or "Admin",
-                "email_verified": True,
-            })
+            cognito_sub = _cognito_create_user(
+                hr_email, hr_first or "HR", hr_last or "Admin", "HR_ADMIN", tenant_id
+            )
             USERS_T.put_item(Item={
                 "userId": hr_user_id, "tenantId": tenant_id, "email": hr_email,
                 "firstName": hr_first or "HR", "lastName": hr_last or "Admin",
                 "phone": hr_phone,
                 "role": "HR_ADMIN", "status": "active", "inviteToken": invite_token,
+                "cognitoSub": cognito_sub, "authProvider": "cognito",
                 "createdBy": caller_email, "createdAt": now
             })
             hr_created = True
@@ -545,13 +536,12 @@ def _handler_impl(event, context):
                               <h2 style="color:#e2e8f0;font-size:20px">Your HR Admin Account is Ready</h2>
                               <p style="color:#94a3b8">You have been set up as the <strong style="color:#818cf8">HR Administrator</strong> for <strong style="color:#fff">{name}</strong>.</p>
                               <div style="background:#1e293b;border-radius:8px;padding:20px;margin:20px 0;border-left:4px solid #818cf8">
-                                <p style="margin:0 0 8px;color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px">Your Login Credentials</p>
+                                <p style="margin:0 0 8px;color:#64748b;font-size:12px;text-transform:uppercase;letter-spacing:1px">Your Login Details</p>
                                 <p style="margin:4px 0;color:#e2e8f0"><strong>Email:</strong> {hr_email}</p>
-                                <p style="margin:4px 0;color:#e2e8f0"><strong>Temporary Password:</strong> <code style="background:#0f172a;padding:2px 8px;border-radius:4px;color:#818cf8">{temp_password}</code></p>
                                 <p style="margin:4px 0;color:#e2e8f0"><strong>Organization:</strong> {name}</p>
                                 <p style="margin:4px 0;color:#e2e8f0"><strong>Tenant ID:</strong> <code style="color:#64748b">{tenant_id}</code></p>
                               </div>
-                              <p style="color:#94a3b8;font-size:14px">Please log in and change your password immediately.</p>
+                              <p style="color:#94a3b8;font-size:14px">Sign in with a one-time passcode sent to your email — no password needed.</p>
                               <a href="{invite_url}" style="display:inline-block;padding:14px 28px;background:#6366f1;color:#fff;text-decoration:none;border-radius:8px;font-weight:600;margin:16px 0">Login to Endevo Life →</a>
                               <p style="color:#475569;font-size:12px;margin-top:24px;border-top:1px solid #1e293b;padding-top:16px">
                                 As HR Admin you can: invite employees, manage training, view reports, and download certificates.<br>
@@ -834,25 +824,9 @@ def _handler_impl(event, context):
 
         invite_token = str(uuid.uuid4())
 
-        # Create user in WorkOS (or find existing)
-        workos_user_id = ""
-        try:
-            workos_user = _workos_api("POST", "/user_management/users", {
-                "email": email,
-                "first_name": first,
-                "last_name": last,
-                "email_verified": True,
-            })
-            workos_user_id = workos_user.get("id", "")
-        except Exception as e:
-            print(f"WORKOS_CREATE_USER: {e}")
-            # User may already exist in WorkOS — look them up
-            try:
-                workos_lookup = _workos_api("GET", f"/user_management/users?email={email}")
-                if workos_lookup.get("data"):
-                    workos_user_id = workos_lookup["data"][0].get("id", "")
-            except Exception:
-                pass  # Continue without WorkOS ID — DynamoDB is source of truth
+        # Create user in Cognito pool (MessageAction=SUPPRESS — invite email sent by us via SES)
+        cognito_sub = _cognito_create_user(email, first, last, user_role, tenant_id)
+
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         try:
@@ -862,15 +836,12 @@ def _handler_impl(event, context):
                 "phone": phone,
                 "status": "pending", "inviteToken": invite_token,
                 "department": department, "jobTitle": job_title,
-                "workosUserId": workos_user_id,
+                "cognitoSub": cognito_sub,
+                "authProvider": "cognito",
                 "createdBy": caller_email, "createdAt": now
             })
         except Exception as e:
-            # DynamoDB write failed — clean up WorkOS user to avoid orphan
-            try:
-                _workos_api("DELETE", f"/user_management/users/{workos_user_id}")
-            except Exception:
-                pass
+            _cognito_disable_user(email)
             return err(500, f"Failed to save user record: {str(e)}")
 
         invite_url = f"https://uat.endevo.life/register?token={invite_token}&email={email}"
@@ -1025,34 +996,14 @@ def _handler_impl(event, context):
         return resp(200, {"message": f"User {email} unlocked"})
 
     # ── POST /api/admin/users/{id}/reset-password ─────────────────────────
+    # Passwordless platform — there are no passwords to reset.
+    # Users always authenticate via email OTP. This endpoint is intentionally gone.
     if "/users/" in path and path.endswith("/reset-password") and method == "POST":
-        user_id = path.split("/")[-2]
-        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
-        if not item:
-            return err(404, "User not found")
-        email = item.get("email", "")
-        new_password = body.get("password") or f"Reset@{str(uuid.uuid4())[:8]}!"
-        # Find the WorkOS user by email to get workos user id
-        workos_uid = item.get("workosUserId", "")
-        if not workos_uid:
-            try:
-                search_resp = _workos_api("GET", f"/user_management/users?email={email}")
-                wk_users = search_resp.get("data", [])
-                if wk_users:
-                    workos_uid = wk_users[0].get("id", "")
-            except Exception:
-                pass
-        if not workos_uid:
-            return err(400, f"Cannot reset password: WorkOS user not found for {email}")
-        try:
-            _workos_api("PUT", f"/user_management/users/{workos_uid}", {
-                "password": new_password,
-            })
-        except Exception as e:
-            return err(400, f"Password reset failed: {str(e)}")
-        audit(item.get("tenantId", "SYSTEM"), caller_email, "PASSWORD_RESET",
-              f"Reset password for: {email}", ip=ip, device=device)
-        return resp(200, {"message": f"Password reset for {email}", "password_set": True})
+        return resp(410, {
+            "success": True,
+            "message": "Password reset is not available — this platform uses passwordless OTP login. "
+                       "Ask the user to log in via email code at /login.",
+        })
 
     # ── POST /api/admin/invite ────────────────────────────────────────────
     if path.endswith("/invite") and method == "POST":
@@ -1094,20 +1045,9 @@ def _handler_impl(event, context):
 
         invite_token  = str(uuid.uuid4())
 
-        try:
-            workos_user = _workos_api("POST", "/user_management/users", {
-                "email": email,
-                "first_name": first,
-                "last_name": last,
-                "email_verified": True,
-            })
-        except Exception as e:
-            msg = str(e)
-            if "already exists" in msg.lower() or "duplicate" in msg.lower():
-                return err(409, f"User {email} already exists")
-            return err(400, f"WorkOS user creation failed: {msg}")
+        # Create user in Cognito pool (MessageAction=SUPPRESS — invite email sent by us)
+        cognito_sub = _cognito_create_user(email, first, last, user_role, tenant_id)
 
-        workos_user_id = workos_user.get("id", "")
         user_id = str(uuid.uuid4())
         now = datetime.now(timezone.utc).isoformat()
         try:
@@ -1116,15 +1056,12 @@ def _handler_impl(event, context):
                 "firstName": first, "lastName": last, "role": user_role,
                 "phone": phone,
                 "status": "pending", "inviteToken": invite_token,
-                "workosUserId": workos_user_id,
+                "cognitoSub": cognito_sub,
+                "authProvider": "cognito",
                 "createdBy": caller_email, "createdAt": now
             })
         except Exception as e:
-            # DynamoDB write failed — clean up WorkOS user to avoid orphan
-            try:
-                _workos_api("DELETE", f"/user_management/users/{workos_user_id}")
-            except Exception:
-                pass
+            _cognito_disable_user(email)
             return err(500, f"Failed to save user record: {str(e)}")
 
         invite_url = f"https://uat.endevo.life/register?token={invite_token}&email={email}"
@@ -1194,30 +1131,31 @@ def _handler_impl(event, context):
     # ── GET /api/admin/health ─────────────────────────────────────────────
     if path.endswith("/health") and method == "GET":
         dynamo_ok  = "ok"
-        workos_ok  = "ok"
+        cognito_ok = "ok"
         ses_ok     = "ok"
         try:
             USERS_T.scan(Limit=1, Select="COUNT")
-        except:
+        except Exception:
             dynamo_ok = "error"
         try:
-            _workos_api("GET", "/user_management/users?limit=1")
-        except:
-            workos_ok = "error"
+            if COGNITO_USER_POOL_ID:
+                cognito_idp.describe_user_pool(UserPoolId=COGNITO_USER_POOL_ID)
+        except Exception:
+            cognito_ok = "error"
         try:
             ses.get_send_quota()
-        except:
+        except Exception:
             ses_ok = "error"
-        overall = "healthy" if dynamo_ok == "ok" and workos_ok == "ok" else "degraded"
+        overall = "healthy" if dynamo_ok == "ok" and cognito_ok == "ok" else "degraded"
         return resp(200, {
             "status": overall,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "services": {
-                "dynamodb": dynamo_ok,
-                "workos":   workos_ok,
-                "ses":      ses_ok,
-                "lambda":   "ok",
-                "api_gateway": "ok"
+                "dynamodb":   dynamo_ok,
+                "cognito":    cognito_ok,
+                "ses":        ses_ok,
+                "lambda":     "ok",
+                "api_gateway": "ok",
             }
         })
 

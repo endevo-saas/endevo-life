@@ -17,8 +17,10 @@ export class ApiStack extends cdk.Stack {
     super(scope, id, props)
 
     const commonEnv = {
-      WORKOS_API_KEY_SECRET: 'endevo/workos/api-key',
-      WORKOS_CLIENT_ID_SECRET: 'endevo/workos/client-id',
+      // Cognito — stateless JWT verification via JWKS (replaces WorkOS session tokens)
+      COGNITO_USER_POOL_ID:  process.env.COGNITO_USER_POOL_ID  || '',
+      COGNITO_CLIENT_ID:     process.env.COGNITO_CLIENT_ID     || '',
+      COGNITO_JWKS_URL:      process.env.COGNITO_JWKS_URL      || '',
       REGION: this.region,
       ENVIRONMENT: 'uat',
     }

@@ -63,3 +63,4 @@ _keys/
 *.key
 credentials
 backend/functions/jesse/knowledge_niki.txt
+.audit-temp/ 

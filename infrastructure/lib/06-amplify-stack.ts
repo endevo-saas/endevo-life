@@ -5,6 +5,8 @@ import { Construct } from 'constructs'
 
 interface AmplifyStackProps extends cdk.StackProps {
   apiUrl: string
+  cognitoUserPoolId: string
+  cognitoClientId: string
 }
 
 export class AmplifyStack extends cdk.Stack {
@@ -50,9 +52,11 @@ export class AmplifyStack extends cdk.Stack {
         '        platform: WEB_COMPUTE',
       ].join('\n'),
       environmentVariables: [
-        { name: 'NEXT_PUBLIC_API_URL', value: props.apiUrl },
-        { name: 'NEXT_PUBLIC_WORKOS_CLIENT_ID', value: 'client_01KNFZCZQZYGTDRS91KW12TGXK' },
-        { name: 'AMPLIFY_MONOREPO_APP_ROOT', value: 'apps/web' },
+        { name: 'NEXT_PUBLIC_API_URL',              value: props.apiUrl },
+        { name: 'NEXT_PUBLIC_COGNITO_USER_POOL_ID', value: props.cognitoUserPoolId },
+        { name: 'NEXT_PUBLIC_COGNITO_CLIENT_ID',    value: props.cognitoClientId },
+        { name: 'NEXT_PUBLIC_COGNITO_REGION',        value: 'us-east-1' },
+        { name: 'AMPLIFY_MONOREPO_APP_ROOT',        value: 'apps/web' },
       ],
     })
 

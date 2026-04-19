@@ -152,41 +152,30 @@ def _get_plan_config() -> dict:
     return _DEFAULT_PLAN_CONFIG
 
 def get_caller(event):
-    """Extract (tenantId, email, userId, role) from Bearer token via session or WorkOS JWT."""
-    auth_header = (event.get("headers") or {}).get("authorization", "")
-    token = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header.strip()
-    if not token:
-        return None, None, None, None
-
-    # Session token (from OTP login)
-    if token.startswith("endevo_"):
+    """Extract (tenantId, email, userId, role) from Cognito JWT Bearer token."""
+    import sys as _sys, os as _os
+    _shared = _os.path.join(_os.path.dirname(__file__), "..", "..", "shared")
+    if _shared not in _sys.path:
+        _sys.path.insert(0, _shared)
+    try:
+        from cognito_auth import get_caller as _get_caller
+        caller = _get_caller(event)
+        # userId not in JWT — look up by sub/email from DynamoDB
+        user_id = ""
         try:
-            from boto3.dynamodb.conditions import Key as _SessKey
-            result = USERS_T.query(
-                IndexName="sessionToken-index",
-                KeyConditionExpression=_SessKey("sessionToken").eq(token),
-                Limit=1,
-            )
-            items = result.get("Items", [])
+            from boto3.dynamodb.conditions import Key as _K
+            res = USERS_T.query(IndexName="email-index",
+                                KeyConditionExpression=_K("email").eq(caller["email"]),
+                                Limit=1)
+            items = res.get("Items", [])
             if items:
-                u = items[0]
-                # Check session expiry (24h TTL)
-                expires = u.get("sessionExpiresAt", "")
-                if expires:
-                    from datetime import datetime as _dt, timezone as _tz
-                    exp_dt = _dt.fromisoformat(expires)
-                    if _dt.now(_tz.utc) > exp_dt:
-                        return None, None, None, None
-                return u.get("tenantId"), u.get("email"), u.get("userId", ""), u.get("role", "EMPLOYEE")
-        except Exception as e:
-            print(f"SESSION_LOOKUP_ERROR: {e}")
+                user_id = items[0].get("userId", "")
+        except Exception:
+            pass
+        return caller["tenantId"], caller["email"], user_id, caller["role"]
+    except Exception as exc:
+        print(f"AUTH_REJECTED: {exc}")
         return None, None, None, None
-
-    # SECURITY: JWT path removed — unverified JWT tokens are not accepted.
-    # All authentication MUST go through the DynamoDB session token path (endevo_*).
-    # WorkOS JWTs lack RSA signature verification and can be forged.
-    print(f"AUTH_REJECTED: Non-session token presented to employee endpoint")
-    return None, None, None, None
 
 def _handler_impl(event, context):
     global _current_event

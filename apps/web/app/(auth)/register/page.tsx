@@ -128,7 +128,7 @@ function ActivateAccount() {
         {/* Footer */}
         <div className="text-center mt-6">
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
-            Protected by WorkOS &middot; TLS 1.3 &middot; Email + SMS OTP
+            Protected by Amazon Cognito &middot; TLS 1.3 &middot; Email OTP
           </p>
         </div>
       </div>
