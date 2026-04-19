@@ -11,9 +11,8 @@ const API_URL = process.env.NEXT_PUBLIC_API_URL || ''
 type Step = 'email' | 'otp'
 
 interface SendOtpResponse {
-  otp_ref: string
+  session: string
   email: string
-  phone: string
   channels: string[]
   expires_in: number
 }
@@ -152,9 +151,8 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [resendCooldown, setResendCooldown] = useState(0)
-  const [otpRef, setOtpRef] = useState('')
+  const [otpSession, setOtpSession] = useState('')
   const [maskedEmail, setMaskedEmail] = useState('')
-  const [maskedPhone, setMaskedPhone] = useState('')
   const [expiryCountdown, setExpiryCountdown] = useState(0)
   const [mounted, setMounted] = useState(false)
   const emailInputRef = useRef<HTMLInputElement>(null)
@@ -193,9 +191,8 @@ export default function LoginPage() {
         throw new Error(data.error || data.detail || data.message || 'Failed to send verification code')
       }
       const otpData = data as SendOtpResponse
-      setOtpRef(otpData.otp_ref)
+      setOtpSession(otpData.session)
       setMaskedEmail(otpData.email)
-      setMaskedPhone(otpData.phone)
       setExpiryCountdown(otpData.expires_in || 300)
       setStep('otp')
       setResendCooldown(60)
@@ -221,7 +218,7 @@ export default function LoginPage() {
       const res = await fetch(`${API_URL}/api/auth/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, otp_ref: otpRef, code: otpCode }),
+        body: JSON.stringify({ email, session: otpSession, code: otpCode }),
       })
       const data: VerifyResponse = await res.json()
       if (!res.ok) {
@@ -230,13 +227,16 @@ export default function LoginPage() {
       }
       // Store auth tokens
       if (data.access_token) {
-        Cookies.set('access_token', data.access_token, { expires: 1, sameSite: 'strict' })
-        if (data.id_token) Cookies.set('id_token', data.id_token, { expires: 1, sameSite: 'strict' })
-        Cookies.set('user_role', data.role, { expires: 1, sameSite: 'strict' })
-        if (data.email) Cookies.set('user_email', data.email, { expires: 1, sameSite: 'strict' })
-        if (data.tenant_name) Cookies.set('tenant_name', data.tenant_name, { expires: 1, sameSite: 'strict' })
-        if (data.first_name) Cookies.set('first_name', data.first_name, { expires: 1, sameSite: 'strict' })
-        if (data.last_name) Cookies.set('last_name', data.last_name, { expires: 1, sameSite: 'strict' })
+        const opts = { expires: 1, sameSite: 'strict' as const }
+        Cookies.set('access_token', data.access_token, opts)
+        if (data.id_token) Cookies.set('id_token', data.id_token, opts)
+        if ((data as unknown as { refresh_token?: string }).refresh_token)
+          Cookies.set('refresh_token', (data as unknown as { refresh_token: string }).refresh_token, { expires: 30, sameSite: 'strict' })
+        Cookies.set('user_role', data.role, opts)
+        if (data.email) Cookies.set('user_email', data.email, opts)
+        if (data.tenant_name) Cookies.set('tenant_name', data.tenant_name, opts)
+        if (data.first_name) Cookies.set('first_name', data.first_name, opts)
+        if (data.last_name) Cookies.set('last_name', data.last_name, opts)
       }
       routeByRole(data.role, router)
     } catch (e: unknown) {
@@ -245,7 +245,7 @@ export default function LoginPage() {
     } finally {
       setLoading(false)
     }
-  }, [email, otpCode, otpRef, expiryCountdown, router])
+  }, [email, otpCode, otpSession, expiryCountdown, router])
 
   const handleResend = useCallback(async () => {
     if (resendCooldown > 0) return
@@ -264,7 +264,7 @@ export default function LoginPage() {
     setOtpCode('')
     setError('')
     setExpiryCountdown(0)
-    setOtpRef('')
+    setOtpSession('')
   }
 
   if (!mounted) return null
@@ -436,16 +436,10 @@ export default function LoginPage() {
               >
                 <Mail className="w-5 h-5 flex-shrink-0 mt-0.5" style={{ color: '#2BBFC5' }} />
                 <div>
-                  <p className="text-sm font-medium text-white">Check your inbox &amp; phone</p>
+                  <p className="text-sm font-medium text-white">Check your inbox</p>
                   <p className="text-xs mt-0.5" style={{ color: 'rgba(255,255,255,0.45)' }}>
                     Code sent to{' '}
                     <span style={{ color: '#2BBFC5' }}>{maskedEmail}</span>
-                    {maskedPhone && (
-                      <>
-                        {' '}and{' '}
-                        <span style={{ color: '#2BBFC5' }}>{maskedPhone}</span>
-                      </>
-                    )}
                   </p>
                 </div>
               </div>
@@ -537,9 +531,9 @@ export default function LoginPage() {
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.3)' }}>
             Protected by{' '}
             <span className="font-semibold" style={{ color: 'rgba(255,255,255,0.5)' }}>
-              WorkOS
+              Amazon Cognito
             </span>
-            {' '}&middot; TLS 1.3 &middot; Email + SMS OTP
+            {' '}&middot; TLS 1.3 &middot; Email OTP
           </p>
           <p className="text-xs" style={{ color: 'rgba(255,255,255,0.2)' }}>
             &copy; 2026{' '}
