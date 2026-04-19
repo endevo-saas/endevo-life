@@ -90,7 +90,7 @@ export default function AdminAuditPage() {
     const rows = [
       ['Time', 'Actor', 'Action', 'Severity', 'Details', 'IP Address', 'Tenant', 'User Agent'].join(','),
       ...filtered.map(l => [
-        new Date(l.createdAt || '').toISOString(),
+        (() => { const ts = l.createdAt; if (!ts) return ''; const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts); return isNaN(d.getTime()) ? '' : d.toISOString() })(),
         l.actor || '',
         l.action || '',
         l.severity || 'INFO',
@@ -225,9 +225,14 @@ export default function AdminAuditPage() {
                     <React.Fragment key={log.auditId}>
                       <tr className="hover:bg-white/3 transition-colors cursor-pointer" onClick={() => setExpandedId(isExpanded ? null : log.auditId)}>
                         <td className="px-4 py-3 text-xs text-slate-500 font-mono whitespace-nowrap">
-                          {log.createdAt ? new Date(log.createdAt).toLocaleString('en-GB', {
-                            day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit'
-                          }) : '—'}
+                          {(() => {
+                            const ts = log.createdAt
+                            if (!ts) return '—'
+                            const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts)
+                            return isNaN(d.getTime()) ? '—' : d.toLocaleString('en-GB', {
+                              day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit'
+                            })
+                          })()}
                         </td>
                         <td className="px-2 py-3">
                           {SEVERITY_ICON[log.severity || 'INFO']}
