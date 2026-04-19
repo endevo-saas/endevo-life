@@ -55,7 +55,6 @@ const cognito = new CognitoStack(app, 'EndevoUatCognito', {
   preTokenGenFn:      cognitoTriggers.preTokenGenFn,
   postConfirmationFn: cognitoTriggers.postConfirmationFn,
 })
-cognito.addDependency(cognitoTriggers)
 
 // Stack 2 — DynamoDB (database)
 new DynamoStack(app, 'EndevoUatDynamo', { env, tags })
@@ -70,15 +69,18 @@ const iam = new IamStack(app, 'EndevoUatIam', { env, tags })
 const api = new ApiStack(app, 'EndevoUatApi', {
   env, tags,
   lambdaRole: iam.lambdaRole,
+  cognitoUserPoolId: cdk.Fn.importValue('endevo-uat-cognito-pool-id-v2'),
+  cognitoClientId:   cdk.Fn.importValue('endevo-uat-cognito-client-id-v2'),
+  cognitoJwksUrl:    cdk.Fn.importValue('endevo-uat-cognito-jwks-url'),
 })
 
 // Stack 6 — Amplify (frontend hosting)
-// Receives Cognito pool outputs for NEXT_PUBLIC_COGNITO_* env vars.
+// Cognito values sourced from named CF exports (decoupled from auto-exports)
 new AmplifyStack(app, 'EndevoUatAmplify', {
   env, tags,
   apiUrl:            api.apiUrl,
-  cognitoUserPoolId: cognito.userPoolId,
-  cognitoClientId:   cognito.userPoolClientId,
+  cognitoUserPoolId: cdk.Fn.importValue('endevo-uat-cognito-pool-id-v2'),
+  cognitoClientId:   cdk.Fn.importValue('endevo-uat-cognito-client-id-v2'),
 })
 
 // Stack 7 — CloudFront LMS (secure video delivery)

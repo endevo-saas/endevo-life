@@ -23,7 +23,7 @@ export class CognitoStack extends cdk.Stack {
     super(scope, id, props)
 
     // ── User Pool ───────────────────────────────────────────────────────────
-    const userPool = new cognito.UserPool(this, 'UserPool', {
+    const userPool = new cognito.UserPool(this, 'UserPoolV2', {
       userPoolName: 'uat-endevo-users-v2',
       selfSignUpEnabled: false,           // admin-created accounts only
       signInAliases: { email: true },
@@ -45,24 +45,29 @@ export class CognitoStack extends cdk.Stack {
       },
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       standardAttributes: {
-        email: { required: true, mutable: false },
+        email: { required: true, mutable: true },
       },
       customAttributes: {
         role:       new cognito.StringAttribute({ mutable: true, maxLen: 50 }),
         tenantId:   new cognito.StringAttribute({ mutable: true, maxLen: 100 }),
         tenantName: new cognito.StringAttribute({ mutable: true, maxLen: 200 }),
       },
-      // Wire custom-auth triggers only when Lambda ARNs are provided.
-      lambdaTriggers: {
-        ...(props.defineChallengeFn    ? { defineAuthChallenge: props.defineChallengeFn }    : {}),
-        ...(props.createChallengeFn    ? { createAuthChallenge: props.createChallengeFn }    : {}),
-        ...(props.verifyChallengeFn    ? { verifyAuthChallengeResponse: props.verifyChallengeFn } : {}),
-        ...(props.preTokenGenFn        ? { preTokenGeneration: props.preTokenGenFn }        : {}),
-        ...(props.postConfirmationFn   ? { postConfirmation: props.postConfirmationFn }      : {}),
-      },
       removalPolicy: cdk.RemovalPolicy.RETAIN, // never auto-delete user data
       deletionProtection: true,
     })
+
+    // Wire triggers directly on the L1 CfnUserPool using string ARNs.
+    // Using lambdaTriggers (L2) would cause CDK to call fn.addPermission(sourceArn: userPool.userPoolArn)
+    // on Lambdas owned by CognitoTriggersStack, creating a cross-stack cyclic reference.
+    // lambdaConfig accepts plain ARN strings — no CDK Token tracking, no reverse dependency.
+    const cfnPool = userPool.node.defaultChild as cognito.CfnUserPool
+    cfnPool.lambdaConfig = {
+      ...(props.defineChallengeFn  ? { defineAuthChallenge:         props.defineChallengeFn.functionArn }  : {}),
+      ...(props.createChallengeFn  ? { createAuthChallenge:         props.createChallengeFn.functionArn }  : {}),
+      ...(props.verifyChallengeFn  ? { verifyAuthChallengeResponse: props.verifyChallengeFn.functionArn }  : {}),
+      ...(props.preTokenGenFn      ? { preTokenGeneration:          props.preTokenGenFn.functionArn }      : {}),
+      ...(props.postConfirmationFn ? { postConfirmation:            props.postConfirmationFn.functionArn } : {}),
+    }
 
     // ── Pool Groups (role = group membership) ──────────────────────────────
     new cognito.CfnUserPoolGroup(this, 'GroupGlobalAdmin', {
@@ -85,7 +90,7 @@ export class CognitoStack extends cdk.Stack {
     })
 
     // ── App Client (SPA — no client secret) ───────────────────────────────
-    const client = new cognito.UserPoolClient(this, 'WebClient', {
+    const client = new cognito.UserPoolClient(this, 'WebClientV2', {
       userPool,
       userPoolClientName: 'uat-endevo-web-client',
       generateSecret: false,  // public client for SPA
@@ -118,27 +123,7 @@ export class CognitoStack extends cdk.Stack {
       readAttributes: new cognito.ClientAttributes().withStandardAttributes({
         email: true,
       }).withCustomAttributes('role', 'tenantId', 'tenantName'),
-      writeAttributes: new cognito.ClientAttributes().withCustomAttributes(
-        'tenantId', 'tenantName'
-        // 'role' is admin-managed only — not writable by the client
-      ),
     })
-
-    // Grant Cognito service principal permission to invoke trigger Lambdas.
-    // CDK does this automatically for lambdaTriggers wired above, but we also
-    // add explicit grants for future trigger additions.
-    for (const fn of [
-      props.defineChallengeFn, props.createChallengeFn, props.verifyChallengeFn,
-      props.preTokenGenFn, props.postConfirmationFn,
-    ]) {
-      if (fn) {
-        fn.addPermission(`CognitoInvoke-${fn.node.id}`, {
-          principal: new cdk.aws_iam.ServicePrincipal('cognito-idp.amazonaws.com'),
-          action: 'lambda:InvokeFunction',
-          sourceArn: userPool.userPoolArn,
-        })
-      }
-    }
 
     // ── Exports ────────────────────────────────────────────────────────────
     this.userPoolId       = userPool.userPoolId

@@ -8,6 +8,9 @@ import { Construct } from 'constructs'
 
 interface ApiStackProps extends cdk.StackProps {
   lambdaRole: iam.Role
+  cognitoUserPoolId: string
+  cognitoClientId: string
+  cognitoJwksUrl: string
 }
 
 export class ApiStack extends cdk.Stack {
@@ -18,9 +21,9 @@ export class ApiStack extends cdk.Stack {
 
     const commonEnv = {
       // Cognito — stateless JWT verification via JWKS (replaces WorkOS session tokens)
-      COGNITO_USER_POOL_ID:  process.env.COGNITO_USER_POOL_ID  || '',
-      COGNITO_CLIENT_ID:     process.env.COGNITO_CLIENT_ID     || '',
-      COGNITO_JWKS_URL:      process.env.COGNITO_JWKS_URL      || '',
+      COGNITO_USER_POOL_ID:  props.cognitoUserPoolId,
+      COGNITO_CLIENT_ID:     props.cognitoClientId,
+      COGNITO_JWKS_URL:      props.cognitoJwksUrl,
       REGION: this.region,
       ENVIRONMENT: 'uat',
     }
@@ -78,7 +81,6 @@ export class ApiStack extends cdk.Stack {
       description: 'Endevo Life backend API',
       corsPreflight: {
         allowOrigins: [
-          'https://uat.endevo.life',
           'https://uat.endevo.life',
           'https://main.d1vvfv8oltolcf.amplifyapp.com',
           'http://localhost:3000',

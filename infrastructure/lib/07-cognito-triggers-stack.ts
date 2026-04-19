@@ -133,6 +133,24 @@ export class CognitoTriggersStack extends cdk.Stack {
       description: 'Cognito PostConfirmation — creates DynamoDB user stub on first login',
     })
 
+    // Grant Cognito service principal invoke permission.
+    // sourceArn is a plain string wildcard — no CDK Token cross-stack reference.
+    const cognitoArnPattern = `arn:aws:cognito-idp:${this.region}:${this.account}:userpool/*`
+    const cognitoInvokePrincipal = new iam.ServicePrincipal('cognito-idp.amazonaws.com')
+    for (const [fn, suffix] of [
+      [this.defineChallengeFn,  'Define'],
+      [this.createChallengeFn,  'Create'],
+      [this.verifyChallengeFn,  'Verify'],
+      [this.preTokenGenFn,      'PreToken'],
+      [this.postConfirmationFn, 'PostConfirm'],
+    ] as [lambda.Function, string][]) {
+      fn.addPermission(`CognitoInvoke${suffix}`, {
+        principal: cognitoInvokePrincipal,
+        action: 'lambda:InvokeFunction',
+        sourceArn: cognitoArnPattern,
+      })
+    }
+
     // ── Resource tags ──────────────────────────────────────────────────────
     const fns = [
       this.defineChallengeFn, this.createChallengeFn, this.verifyChallengeFn,
