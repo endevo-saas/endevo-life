@@ -2010,7 +2010,7 @@ def _handler_impl(event, context):
             "bulk_import": True,
         }
         try:
-            item = CONFIG_T.get_item(Key={"configKey": "FEATURE_FLAGS", "sk": "v1"}).get("Item")
+            item = CONFIG_T.get_item(Key={"configKey": "FEATURE_FLAGS"}).get("Item")
             if item and "configValue" in item:
                 flags = json.loads(json.dumps(item["configValue"], default=str))
                 # Merge with defaults so new flags are always present
@@ -2035,7 +2035,6 @@ def _handler_impl(event, context):
             now = datetime.now(timezone.utc).isoformat()
             CONFIG_T.put_item(Item={
                 "configKey": "FEATURE_FLAGS",
-                "sk": "v1",
                 "configValue": body,
                 "updatedAt": now,
                 "updatedBy": caller_email,
