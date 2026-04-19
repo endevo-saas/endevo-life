@@ -11,32 +11,32 @@ phases:
       - cd backend/functions
 
       - echo "--- fn-auth ---"
-      - cd auth && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - cd auth && pip install cryptography -t . -q && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
       - aws lambda update-function-code --function-name endevo-uat-fn-auth --zip-file fileb://function.zip --region us-east-1
       - rm function.zip && cd ..
 
       - echo "--- fn-admin ---"
-      - cd admin && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - cd admin && pip install cryptography -t . -q && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
       - aws lambda update-function-code --function-name endevo-uat-fn-admin --zip-file fileb://function.zip --region us-east-1
       - rm function.zip && cd ..
 
       - echo "--- fn-hr ---"
-      - cd hr && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - cd hr && pip install cryptography -t . -q && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
       - aws lambda update-function-code --function-name endevo-uat-fn-hr --zip-file fileb://function.zip --region us-east-1
       - rm function.zip && cd ..
 
       - echo "--- fn-employee ---"
-      - cd employee && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - cd employee && pip install cryptography -t . -q && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
       - aws lambda update-function-code --function-name endevo-uat-fn-employee --zip-file fileb://function.zip --region us-east-1
       - rm function.zip && cd ..
 
       - echo "--- fn-lms ---"
-      - cd lms && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - cd lms && pip install cryptography -t . -q && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
       - aws lambda update-function-code --function-name endevo-uat-fn-lms --zip-file fileb://function.zip --region us-east-1
       - rm function.zip && cd ..
 
       - echo "--- fn-jesse ---"
-      - cd jesse && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
+      - cd jesse && pip install cryptography -t . -q && zip -r function.zip . -x '__pycache__/*' '*.pyc' 'tests/*' '*.zip'
       - aws lambda update-function-code --function-name endevo-uat-fn-jesse --zip-file fileb://function.zip --region us-east-1
       - rm function.zip && cd ..
 
