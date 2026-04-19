@@ -35,7 +35,6 @@ const navGroups = [
       { href: '/admin/lms/modules',   icon: BookOpen,       label: 'Modules' },
       { href: '/admin/lms/questions', icon: ClipboardList,  label: 'Questions' },
       { href: '/admin/lms/progress',  icon: TrendingUp,     label: 'User Progress' },
-      { href: '/admin/certificates',  icon: Award,          label: 'Certificates' },
       { href: '/admin/knowledge',     icon: Brain,          label: 'Knowledge Base' },
     ]
   },
