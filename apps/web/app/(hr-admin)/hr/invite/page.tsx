@@ -35,7 +35,8 @@ export default function InvitePage() {
       setResult(r)
       setForm({ email: '', phone: '', first_name: '', last_name: '', department: '', job_title: '' })
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to send invite')
+      const msg = e instanceof Error ? e.message : 'Failed to send invite'
+      setError(msg.toLowerCase().includes('already') ? `This email is already registered. ${msg}` : msg)
     } finally {
       setSaving(false)
     }

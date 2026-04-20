@@ -251,10 +251,18 @@ export default function EmployeeDashboard() {
     setLoading(true)
     setError('')
     try {
+      // Resolve module number dynamically — avoid hardcoded '1'
+      let moduleNum = '1'
+      try {
+        const mods = await api.lmsGetModules() as unknown as { modules?: Array<{ moduleNum: number | string }> }
+        const first = mods?.modules?.[0]
+        if (first?.moduleNum) moduleNum = String(first.moduleNum)
+      } catch { /* keep fallback '1' */ }
+
       const [dash, assess, lessons] = await Promise.allSettled([
         api.employeeDashboard(),
         api.lmsGetAssessmentStatus(),
-        api.lmsGetLessons('1'),
+        api.lmsGetLessons(moduleNum),
       ])
 
       if (dash.status === 'fulfilled') setDashData(dash.value as DashboardData)

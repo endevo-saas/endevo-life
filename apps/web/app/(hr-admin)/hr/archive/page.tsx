@@ -4,7 +4,7 @@ export const dynamic = 'force-dynamic'
 import React, { useEffect, useState, useCallback } from 'react'
 import {
   Archive, Search, Loader2, AlertCircle, RefreshCw, X, Check,
-  RotateCcw, Download, Users
+  RotateCcw, Download, Users, Trash2
 } from 'lucide-react'
 import { exportCsv } from '@/lib/export'
 import { api } from '@/lib/api'
@@ -29,6 +29,8 @@ export default function HrArchivePage() {
   const [search, setSearch] = useState('')
   const [confirmRestore, setConfirmRestore] = useState<{ id: string; name: string } | null>(null)
   const [restoring, setRestoring] = useState(false)
+  const [confirmDelete, setConfirmDelete] = useState<{ id: string; name: string } | null>(null)
+  const [deleting, setDeleting] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -63,6 +65,22 @@ export default function HrArchivePage() {
       setError(e instanceof Error ? e.message : 'Restore failed')
     } finally {
       setRestoring(false)
+    }
+  }
+
+  const handleDelete = async () => {
+    if (!confirmDelete) return
+    setDeleting(true)
+    setError('')
+    try {
+      await api.hrDeleteEmployeePermanently(confirmDelete.id)
+      showSuccess(`${confirmDelete.name} permanently deleted`)
+      setConfirmDelete(null)
+      load()
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Delete failed')
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -194,12 +212,20 @@ export default function HrArchivePage() {
                       <td className="px-4 py-3 text-xs text-slate-400">{emp.archivedBy || '-'}</td>
                       <td className="px-4 py-3 text-xs text-slate-400 max-w-48 truncate" title={emp.reason}>{emp.reason || '-'}</td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => setConfirmRestore({ id: emp.userId, name: `${emp.firstName} ${emp.lastName}` })}
-                          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-green-400 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 transition-all opacity-0 group-hover:opacity-100"
-                        >
-                          <RotateCcw className="w-3.5 h-3.5" />Restore
-                        </button>
+                        <div className="flex gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            onClick={() => setConfirmRestore({ id: emp.userId, name: `${emp.firstName} ${emp.lastName}` })}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-green-400 bg-green-500/10 hover:bg-green-500/20 border border-green-500/20 transition-all"
+                          >
+                            <RotateCcw className="w-3.5 h-3.5" />Restore
+                          </button>
+                          <button
+                            onClick={() => setConfirmDelete({ id: emp.userId, name: `${emp.firstName} ${emp.lastName}` })}
+                            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-red-400 bg-red-500/10 hover:bg-red-500/20 border border-red-500/20 transition-all"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />Delete
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -248,6 +274,46 @@ export default function HrArchivePage() {
               >
                 {restoring ? <Loader2 className="w-4 h-4 animate-spin" /> : <RotateCcw className="w-4 h-4" />}
                 {restoring ? 'Restoring...' : 'Restore'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Delete Permanently Confirmation Modal */}
+      {confirmDelete && (
+        <div
+          className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4"
+          onClick={e => { if (e.target === e.currentTarget) setConfirmDelete(null) }}
+        >
+          <div className="glass border border-red-500/30 rounded-2xl w-full max-w-md shadow-2xl">
+            <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
+              <h2 className="text-base font-semibold text-red-400">Delete Permanently</h2>
+              <button onClick={() => setConfirmDelete(null)} className="text-slate-400 hover:text-white">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-3">
+              {error && (
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-xl text-red-400 text-xs flex gap-2">
+                  <AlertCircle className="w-4 h-4 flex-shrink-0" />{error}
+                </div>
+              )}
+              <p className="text-slate-300 text-sm">
+                Permanently delete <strong className="text-white">{confirmDelete.name}</strong>?
+                This will remove their account from the system and Cognito. <strong className="text-red-400">This cannot be undone.</strong>
+              </p>
+            </div>
+            <div className="px-6 pb-6 flex justify-end gap-3">
+              <button onClick={() => setConfirmDelete(null)} className="px-4 py-2 rounded-xl text-sm text-slate-400 hover:text-white hover:bg-white/5 transition-all">
+                Cancel
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting}
+                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all disabled:opacity-50 bg-red-600/80 hover:bg-red-600 text-white"
+              >
+                {deleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                {deleting ? 'Deleting...' : 'Delete Permanently'}
               </button>
             </div>
           </div>

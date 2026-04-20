@@ -90,7 +90,7 @@ export default function AdminAuditPage() {
     const rows = [
       ['Time', 'Actor', 'Action', 'Severity', 'Details', 'IP Address', 'Tenant', 'User Agent'].join(','),
       ...filtered.map(l => [
-        (() => { const ts = l.createdAt; if (!ts) return ''; const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts); return isNaN(d.getTime()) ? '' : d.toISOString() })(),
+        (() => { const ts = l.createdAt; if (!ts) return ''; const d = typeof ts === 'number' ? new Date(ts * 1000) : new Date(ts); return isNaN(d.getTime()) ? '' : d.toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }) })(),
         l.actor || '',
         l.action || '',
         l.severity || 'INFO',

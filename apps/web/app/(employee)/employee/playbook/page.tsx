@@ -65,10 +65,16 @@ export default function MyPlaybookPage() {
     setLoading(true)
     setError('')
     try {
-      const result = await api.employeeGeneratePlaybook()
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('TIMEOUT')), 30000)
+      )
+      const result = await Promise.race([api.employeeGeneratePlaybook(), timeout])
       setPlaybook(result as PlaybookData)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load playbook')
+      const msg = e instanceof Error ? e.message : 'Failed to load playbook'
+      setError(msg === 'TIMEOUT'
+        ? 'Playbook generation is taking too long. Please try again in a moment.'
+        : msg)
     } finally {
       setLoading(false)
     }

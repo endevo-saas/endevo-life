@@ -489,6 +489,8 @@ export const api = {
     apiFetch<{ employees: User[] }>('/api/hr/archive/employees'),
   hrRestoreEmployee: (userId: string) =>
     apiFetch(`/api/hr/archive/employees/${userId}/restore`, { method: 'POST' }),
+  hrDeleteEmployeePermanently: (userId: string) =>
+    apiFetch(`/api/hr/employees/${userId}/permanent`, { method: 'DELETE' }),
 
   // Feature Flags
   adminGetFeatures: () =>

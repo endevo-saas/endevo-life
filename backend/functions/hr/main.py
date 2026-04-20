@@ -939,6 +939,25 @@ def _handler_impl(event, context):
               ip=ip, device=device, severity="WARN")
         return resp(200, {"message": f"Employee {emp_email} restored from archive", "restoredAt": now})
 
+    # ── DELETE /api/hr/employees/{id}/permanent — Hard delete (tenant-scoped) ──
+    if "/employees/" in path and path.endswith("/permanent") and method == "DELETE":
+        user_id = path.split("/")[-2]
+        item = USERS_T.get_item(Key={"userId": user_id}).get("Item")
+        if not item or item.get("tenantId") != tenant_id:
+            return err(404, "Employee not found in your organisation")
+        if item.get("status") != "archived":
+            return err(400, "Only archived employees can be permanently deleted. Archive the employee first.")
+        emp_email = item.get("email", "")
+        try:
+            cognito_idp.admin_delete_user(UserPoolId=COGNITO_USER_POOL_ID, Username=emp_email)
+        except Exception:
+            pass  # User may already be removed from Cognito
+        USERS_T.delete_item(Key={"userId": user_id})
+        audit(tenant_id, caller_email, "EMPLOYEE_HARD_DELETED",
+              json.dumps({"userId": user_id, "email": emp_email, "deletedBy": caller_email}),
+              ip=ip, device=device, severity="CRITICAL")
+        return resp(200, {"message": f"Employee {emp_email} permanently deleted"})
+
     # ── PUT /api/hr/subscription/plan — HR admin changes tenant plan ──────
     if path.endswith("/subscription/plan") and method == "PUT":
         new_plan = (body.get("plan") or "").lower().strip()
