@@ -3,7 +3,7 @@ export const dynamic = 'force-dynamic'
 
 import React, { useEffect, useState, useCallback } from 'react'
 import {
-  Building2, Users, Award, Activity, RefreshCw,
+  Building2, Users, Activity, RefreshCw,
   TrendingUp, Shield, Globe, CreditCard, ArrowUpRight,
   CheckCircle, AlertTriangle, Sparkles, BookOpen, ClipboardList,
   Clock
@@ -170,12 +170,7 @@ export default function AdminDashboard() {
                 color="text-green-400" href="/admin/users"
                 gradient="bg-gradient-to-br from-green-600/20 to-green-800/10 border-green-500/30"
               />
-              <StatCard
-                icon={Award} label="Certificates" value={data?.total_certificates ?? 0}
-                sub="Issued across all tenants"
-                color="text-yellow-400" href="/admin/lms/progress"
-                gradient="bg-gradient-to-br from-yellow-600/20 to-yellow-800/10 border-yellow-500/30"
-              />
+              {/* Removed 2026-04-19 — certificate feature deprecated */}
               <StatCard
                 icon={Shield} label="System Health" value={healthy ? '100%' : 'Degraded'}
                 sub={healthy ? 'All systems operational' : 'Issues detected'}
@@ -247,7 +242,7 @@ export default function AdminDashboard() {
               {[
                 { label: 'Tenant Activation Rate', value: activePct, color: 'bg-brand-500' },
                 { label: 'User Activity Rate', value: data ? Math.round((data.active_users / Math.max(data.total_users, 1)) * 100) : 0, color: 'bg-green-500' },
-                { label: 'Certificate Rate', value: data ? Math.min(Math.round((data.total_certificates / Math.max(data.total_users, 1)) * 100), 100) : 0, color: 'bg-yellow-500' },
+                // Removed 2026-04-19 — certificate feature deprecated
                 { label: 'System Uptime', value: healthy ? 100 : 85, color: healthy ? 'bg-emerald-500' : 'bg-red-500' },
               ].map(m => (
                 <div key={m.label} className="bg-white/3 rounded-xl p-4 border border-white/5">

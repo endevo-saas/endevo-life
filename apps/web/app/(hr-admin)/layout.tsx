@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import {
   Users, BarChart3, UserPlus, FileText, LogOut, Settings,
   Globe, Monitor, MapPin, Wifi, ChevronDown, ChevronUp, Camera,
-  BookOpen, Award, CreditCard, TrendingUp, Archive
+  BookOpen, CreditCard, TrendingUp, Archive
 } from 'lucide-react'
 import { signOut } from '@/lib/auth/cognito'
 import Cookies from 'js-cookie'
@@ -30,7 +30,7 @@ const navGroups = [
     label: 'LMS',
     items: [
       { href: '/hr/lms/progress', icon: TrendingUp, label: 'Module Progress' },
-      { href: '/hr/certificates', icon: Award,      label: 'Certificates' },
+      // Removed 2026-04-19 — certificate feature deprecated
     ],
   },
   {

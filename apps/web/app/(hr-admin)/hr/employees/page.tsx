@@ -125,19 +125,6 @@ export default function EmployeesPage() {
     }
   }
 
-  async function resetPassword(emp: User) {
-    if (!confirm(`Reset password for ${emp.email}? A new temporary password will be generated.`)) return
-    setDeactivating(emp.userId)
-    try {
-      const res = await api.hrResetPassword(emp.userId) as { temporary_password: string }
-      setResetPwResult({ email: emp.email, password: res.temporary_password })
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Reset failed')
-    } finally {
-      setDeactivating(null)
-    }
-  }
-
   return (
     <div className="p-8">
       <div className="max-w-6xl mx-auto">
@@ -325,14 +312,7 @@ export default function EmployeesPage() {
                           >
                             {emp.status==='locked' ? <Unlock className="w-4 h-4"/> : <Lock className="w-4 h-4"/>}
                           </button>
-                          <button
-                            onClick={() => resetPassword(emp)}
-                            disabled={deactivating === emp.userId}
-                            className="p-1.5 rounded-lg text-slate-500 hover:text-blue-400 hover:bg-blue-500/10 transition-colors"
-                            title="Reset password"
-                          >
-                            <KeyRound className="w-4 h-4"/>
-                          </button>
+                          <span title="OTP login only — no password reset needed" className="p-1.5 text-slate-600 cursor-default"><KeyRound className="w-4 h-4"/></span>
                           {emp.status !== 'inactive' ? (
                             <button
                               onClick={() => deactivate(emp.userId, emp.email)}

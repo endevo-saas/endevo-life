@@ -93,13 +93,6 @@ export default function AllUsersPage() {
     } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Failed') }
   }
 
-  async function resetPassword(u: UserType) {
-    setSelected(u); setSaving(true); setError('')
-    try { const r = await api.adminResetPassword(u.userId) as { temporary_password: string }; setResetPw(r.temporary_password); setModal('resetpw') }
-    catch (e: unknown) { setError(e instanceof Error ? e.message : 'Reset failed') }
-    finally { setSaving(false) }
-  }
-
   async function sendInvite() {
     setSaving(true); setError('')
     try {
@@ -172,7 +165,7 @@ export default function AllUsersPage() {
                         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                           <ActionBtn onClick={()=>openEdit(u)} title="Edit"><Pencil className="w-3.5 h-3.5"/></ActionBtn>
                           <ActionBtn onClick={()=>toggleLock(u)} title={u.status==='locked'?'Unlock':'Lock'} color={u.status==='locked'?'hover:text-green-400':'hover:text-yellow-400'}>{u.status==='locked'?<Unlock className="w-3.5 h-3.5"/>:<Lock className="w-3.5 h-3.5"/>}</ActionBtn>
-                          <ActionBtn onClick={()=>resetPassword(u)} title="Reset Password" color="hover:text-blue-400"><KeyRound className="w-3.5 h-3.5"/></ActionBtn>
+                          <span title="OTP login only — no password reset needed" className="p-1.5 text-slate-600 cursor-default"><KeyRound className="w-3.5 h-3.5"/></span>
                           <ActionBtn onClick={()=>openToggle(u)} title={u.status==='active'?'Deactivate user':'Reactivate user'} color={u.status==='active'?'hover:text-orange-400 hover:bg-orange-500/10':'hover:text-green-400 hover:bg-green-500/10'}>{u.status==='active'?<ToggleRight className="w-3.5 h-3.5"/>:<ToggleLeft className="w-3.5 h-3.5"/>}</ActionBtn>
                         </div>
                       </td>

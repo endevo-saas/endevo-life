@@ -1,5 +1,6 @@
 import Cookies from 'js-cookie'
 import { showToast } from '@/components/ToastContainer'
+import { refreshSession } from '@/lib/auth/cognito'
 
 const BASE = process.env.NEXT_PUBLIC_API_URL || 'https://4jms6sdzk9.execute-api.us-east-1.amazonaws.com'
 
@@ -36,11 +37,24 @@ export async function apiFetch<T = unknown>(
     return null as T
   }
 
-  // Handle 401 — redirect to login
+  // Handle 401 — try refresh token first, only redirect if refresh fails
   if (res.status === 401) {
-    showToast('Session expired — redirecting to login', 'warning')
+    try {
+      const refreshed = await refreshSession()
+      if (refreshed) {
+        // Retry original request once with fresh token
+        const retry = await fetch(`${BASE}${path}`, {
+          ...options,
+          headers: { ...authHeaders(), ...(options.headers || {}) },
+        })
+        if (retry.ok) return retry.json() as T
+      }
+    } catch {
+      // refresh failed — fall through to redirect
+    }
+    showToast('Session expired — please log in again', 'warning')
     if (typeof window !== 'undefined') {
-      window.location.href = '/login'
+      window.location.href = '/login?reason=session_expired'
     }
     throw new Error('Unauthorized — session expired')
   }
