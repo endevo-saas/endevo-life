@@ -63,4 +63,13 @@ _keys/
 *.key
 credentials
 backend/functions/jesse/knowledge_niki.txt
-.audit-temp/ 
+.audit-temp/
+
+# Session tokens — NEVER commit
+.id_token
+.otp_session
+
+# Local tooling
+.claude/
+check.tmp
+push-temp/ 
